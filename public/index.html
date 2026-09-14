@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LinkedIn Connect AI Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <h1>LinkedIn Connect AI</h1>
+          <p>Targeted Recruitment & Outreach Engine</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div id="statusPill" class="status-pill status-idle">
+          <span class="status-dot"></span>
+          <span id="statusText">System Ready</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="dashboard-grid">
+      <!-- Left Panel: Configuration Form -->
+      <section class="card config-card">
+        <div class="card-header">
+          <h2>🎯 Target & Outreach Settings</h2>
+          <p>Configure company, role filters, personalized notes, and speed.</p>
+        </div>
+
+        <form id="configForm" onsubmit="return false;">
+          <!-- Target Company -->
+          <div class="form-group">
+            <label for="companyInput">Target Company Name or LinkedIn URL</label>
+            <div class="input-with-icon">
+              <span class="input-icon">🏢</span>
+              <input
+                type="text"
+                id="companyInput"
+                placeholder="e.g. MongoDB, Microsoft, Google or full URL"
+                value="MongoDB"
+                required
+              />
+            </div>
+            <span class="field-hint">e.g. "MongoDB", "Microsoft", "Google" or "https://www.linkedin.com/company/mongodbinc/people/"</span>
+          </div>
+
+          <!-- Role Filter Tags -->
+          <div class="form-group">
+            <label>Target Role Keywords (Filters)</label>
+            <div class="tags-container" id="tagsContainer">
+              <!-- Dynamic tags rendered here -->
+            </div>
+            <div class="tag-input-row">
+              <input type="text" id="roleTagInput" placeholder="Add custom role (e.g. Lead Recruiter)" />
+              <button type="button" class="btn btn-secondary btn-sm" id="addTagBtn">+ Add Role</button>
+            </div>
+            <span class="field-hint">Add or remove role keywords. Automation navigates each role filter sequentially.</span>
+          </div>
+
+          <!-- Connections Target & Speed Preset -->
+          <div class="form-row">
+            <div class="form-group col-half">
+              <label for="connectionsPerFilter">Requests per Role</label>
+              <input type="number" id="connectionsPerFilter" min="1" max="100" value="10" />
+            </div>
+            <div class="form-group col-half">
+              <label for="speedPreset">Speed & Safety Preset</label>
+              <select id="speedPreset">
+                <option value="safe" selected>🛡️ Safe (20s - 35s delay)</option>
+                <option value="balanced">⚖️ Balanced (10s - 20s delay)</option>
+                <option value="fast">⚡ Fast (5s - 10s delay)</option>
+                <option value="custom">⚙️ Custom Delay</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Custom Delays (Hidden by default) -->
+          <div class="form-row hidden" id="customDelaysRow">
+            <div class="form-group col-half">
+              <label for="minDelay">Min Delay (sec)</label>
+              <input type="number" id="minDelay" min="1" max="60" value="20" />
+            </div>
+            <div class="form-group col-half">
+              <label for="maxDelay">Max Delay (sec)</label>
+              <input type="number" id="maxDelay" min="2" max="120" value="35" />
+            </div>
+          </div>
+
+          <!-- Connection Note Template -->
+          <div class="form-group">
+            <div class="label-with-toggle">
+              <label for="connectionNote">Personalized Connection Note</label>
+              <span class="badge badge-subtle">{name} placeholder enabled</span>
+            </div>
+            <textarea
+              id="connectionNote"
+              rows="3"
+              placeholder="Type your connection message template..."
+            >Hi {name}, I'm a 2027 B.Tech CSE student actively exploring Software Engineering Intern opportunities at {company}. I came across the 2027 internship openings and would love to connect and learn more!</textarea>
+          </div>
+
+          <!-- Gemini AI Toggle -->
+          <div class="form-group ai-toggle-box">
+            <div class="toggle-row">
+              <div class="toggle-info">
+                <span class="toggle-title">🤖 Enable Gemini AI Personalization</span>
+                <span class="toggle-desc">Automatically tailors notes using recipient role & name</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="useAINotes" checked />
+                <span class="slider round"></span>
+              </label>
+            </div>
+
+            <div class="api-key-group" id="apiKeyGroup">
+              <label for="geminiApiKey">Gemini API Key (Optional Override)</label>
+              <input type="password" id="geminiApiKey" placeholder="Paste GEMINI_API_KEY (or use .env default)" />
+            </div>
+          </div>
+
+          <!-- Control Action Buttons -->
+          <div class="action-bar">
+            <button type="button" id="startBtn" class="btn btn-primary btn-lg">
+              <span class="btn-icon">🚀</span> Start Automation
+            </button>
+            <button type="button" id="stopBtn" class="btn btn-danger btn-lg" disabled>
+              <span class="btn-icon">🛑</span> Stop
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Right Panel: Execution Dashboard & Live Terminal -->
+      <section class="card dashboard-card">
+        <div class="card-header">
+          <h2>📊 Live Execution Dashboard</h2>
+          <p>Monitor real-time progress, log streams, and connection results.</p>
+        </div>
+
+        <!-- Metrics Overview Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card metric-sent">
+            <div class="metric-value" id="metricSent">0</div>
+            <div class="metric-label">Notes Sent</div>
+          </div>
+          <div class="metric-card metric-skipped">
+            <div class="metric-value" id="metricSkipped">0</div>
+            <div class="metric-label">Skipped / Pending</div>
+          </div>
+          <div class="metric-card metric-failed">
+            <div class="metric-value" id="metricFailed">0</div>
+            <div class="metric-label">Skipped / Other</div>
+          </div>
+          <div class="metric-card metric-target">
+            <div class="metric-value" id="metricTarget">0</div>
+            <div class="metric-label">Total Target</div>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-section">
+          <div class="progress-info">
+            <span id="currentRoleText">Current Filter: None</span>
+            <span id="progressPercentage">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progressBarFill"></div>
+          </div>
+        </div>
+
+        <!-- Terminal Console Window -->
+        <div class="terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <span class="terminal-title">Console Output Logs</span>
+            <div class="terminal-controls">
+              <button class="btn-icon-only" id="clearLogsBtn" title="Clear console">🧹</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminalBody">
+            <div class="log-line log-info">
+              <span class="log-ts">[00:00:00]</span> Welcome to LinkedIn Connect AI. Click "Start Automation" to begin.
+            </div>
+          </div>
+        </div>
+
+        <!-- Sent Connections Results Table -->
+        <div class="table-section">
+          <h3>📬 Sent Requests History</h3>
+          <div class="table-wrapper">
+            <table class="sent-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Name</th>
+                  <th>Role Filter</th>
+                  <th>Note Sent</th>
+                </tr>
+              </thead>
+              <tbody id="sentTableBody">
+                <tr id="emptyTableMsg">
+                  <td colspan="4" class="text-center text-muted">No connection requests sent in this session yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
