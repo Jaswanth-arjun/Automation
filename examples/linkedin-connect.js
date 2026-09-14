@@ -12,6 +12,8 @@
  */
 
 import puppeteer from 'puppeteer-core';
+import 'dotenv/config';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
@@ -48,7 +50,20 @@ const CONFIG = {
   delayBetweenConnections: { min: 20000, max: 35000 },
   delayBetweenRoles: { min: 8000, max: 15000 },
   typingDelay: 25,
+
+  // 🤖 Gemini AI personalized notes
+  useAINotes: true,
+  geminiModel: 'gemini-3.6-flash',
+  aiNoteMaxChars: 250,
 };
+
+// Gemini AI client init (GEMINI_API_KEY .env lo untundi)
+const genAI = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
+
+// Current filter role (AI prompt context kosam)
+let currentRole = '';
 
 // ============================================
 // 🛠️ HELPERS
@@ -77,6 +92,48 @@ function personalizeNote(name) {
   return CONFIG.connectionNote.replace('{name}', getFirstName(name));
 }
 
+/**
+ * 🤖 Gemini AI tho personalized connection note generate chey.
+ * Fail aithe null return — caller template note fallback vadatadu.
+ */
+async function generateAINote(personName, headline = '') {
+  if (!CONFIG.useAINotes || !genAI) return null;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: CONFIG.geminiModel });
+    const prompt = `Write a LinkedIn connection request note.
+
+Recipient: ${personName}${headline ? ` — ${headline}` : ''} (works at MongoDB; I found them under the "${currentRole}" role filter).
+Sender: a 2027 B.Tech CSE student actively exploring Software Engineering Internship opportunities at MongoDB (2027 internship openings).
+
+Requirements:
+- Maximum ${CONFIG.aiNoteMaxChars} characters, 2-3 short sentences
+- VERY POLITE and respectful tone throughout
+- IMPORTANT: Infer the recipient's gender from the name. If male, add "sir" after the first name (e.g., "Hi Ramesh sir"). If female, add "mam" after the first name (e.g., "Hi Priya mam"). Never use Mr./Ms. — only sir/mam
+- Friendly, professional, and genuine — not generic or robotic
+- Mention my internship interest at MongoDB naturally
+- No emojis, no hashtags, no placeholders, no subject lines
+- Vary phrasing so it doesn't sound templated
+
+Return ONLY the note text, nothing else.`;
+
+    const result = await model.generateContent(prompt);
+    const text = result?.response?.text?.().trim();
+    if (!text) throw new Error('Empty response from Gemini');
+
+    // Quotes/formatting cleanup + length cap (LinkedIn note limit 300)
+    const note = text
+      .replace(/^["'`\s]+|["'`\s]+$/g, '')
+      .split('\n')
+      .join(' ')
+      .substring(0, 290);
+    return note;
+  } catch (err) {
+    console.log(`      ⚠️  Gemini note failed: ${err.message} — template note vadatunna`);
+    return null;
+  }
+}
+
 function ts() {
   return new Date().toLocaleTimeString('en-IN', { hour12: true });
 }
@@ -85,7 +142,7 @@ function ts() {
  * Handle Connection Modal: Click Add a note -> Type personalized text -> Click Send
  * Safety: modal lo person name verify chestundi — verey person modal vachtey abort.
  */
-async function handleConnectionModal(page, personName) {
+async function handleConnectionModal(page, personName, headline = '') {
   await sleep(2000);
 
   // 0. Modal open ayyinda? 10s varaku wait chey (late load)
@@ -163,8 +220,13 @@ async function handleConnectionModal(page, personName) {
 
   await sleep(300);
 
-  // Type note
-  const noteText = personalizeNote(personName);
+  // Type note — 🤖 Gemini AI note, fail aithe template fallback
+  let noteText = await generateAINote(personName, headline);
+  if (noteText) {
+    console.log(`      🤖 AI note for ${getFirstName(personName)}: "${noteText.substring(0, 60)}..."`);
+  } else {
+    noteText = personalizeNote(personName);
+  }
   await page.keyboard.type(noteText, { delay: CONFIG.typingDelay });
   console.log(`      ✍️  Typed note for ${getFirstName(personName)}: "${noteText.substring(0, 50)}..."`);
   await sleep(1500);
@@ -207,7 +269,7 @@ async function handleConnectionModal(page, personName) {
  * profile page open chesi -> 3-dots (More) -> Connect -> note -> send
  * Tarvata people list ki return avthundi (new tab close = back).
  */
-async function connectViaProfilePage(browser, profileUrl, personName) {
+async function connectViaProfilePage(browser, profileUrl, personName, headline = '') {
   const profilePage = await browser.newPage();
   try {
     await profilePage.evaluateOnNewDocument(() => {
@@ -221,6 +283,30 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
     // Login/authwall check
     if (profilePage.url().includes('/login') || profilePage.url().includes('/authwall')) {
       console.log('      ⚠️  Profile page redirected to login/authwall');
+      await profilePage.close();
+      return false;
+    }
+
+    // Pending check on profile top card (e.g. Nikhit Alex - Pending button)
+    const isPending = await profilePage.evaluate(() => {
+      const mainSection =
+        document.querySelector('main section, .scaffold-layout__main section, .pv-top-card') ||
+        document.querySelector('main');
+      if (!mainSection) return false;
+
+      const buttons = Array.from(mainSection.querySelectorAll('button, div[role="button"], span, a'));
+      for (const btn of buttons) {
+        const text = (btn.textContent || '').trim().toLowerCase();
+        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (text === 'pending' || text === 'invitation sent' || aria.includes('pending') || aria.includes('withdraw')) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (isPending) {
+      console.log(`      ⏸️  ${personName} profile is already "Pending" (request sent earlier). Skipping!`);
       await profilePage.close();
       return false;
     }
@@ -357,7 +443,7 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
     }
 
     // 3. Connection modal -> note -> send (same process)
-    const sent = await handleConnectionModal(profilePage, personName);
+    const sent = await handleConnectionModal(profilePage, personName, headline);
 
     // 4. Modal/processing complete ayyaka tab close chesi people list ki return
     await sleep(1000);
@@ -412,6 +498,7 @@ async function navigateToRoleFilterPage(page, roleKeyword) {
 async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, failedProfiles, overallSentRef) {
   let filterSentCount = 0;
   const targetForThisFilter = CONFIG.connectionsPerFilter; // 10
+  currentRole = roleKeyword;
 
   console.log(`📋 Goal for "${roleKeyword}": Send ${targetForThisFilter} connection notes.`);
 
@@ -439,7 +526,14 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
 
         if (!rawName || rawName.includes('LinkedIn Member') || rawName.length < 2) return;
 
-        list.push({ name: rawName, url: href });
+        // Headline (job title) — AI prompt context kosam
+        const subEl =
+          card.querySelector('.org-people-profile-card__profile-description') ||
+          card.querySelector('.artdeco-entity-lockup__subtitle') ||
+          card.querySelector('.org-people-profile-card__profile-role');
+        const headline = subEl ? subEl.textContent.trim().split('\n')[0].trim().substring(0, 120) : '';
+
+        list.push({ name: rawName, url: href, headline });
       });
 
       // Deduplicate
@@ -456,144 +550,209 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
     });
   };
 
-  let employees = await getEmployeesFromDOM();
-  console.log(`   👥 Found ${employees.length} MongoDB cards visible for filter "${roleKeyword}".`);
+  let processedInThisFilter = new Set();
+  let hasMoreCards = true;
 
-  for (const emp of employees) {
-    if (filterSentCount >= targetForThisFilter) break;
+  while (filterSentCount < targetForThisFilter && hasMoreCards) {
+    let employees = await getEmployeesFromDOM();
 
-    const name = emp.name;
-    if (sentProfiles.has(name) || failedProfiles.has(name) || sentProfiles.has(emp.url)) {
-      continue;
-    }
+    let unvisited = employees.filter(
+      (emp) =>
+        !sentProfiles.has(emp.name) &&
+        !failedProfiles.has(emp.name) &&
+        !sentProfiles.has(emp.url) &&
+        !failedProfiles.has(emp.url) &&
+        !processedInThisFilter.has(emp.url)
+    );
 
-    console.log(`\n   👤 [${roleKeyword}] (${filterSentCount + 1}/${targetForThisFilter}) Target: ${name}`);
-    console.log(`      🕐 ${ts()}`);
-
-    let connected = false;
-    let clickResult = { status: 'no_card' };
-
-    // Try direct Connect on card
-    try {
-      clickResult = await page.evaluate((targetUrl) => {
-        const links = Array.from(document.querySelectorAll('a[href*="/in/"]'));
-        let targetCard = null;
-
-        for (const l of links) {
-          if (l.href.includes(targetUrl)) {
-            let parent = l.parentElement;
-            while (parent && parent.tagName !== 'BODY') {
-              if (parent.querySelector('button')) {
-                targetCard = parent;
-                break;
-              }
-              parent = parent.parentElement;
-            }
-            if (targetCard) break;
-          }
-        }
-
-        if (!targetCard) return { status: 'no_card' };
-
-        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        const buttons = Array.from(targetCard.querySelectorAll('button, div[role="button"]'));
-        for (const btn of buttons) {
-          const text = (btn.textContent || '').trim();
-          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-          if (text === 'Connect' || (aria.includes('invite') && aria.includes('connect'))) {
-            btn.click();
-            return { status: 'clicked_connect' };
-          }
-        }
-
-        for (const btn of buttons) {
-          const text = (btn.textContent || '').trim().toLowerCase();
-          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-          if (text === 'more' || aria.includes('more actions') || aria.includes('overflow')) {
-            btn.click();
-            return { status: 'clicked_more' };
-          }
-        }
-
-        // "Pending" button untey -> request already sent, skip (profile open cheyakkarledu)
-        for (const btn of buttons) {
-          const text = (btn.textContent || '').trim().toLowerCase();
-          if (text === 'pending') {
-            return { status: 'pending' };
-          }
-        }
-
-        return { status: 'no_button' };
-      }, emp.url);
-
-      if (clickResult.status === 'clicked_connect') {
-        console.log('      ⚡ Clicked Connect directly on MongoDB card!');
-        connected = await handleConnectionModal(page, name);
-      } else if (clickResult.status === 'clicked_more') {
-        await sleep(1800);
-        const dropdownClicked = await page.evaluate(() => {
-          // Open ayyina dropdown menus lo matramey vetakali
-          const menus = Array.from(
-            document.querySelectorAll(
-              '.artdeco-dropdown__content.artdeco-dropdown__content--is-open, [role="menu"], .artdeco-dropdown__content--is-open'
-            )
-          );
-          const scopes = menus.length ? menus : Array.from(document.querySelectorAll('.artdeco-dropdown__content, [role="menu"]'));
-          for (const scope of scopes) {
-            const items = Array.from(scope.querySelectorAll('div[role="button"], button, li, span'));
-            for (const item of items) {
-              const text = (item.textContent || '').trim();
-              if (/^connect$/i.test(text)) {
-                item.click();
-                return true;
-              }
-            }
-          }
-          return false;
-        });
-
-        if (dropdownClicked) {
-          connected = await handleConnectionModal(page, name);
-        } else {
-          await page.keyboard.press('Escape');
-        }
-      }
-    } catch {
-      connected = false;
-    }
-
-    // Fallback: card lo "Follow"/"Message" matramey untey -> profile open chesi
-    // 3-dots (More) -> Connect -> note -> send, then back to list.
-    // "Pending" untey skip — profile open cheyakkarledu.
-    if (!connected && clickResult.status !== 'pending') {
-      connected = await connectViaProfilePage(page.browser(), emp.url, name);
-    }
-
-    if (connected) {
-      filterSentCount++;
-      overallSentRef.count++;
-      sentProfiles.add(name);
-      sentProfiles.add(emp.url);
-      console.log(`      ✅ [Filter: ${roleKeyword}] (${filterSentCount}/${targetForThisFilter}) SENT NOTE TO ${name}!`);
-    } else if (clickResult.status === 'pending') {
-      console.log(`      ⏸️  ${name} — "Pending" already sent. Profile open cheyaledu, skip.`);
-      failedProfiles.add(name);
-      failedProfiles.add(emp.url);
-      continue;
-    } else {
-      console.log(`      ⏭️  Skipped ${name} (already connected, pending, or unavailable)`);
-      failedProfiles.add(name);
-      failedProfiles.add(emp.url);
-    }
-
-    // Rate Limiting Delay
-    if (filterSentCount < targetForThisFilter) {
-      await waitRandom(
-        CONFIG.delayBetweenConnections.min,
-        CONFIG.delayBetweenConnections.max,
-        `Next connection delay for ${roleKeyword}`
+    // Filter target reach kakapothey, and unvisited profiles aipothey -> "Show more results" click chey
+    if (unvisited.length === 0) {
+      console.log(
+        `   👇 Target not reached (${filterSentCount}/${targetForThisFilter}). Looking for "Show more results" button...`
       );
+
+      const showMoreClicked = await page.evaluate(async () => {
+        window.scrollBy(0, 1000);
+        await new Promise((r) => setTimeout(r, 1200));
+
+        const buttons = Array.from(document.querySelectorAll('button, div[role="button"], a[role="button"], span'));
+        for (const btn of buttons) {
+          const text = (btn.textContent || '').trim().toLowerCase();
+          if (text.includes('show more results') || text === 'show more') {
+            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            btn.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (showMoreClicked) {
+        console.log('   🔄 Clicked "Show more results"! Waiting 4s for new cards to load...');
+        await sleep(4000);
+
+        let freshEmployees = await getEmployeesFromDOM();
+        let freshUnvisited = freshEmployees.filter(
+          (emp) =>
+            !sentProfiles.has(emp.name) &&
+            !failedProfiles.has(emp.name) &&
+            !sentProfiles.has(emp.url) &&
+            !failedProfiles.has(emp.url) &&
+            !processedInThisFilter.has(emp.url)
+        );
+
+        if (freshUnvisited.length === 0) {
+          console.log('   ℹ️  No new cards loaded after "Show more results". Ending filter search.');
+          hasMoreCards = false;
+          break;
+        } else {
+          console.log(`   👥 Loaded ${freshUnvisited.length} new cards! Continuing process...`);
+          unvisited = freshUnvisited;
+        }
+      } else {
+        console.log('   ℹ️  "Show more results" button not found (end of list).');
+        hasMoreCards = false;
+        break;
+      }
+    }
+
+    for (const emp of unvisited) {
+      if (filterSentCount >= targetForThisFilter) break;
+
+      processedInThisFilter.add(emp.url);
+      processedInThisFilter.add(emp.name);
+
+      const name = emp.name;
+      if (sentProfiles.has(name) || failedProfiles.has(name) || sentProfiles.has(emp.url)) {
+        continue;
+      }
+
+      console.log(`\n   👤 [${roleKeyword}] (${filterSentCount + 1}/${targetForThisFilter}) Target: ${name}`);
+      console.log(`      🕐 ${ts()}`);
+
+      let connected = false;
+      let clickResult = { status: 'no_card' };
+
+      // Try direct Connect on card
+      try {
+        clickResult = await page.evaluate((targetUrl) => {
+          const links = Array.from(document.querySelectorAll('a[href*="/in/"]'));
+          let targetCard = null;
+
+          for (const l of links) {
+            if (l.href.includes(targetUrl)) {
+              let parent = l.parentElement;
+              while (parent && parent.tagName !== 'BODY') {
+                if (parent.querySelector('button')) {
+                  targetCard = parent;
+                  break;
+                }
+                parent = parent.parentElement;
+              }
+              if (targetCard) break;
+            }
+          }
+
+          if (!targetCard) return { status: 'no_card' };
+
+          targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          const buttons = Array.from(targetCard.querySelectorAll('button, div[role="button"]'));
+
+          // "Pending" / "Withdraw" button untey -> request already sent, skip immediately (profile open cheyakkarledu)
+          for (const btn of buttons) {
+            const text = (btn.textContent || '').trim().toLowerCase();
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (text === 'pending' || text === 'invitation sent' || aria.includes('pending') || aria.includes('withdraw')) {
+              return { status: 'pending' };
+            }
+          }
+
+          for (const btn of buttons) {
+            const text = (btn.textContent || '').trim();
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (text === 'Connect' || (aria.includes('invite') && aria.includes('connect'))) {
+              btn.click();
+              return { status: 'clicked_connect' };
+            }
+          }
+
+          for (const btn of buttons) {
+            const text = (btn.textContent || '').trim().toLowerCase();
+            const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+            if (text === 'more' || aria.includes('more actions') || aria.includes('overflow')) {
+              btn.click();
+              return { status: 'clicked_more' };
+            }
+          }
+
+          return { status: 'no_button' };
+        }, emp.url);
+
+        if (clickResult.status === 'clicked_connect') {
+          console.log('      ⚡ Clicked Connect directly on MongoDB card!');
+          connected = await handleConnectionModal(page, name, emp.headline);
+        } else if (clickResult.status === 'clicked_more') {
+          await sleep(1800);
+          const dropdownClicked = await page.evaluate(() => {
+            const menus = Array.from(
+              document.querySelectorAll(
+                '.artdeco-dropdown__content.artdeco-dropdown__content--is-open, [role="menu"], .artdeco-dropdown__content--is-open'
+              )
+            );
+            const scopes = menus.length ? menus : Array.from(document.querySelectorAll('.artdeco-dropdown__content, [role="menu"]'));
+            for (const scope of scopes) {
+              const items = Array.from(scope.querySelectorAll('div[role="button"], button, li, span'));
+              for (const item of items) {
+                const text = (item.textContent || '').trim();
+                if (/^connect$/i.test(text)) {
+                  item.click();
+                  return true;
+                }
+              }
+            }
+            return false;
+          });
+
+          if (dropdownClicked) {
+            connected = await handleConnectionModal(page, name, emp.headline);
+          } else {
+            await page.keyboard.press('Escape');
+          }
+        }
+      } catch {
+        connected = false;
+      }
+
+      if (!connected && clickResult.status !== 'pending') {
+        connected = await connectViaProfilePage(page.browser(), emp.url, name, emp.headline);
+      }
+
+      if (connected) {
+        filterSentCount++;
+        overallSentRef.count++;
+        sentProfiles.add(name);
+        sentProfiles.add(emp.url);
+        console.log(`      ✅ [Filter: ${roleKeyword}] (${filterSentCount}/${targetForThisFilter}) SENT NOTE TO ${name}!`);
+      } else if (clickResult.status === 'pending') {
+        console.log(`      ⏸️  ${name} — "Pending" already sent. Profile open cheyaledu, skip.`);
+        failedProfiles.add(name);
+        failedProfiles.add(emp.url);
+        continue;
+      } else {
+        console.log(`      ⏭️  Skipped ${name} (already connected, pending, or unavailable)`);
+        failedProfiles.add(name);
+        failedProfiles.add(emp.url);
+      }
+
+      // Rate Limiting Delay
+      if (filterSentCount < targetForThisFilter) {
+        await waitRandom(
+          CONFIG.delayBetweenConnections.min,
+          CONFIG.delayBetweenConnections.max,
+          `Next connection delay for ${roleKeyword}`
+        );
+      }
     }
   }
 
