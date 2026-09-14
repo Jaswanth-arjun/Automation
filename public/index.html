@@ -11,16 +11,16 @@
 </head>
 <body>
   <div class="app-container">
-    <!-- Header -->
+    <!-- Top Header Navigation -->
     <header class="app-header">
       <div class="brand">
         <div class="brand-icon">⚡</div>
-        <div>
+        <div class="brand-text">
           <h1>LinkedIn Connect AI</h1>
-          <p>Targeted Recruitment & Outreach Engine</p>
+          <p>Automated Recruitment & Outreach Engine</p>
         </div>
       </div>
-      <div class="header-actions">
+      <div class="header-status">
         <div id="statusPill" class="status-pill status-idle">
           <span class="status-dot"></span>
           <span id="statusText">System Ready</span>
@@ -28,17 +28,17 @@
       </div>
     </header>
 
-    <!-- Main Grid -->
+    <!-- Main Dashboard Grid -->
     <main class="dashboard-grid">
-      <!-- Left Panel: Configuration Form -->
+      <!-- Left Column: Settings & Configuration -->
       <section class="card config-card">
         <div class="card-header">
           <h2>🎯 Target & Outreach Settings</h2>
-          <p>Configure company, role filters, personalized notes, and speed.</p>
+          <p>Configure company, role keywords, note template, and speed.</p>
         </div>
 
         <form id="configForm" onsubmit="return false;">
-          <!-- Target Company -->
+          <!-- Target Company Input -->
           <div class="form-group">
             <label for="companyInput">Target Company Name or LinkedIn URL</label>
             <div class="input-with-icon">
@@ -46,12 +46,12 @@
               <input
                 type="text"
                 id="companyInput"
-                placeholder="e.g. MongoDB, Microsoft, Google or full URL"
+                placeholder="e.g. MongoDB, Microsoft, Google"
                 value="MongoDB"
                 required
               />
             </div>
-            <span class="field-hint">e.g. "MongoDB", "Microsoft", "Google" or "https://www.linkedin.com/company/mongodbinc/people/"</span>
+            <span class="field-hint">Enter company name (e.g. "MongoDB") or paste direct LinkedIn People URL</span>
           </div>
 
           <!-- Role Filter Tags -->
@@ -64,10 +64,10 @@
               <input type="text" id="roleTagInput" placeholder="Add custom role (e.g. Lead Recruiter)" />
               <button type="button" class="btn btn-secondary btn-sm" id="addTagBtn">+ Add Role</button>
             </div>
-            <span class="field-hint">Add or remove role keywords. Automation navigates each role filter sequentially.</span>
+            <span class="field-hint">Add or remove roles. Automation navigates each filter sequentially.</span>
           </div>
 
-          <!-- Connections Target & Speed Preset -->
+          <!-- Target & Speed Settings -->
           <div class="form-row">
             <div class="form-group col-half">
               <label for="connectionsPerFilter">Requests per Role</label>
@@ -76,15 +76,15 @@
             <div class="form-group col-half">
               <label for="speedPreset">Speed & Safety Preset</label>
               <select id="speedPreset">
-                <option value="safe" selected>🛡️ Safe (20s - 35s delay)</option>
-                <option value="balanced">⚖️ Balanced (10s - 20s delay)</option>
-                <option value="fast">⚡ Fast (5s - 10s delay)</option>
+                <option value="safe" selected>🛡️ Safe (20s - 35s wait)</option>
+                <option value="balanced">⚖️ Balanced (10s - 20s wait)</option>
+                <option value="fast">⚡ Fast (5s - 10s wait)</option>
                 <option value="custom">⚙️ Custom Delay</option>
               </select>
             </div>
           </div>
 
-          <!-- Custom Delays (Hidden by default) -->
+          <!-- Custom Delay Inputs -->
           <div class="form-row hidden" id="customDelaysRow">
             <div class="form-group col-half">
               <label for="minDelay">Min Delay (sec)</label>
@@ -96,25 +96,25 @@
             </div>
           </div>
 
-          <!-- Connection Note Template -->
+          <!-- Personalized Note Template -->
           <div class="form-group">
-            <div class="label-with-toggle">
+            <div class="label-with-badge">
               <label for="connectionNote">Personalized Connection Note</label>
-              <span class="badge badge-subtle">{name} placeholder enabled</span>
+              <span class="badge-tag">{name} placeholder</span>
             </div>
             <textarea
               id="connectionNote"
               rows="3"
-              placeholder="Type your connection message template..."
-            >Hi {name}, I'm a 2027 B.Tech CSE student actively exploring Software Engineering Intern opportunities at {company}. I came across the 2027 internship openings and would love to connect and learn more!</textarea>
+              placeholder="Type message template..."
+            >Hi {name}, I'm a 2027 B.Tech CSE student actively exploring Software Engineering Intern opportunities at MongoDB. I came across the 2027 internship openings and would love to connect and learn more!</textarea>
           </div>
 
-          <!-- Gemini AI Toggle -->
-          <div class="form-group ai-toggle-box">
-            <div class="toggle-row">
-              <div class="toggle-info">
-                <span class="toggle-title">🤖 Enable Gemini AI Personalization</span>
-                <span class="toggle-desc">Automatically tailors notes using recipient role & name</span>
+          <!-- Gemini AI Toggle Card -->
+          <div class="ai-box">
+            <div class="ai-box-header">
+              <div>
+                <span class="ai-title">🤖 Gemini AI Note Personalization</span>
+                <span class="ai-desc">Automatically tailors custom notes per recipient name & headline</span>
               </div>
               <label class="switch">
                 <input type="checkbox" id="useAINotes" checked />
@@ -122,14 +122,14 @@
               </label>
             </div>
 
-            <div class="api-key-group" id="apiKeyGroup">
+            <div class="api-key-wrapper" id="apiKeyGroup">
               <label for="geminiApiKey">Gemini API Key (Optional Override)</label>
               <input type="password" id="geminiApiKey" placeholder="Paste GEMINI_API_KEY (or use .env default)" />
             </div>
           </div>
 
-          <!-- Control Action Buttons -->
-          <div class="action-bar">
+          <!-- Form Control Actions -->
+          <div class="action-row">
             <button type="button" id="startBtn" class="btn btn-primary btn-lg">
               <span class="btn-icon">🚀</span> Start Automation
             </button>
@@ -140,80 +140,78 @@
         </form>
       </section>
 
-      <!-- Right Panel: Execution Dashboard & Live Terminal -->
+      <!-- Right Column: Dashboard & Execution Monitor -->
       <section class="card dashboard-card">
         <div class="card-header">
           <h2>📊 Live Execution Dashboard</h2>
-          <p>Monitor real-time progress, log streams, and connection results.</p>
+          <p>Monitor real-time progress, console log output, and connection history.</p>
         </div>
 
-        <!-- Metrics Overview Grid -->
+        <!-- Metrics Overview Cards -->
         <div class="metrics-grid">
           <div class="metric-card metric-sent">
             <div class="metric-value" id="metricSent">0</div>
-            <div class="metric-label">Notes Sent</div>
+            <div class="metric-label">NOTES SENT</div>
           </div>
           <div class="metric-card metric-skipped">
             <div class="metric-value" id="metricSkipped">0</div>
-            <div class="metric-label">Skipped / Pending</div>
+            <div class="metric-label">PENDING / SKIPPED</div>
           </div>
           <div class="metric-card metric-failed">
             <div class="metric-value" id="metricFailed">0</div>
-            <div class="metric-label">Skipped / Other</div>
+            <div class="metric-label">FAILED / OTHER</div>
           </div>
           <div class="metric-card metric-target">
             <div class="metric-value" id="metricTarget">0</div>
-            <div class="metric-label">Total Target</div>
+            <div class="metric-label">TOTAL TARGET</div>
           </div>
         </div>
 
-        <!-- Progress Bar -->
-        <div class="progress-section">
-          <div class="progress-info">
-            <span id="currentRoleText">Current Filter: None</span>
-            <span id="progressPercentage">0%</span>
+        <!-- Live Progress Section -->
+        <div class="progress-card">
+          <div class="progress-header">
+            <span id="currentRoleText" class="current-role-title">Current Filter: None</span>
+            <span id="progressPercentage" class="progress-pct">0%</span>
           </div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" id="progressBarFill"></div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressBarFill"></div>
           </div>
         </div>
 
-        <!-- Terminal Console Window -->
-        <div class="terminal-card">
-          <div class="terminal-header">
-            <div class="terminal-dots">
-              <span class="dot dot-red"></span>
-              <span class="dot dot-yellow"></span>
-              <span class="dot dot-green"></span>
+        <!-- Live Console Terminal -->
+        <div class="terminal-box">
+          <div class="terminal-bar">
+            <div class="window-buttons">
+              <span class="wb wb-red"></span>
+              <span class="wb wb-yellow"></span>
+              <span class="wb wb-green"></span>
             </div>
-            <span class="terminal-title">Console Output Logs</span>
-            <div class="terminal-controls">
-              <button class="btn-icon-only" id="clearLogsBtn" title="Clear console">🧹</button>
-            </div>
+            <span class="terminal-heading">Console Output Logs</span>
+            <button class="btn-clear" id="clearLogsBtn" title="Clear console logs">Clear Logs</button>
           </div>
-          <div class="terminal-body" id="terminalBody">
-            <div class="log-line log-info">
-              <span class="log-ts">[00:00:00]</span> Welcome to LinkedIn Connect AI. Click "Start Automation" to begin.
+          <div class="terminal-content" id="terminalBody">
+            <div class="log-entry log-info">
+              <span class="log-time">[00:00:00]</span> Engine ready. Configure settings and click "Start Automation" to begin.
             </div>
           </div>
         </div>
 
-        <!-- Sent Connections Results Table -->
-        <div class="table-section">
+        <!-- Sent Connection History Table -->
+        <div class="sent-history-card">
           <h3>📬 Sent Requests History</h3>
-          <div class="table-wrapper">
-            <table class="sent-table">
+          <div class="table-container">
+            <table class="history-table">
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Name</th>
-                  <th>Role Filter</th>
-                  <th>Note Sent</th>
+                  <th style="width: 90px;">Time</th>
+                  <th style="width: 150px;">Name</th>
+                  <th style="width: 130px;">Role Filter</th>
+                  <th>Note Preview</th>
                 </tr>
               </thead>
               <tbody id="sentTableBody">
                 <tr id="emptyTableMsg">
-                  <td colspan="4" class="text-center text-muted">No connection requests sent in this session yet.</td>
+                  <td colspan="4" class="empty-state">No connection requests sent in this session yet.</td>
                 </tr>
               </tbody>
             </table>

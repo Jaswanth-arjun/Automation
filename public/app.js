@@ -1,12 +1,11 @@
 /**
- * Client-side Controller for LinkedIn Connect AI Web Application
+ * LinkedIn Connect AI - Client Controller
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   // State
   let roles = ['Recruiter', 'Talent Acquisition', 'HR', 'Hiring Manager', 'Engineering Manager'];
   let ws = null;
-  let currentStatus = 'idle';
 
   // DOM Elements
   const companyInput = document.getElementById('companyInput');
@@ -42,20 +41,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearLogsBtn = document.getElementById('clearLogsBtn');
   const sentTableBody = document.getElementById('sentTableBody');
 
-  // Tag Management
+  // Tag Manager Logic
   function renderTags() {
     tagsContainer.innerHTML = '';
     roles.forEach((role, idx) => {
       const chip = document.createElement('div');
       chip.className = 'tag-chip';
       chip.innerHTML = `
-        <span>${role}</span>
+        <span>${escapeHtml(role)}</span>
         <span class="tag-remove" data-idx="${idx}">&times;</span>
       `;
       tagsContainer.appendChild(chip);
     });
 
-    // Re-bind remove click
     document.querySelectorAll('.tag-remove').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const index = parseInt(e.target.getAttribute('data-idx'), 10);
@@ -82,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Speed Preset Selector
+  // Speed Preset Switcher
   speedPreset.addEventListener('change', () => {
     if (speedPreset.value === 'custom') {
       customDelaysRow.classList.remove('hidden');
@@ -91,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // AI Toggle
+  // AI Toggle Switcher
   useAINotesCheckbox.addEventListener('change', () => {
     if (useAINotesCheckbox.checked) {
       apiKeyGroup.style.display = 'block';
@@ -100,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Helper: Get Delays Object
+  // Delays Helper
   function getDelays() {
     const preset = speedPreset.value;
     if (preset === 'safe') return { min: 20000, max: 35000 };
@@ -112,12 +110,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return { min: minSec * 1000, max: maxSec * 1000 };
   }
 
-  // Terminal Log Append
+  // Log Renderer
   function appendLog(logObj) {
     const { timestamp, message, level } = logObj;
     const line = document.createElement('div');
-    line.className = `log-line log-${level || 'info'}`;
-    line.innerHTML = `<span class="log-ts">[${timestamp || new Date().toLocaleTimeString()}]</span> ${escapeHtml(message)}`;
+    line.className = `log-entry log-${level || 'info'}`;
+    line.innerHTML = `<span class="log-time">[${timestamp || new Date().toLocaleTimeString()}]</span> ${escapeHtml(message)}`;
 
     terminalBody.appendChild(line);
     terminalBody.scrollTop = terminalBody.scrollHeight;
@@ -132,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     terminalBody.innerHTML = '';
   });
 
-  // Sent History Table
+  // Sent Record Table Renderer
   function appendSentRecord(record) {
     const emptyRow = document.getElementById('emptyTableMsg');
     if (emptyRow) emptyRow.remove();
@@ -142,14 +140,13 @@ document.addEventListener('DOMContentLoaded', () => {
       <td>${record.timestamp || ''}</td>
       <td><strong>${escapeHtml(record.name || '')}</strong></td>
       <td><span class="tag-chip">${escapeHtml(record.role || '')}</span></td>
-      <td>${escapeHtml(record.note ? record.note.substring(0, 60) + '...' : '')}</td>
+      <td>${escapeHtml(record.note ? record.note.substring(0, 65) + '...' : '')}</td>
     `;
     sentTableBody.prepend(tr);
   }
 
   // Update Status Pill UI
   function updateStatusUI(status, errorMsg) {
-    currentStatus = status;
     statusPill.className = `status-pill status-${status}`;
 
     if (status === 'idle') {
@@ -175,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Update Progress UI
+  // Update Progress Stats & Bar
   function updateProgressUI(data) {
     if (!data) return;
     const { stats, currentRole, currentRoleSent, targetPerRole, totalRoles } = data;
@@ -201,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
     progressBarFill.style.width = `${pct}%`;
   }
 
-  // WebSocket Client Setup
+  // WebSocket Setup
   function initWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${location.host}`;
@@ -240,17 +237,16 @@ document.addEventListener('DOMContentLoaded', () => {
           updateStatusUI(data.status, data.error);
         }
       } catch (err) {
-        console.error('WS Parse Error:', err);
+        console.error('WS Error:', err);
       }
     };
 
     ws.onclose = () => {
-      console.log('WS Connection closed. Reconnecting in 3s...');
       setTimeout(initWebSocket, 3000);
     };
   }
 
-  // Start Button Handler
+  // Start Automation Handler
   startBtn.addEventListener('click', async () => {
     if (roles.length === 0) {
       alert('Please add at least one Role filter tag!');
@@ -288,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Stop Button Handler
+  // Stop Handler
   stopBtn.addEventListener('click', async () => {
     stopBtn.disabled = true;
     appendLog({ timestamp: new Date().toLocaleTimeString(), message: 'Sending stop signal to server...', level: 'warning' });

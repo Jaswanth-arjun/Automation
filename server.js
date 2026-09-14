@@ -13,6 +13,10 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+wss.on('error', (err) => {
+  // Handle WS server error silently during port retry
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
