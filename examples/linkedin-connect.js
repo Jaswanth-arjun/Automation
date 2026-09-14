@@ -225,116 +225,90 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       return false;
     }
 
-    // 1. Target ONLY the 3-dots (⋯) button in the main profile header card (Image 2),
-    //    strictly excluding right sidebars, ads, and secondary content.
-    const moreClicked = await profilePage.evaluate(() => {
-      // Find main profile H1 heading (in main content area)
-      const h1 =
-        document.querySelector('main h1, .scaffold-layout__main h1, .pv-top-card h1') ||
-        Array.from(document.querySelectorAll('h1')).find(
-          (h) => (h.textContent || '').trim().length > 1 && !h.closest('aside, #secondary-content')
+    // 1. Target ONLY the 3-dots (⋯) button in the main profile header card (Image 2)
+    //    using native Puppeteer ElementHandle click for 100% reliable dropdown opening!
+    const targetHandle = await profilePage.evaluateHandle(() => {
+      const mainSection =
+        document.querySelector('main section, .scaffold-layout__main section, .pv-top-card') ||
+        document.querySelector('main');
+      if (!mainSection) return null;
+
+      const buttons = Array.from(mainSection.querySelectorAll('button, div[role="button"]'));
+
+      // Check direct Connect first
+      const directConnect = buttons.find((b) => {
+        const text = (b.textContent || '').trim();
+        const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+        return (
+          text === 'Connect' ||
+          (aria.includes('connect') && !aria.includes('disconnect') && !aria.includes('more'))
         );
+      });
+      if (directConnect) return { type: 'connect', el: directConnect };
 
-      if (!h1) return 'none';
-
-      // Find main profile container (strictly inside <main> or .pv-top-card)
-      const mainCard =
-        h1.closest('section, .pv-top-card, .artdeco-card') ||
-        h1.parentElement.parentElement.parentElement;
-
-      // Get buttons ONLY from main profile card
-      const buttons = Array.from(mainCard.querySelectorAll('button, div[role="button"]'));
-
-      // Check direct Connect button on main profile card
-      for (const btn of buttons) {
-        const text = (btn.textContent || '').trim();
-        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (text === 'Connect' || (aria.includes('connect') && !aria.includes('disconnect') && !aria.includes('more'))) {
-          btn.click();
-          return 'clicked_connect';
-        }
-      }
-
-      // Find Message or Follow button on main card to locate exact sibling 3-dots button (Image 2)
-      let dotsCandidate = null;
+      // Find Message or Follow button on top card to pinpoint exact sibling 3-dots button (Red Circle)
       const actionBtn = buttons.find((b) => {
         const t = (b.textContent || '').trim().toLowerCase();
-        return t === 'message' || t === 'follow' || t === '+ follow';
+        return t === 'message' || t.includes('follow');
       });
 
-      if (actionBtn && actionBtn.parentElement) {
-        const siblingButtons = Array.from(
-          actionBtn.parentElement.querySelectorAll('button, div[role="button"]')
-        );
-        dotsCandidate = siblingButtons.find((b) => {
-          const txt = (b.textContent || '').trim().toLowerCase();
-          return txt !== 'message' && !txt.includes('follow') && !txt.includes('connect');
-        });
+      if (!actionBtn) return null;
+
+      let container = actionBtn.parentElement;
+      while (container && container !== mainSection) {
+        const btns = container.querySelectorAll('button, div[role="button"]');
+        if (btns.length >= 2) break;
+        container = container.parentElement;
       }
 
-      if (!dotsCandidate) {
-        for (const btn of buttons) {
-          const text = (btn.textContent || '').trim().toLowerCase();
-          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-          if (
-            text === 'more' ||
-            text === '...' ||
-            text === '\u2022\u2022\u2022' ||
-            aria === 'more' ||
-            aria.includes('more actions') ||
-            aria.includes('overflow')
-          ) {
-            dotsCandidate = btn;
-            break;
-          }
-        }
-      }
+      if (!container) return null;
 
-      if (dotsCandidate) {
-        dotsCandidate.scrollIntoView({ behavior: 'instant', block: 'center' });
-        dotsCandidate.click();
-        return 'clicked_more';
-      }
+      const containerButtons = Array.from(container.querySelectorAll('button, div[role="button"]'));
+      const dotsBtn = containerButtons.find((b) => {
+        const txt = (b.textContent || '').trim().toLowerCase();
+        return txt !== 'message' && !txt.includes('follow');
+      });
 
-      return 'none';
+      if (dotsBtn) {
+        dotsBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+        return { type: 'more', el: dotsBtn };
+      }
+      return null;
     });
 
-    if (moreClicked === 'none') {
-      console.log('      ⚠️  Connect / 3-dots button not found on profile');
+    const actionType = await profilePage.evaluate((obj) => (obj ? obj.type : 'none'), targetHandle);
+    const nativeBtnHandle = await profilePage.evaluateHandle(
+      (obj) => (obj ? obj.el : null),
+      targetHandle
+    );
+    const nativeBtn = nativeBtnHandle.asElement();
+
+    if (!nativeBtn || actionType === 'none') {
+      console.log('      ⚠️  Connect / 3-dots button not found on profile top card');
       await profilePage.close();
       return false;
     }
 
-    console.log(`      ⚡ Profile lo ${moreClicked === 'clicked_connect' ? 'Connect button' : '3-dots (More)'} clicked!`);
+    // Native Puppeteer Mouse Click!
+    await nativeBtn.click();
+    console.log(
+      `      ⚡ Profile top card lo ${
+        actionType === 'connect' ? 'Connect button' : '3-dots (More)'
+      } clicked natively!`
+    );
 
-    // 2. Dropdown lo "Connect" option click (3-dots path ayithe)
-    //    IMPORTANT: open ayyina dropdown menu lo matramey vetakali —
-    //    sidebar "More profiles for you" lo unna verey person "Connect" button
-    //    tappu ga match avvakudadhu
-    if (moreClicked === 'clicked_more') {
+    // 2. Dropdown menu lo "Connect" option click (if 3-dots clicked)
+    if (actionType === 'more') {
       await sleep(1800);
       const connectClicked = await profilePage.evaluate(() => {
-        // Open ayyina dropdown menus matramey
-        const menus = Array.from(
-          document.querySelectorAll(
-            '.artdeco-dropdown__content.artdeco-dropdown__content--is-open, [role="menu"], .artdeco-dropdown__content--is-open'
-          )
+        const items = Array.from(
+          document.querySelectorAll('.artdeco-dropdown__content--is-open *, [role="menu"] *')
         );
-        const scopes = menus.length
-          ? menus
-          : Array.from(document.querySelectorAll('.artdeco-dropdown__content, [role="menu"]'));
-
-        for (const scope of scopes) {
-          const items = Array.from(
-            scope.querySelectorAll('div[role="button"], button, li, span')
-          );
-          for (const item of items) {
-            const text = (item.textContent || '').trim();
-            // EXACT "Connect" matramey — "Remove connection" lanti vi kakudadhu
-            if (/^connect$/i.test(text)) {
-              item.click();
-              return true;
-            }
+        for (const item of items) {
+          const text = (item.textContent || '').trim();
+          if (/^connect$/i.test(text) || (text.includes('Connect') && !text.includes('Remove'))) {
+            item.click();
+            return true;
           }
         }
         return false;
