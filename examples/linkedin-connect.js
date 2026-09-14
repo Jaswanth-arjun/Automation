@@ -297,44 +297,65 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       } clicked natively!`
     );
 
-    // 2. Dropdown menu lo Red-Circled "+ Connect" option click natively!
+    // 2. Dropdown menu lo Red-Circled "+ Connect" option click (Failsafe 2-Tier Strategy)!
     if (actionType === 'more') {
-      await sleep(1800);
-      const connectHandle = await profilePage.evaluateHandle(() => {
-        const menus = Array.from(
+      await sleep(1500);
+
+      let connectClicked = await profilePage.evaluate(() => {
+        const candidates = Array.from(
           document.querySelectorAll(
-            '.artdeco-dropdown__content--is-open, .artdeco-dropdown__content[aria-hidden="false"], [role="menu"]'
+            '.artdeco-dropdown__content *, [role="menu"] *, div.artdeco-dropdown__item, li.artdeco-dropdown__item, div[role="button"], button, li, span'
           )
         );
-        const scope = menus[0] || document;
-        const items = Array.from(
-          scope.querySelectorAll(
-            'div[role="button"], button, li, div.artdeco-dropdown__item, span'
-          )
-        );
-        for (const item of items) {
-          const text = (item.textContent || '').trim();
-          const aria = (item.getAttribute('aria-label') || '').toLowerCase();
+
+        for (const el of candidates) {
+          const text = (el.textContent || '').trim();
           if (
-            text === 'Connect' ||
-            text.includes('Connect') ||
-            aria.includes('connect') ||
-            item.querySelector('svg[data-test-icon="connect-small"]')
+            /^(\+ )?connect$/i.test(text) ||
+            (text.includes('Connect') &&
+              !text.includes('Remove') &&
+              !text.includes('Disconnect') &&
+              !text.includes('More profiles') &&
+              text.length < 25)
           ) {
-            if (!text.includes('Remove') && !text.includes('Disconnect')) {
-              item.scrollIntoView({ behavior: 'instant', block: 'center' });
-              return item;
-            }
+            el.scrollIntoView({ behavior: 'instant', block: 'center' });
+            el.click();
+            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            return true;
           }
         }
-        return null;
+        return false;
       });
 
-      const connectNativeBtn = connectHandle.asElement();
-      if (connectNativeBtn) {
-        await connectNativeBtn.click();
-        console.log('      ⚡ Open ayyina Dropdown lo Red-Circled "+ Connect" item clicked natively!');
+      if (connectClicked) {
+        console.log('      ⚡ Open ayyina Dropdown lo Red-Circled "+ Connect" item clicked successfully!');
       } else {
+        const connectHandle = await profilePage.evaluateHandle(() => {
+          const all = Array.from(document.querySelectorAll('*'));
+          for (const el of all) {
+            const text = (el.textContent || '').trim();
+            if (
+              (/^(\+ )?connect$/i.test(text) ||
+                (text.includes('Connect') && !text.includes('Remove') && text.length < 20)) &&
+              el.closest('.artdeco-dropdown__content, [role="menu"], .artdeco-dropdown__item, li')
+            ) {
+              return el;
+            }
+          }
+          return null;
+        });
+
+        const nativeConnectBtn = connectHandle.asElement();
+        if (nativeConnectBtn) {
+          await nativeConnectBtn.click();
+          console.log('      ⚡ Open ayyina Dropdown lo Red-Circled "+ Connect" item clicked natively (Fallback)!');
+          connectClicked = true;
+        }
+      }
+
+      if (!connectClicked) {
         console.log('      ⚠️ Dropdown lo Red-Circled "+ Connect" option dorakaledu');
         await profilePage.keyboard.press('Escape');
         await profilePage.close();
