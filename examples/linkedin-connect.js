@@ -297,60 +297,43 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       } clicked natively!`
     );
 
-    // 2. Dropdown menu lo Red-Circled "+ Connect" option click!
-    //    STRICT SAFETY: Target ONLY the main profile dropdown menu container (containing "Send profile in a message" / "Save to PDF"),
-    //    completely eliminating any risk of clicking sidebar profiles or wrong URLs!
+    // 2. Dropdown menu lo Red-Circled "+ Connect" option click natively on parent item!
     if (actionType === 'more') {
-      await sleep(1800);
+      await sleep(1500);
 
-      const connectHandle = await profilePage.evaluateHandle(() => {
-        const containers = Array.from(document.querySelectorAll('div, ul, section'));
+      const itemHandle = await profilePage.evaluateHandle(() => {
+        // Query elements inside open dropdown or menu
+        const menuItems = Array.from(
+          document.querySelectorAll(
+            '.artdeco-dropdown__content *, [role="menu"] *, .artdeco-dropdown__item *, .artdeco-dropdown__item'
+          )
+        );
 
-        // Target main profile 3-dots dropdown container ONLY
-        const mainDropdown = containers.find((d) => {
-          const text = (d.textContent || '').trim();
-          return (
-            (text.includes('Send profile in a message') ||
-              text.includes('Save to PDF') ||
-              text.includes('About this member')) &&
-            text.includes('Connect')
-          );
-        });
-
-        const scope =
-          mainDropdown ||
-          document.querySelector('.artdeco-dropdown__content--is-open, [role="menu"]');
-        if (!scope) return null;
-
-        const items = Array.from(scope.querySelectorAll('div, li, button, span, a'));
-        for (const item of items) {
-          const text = (item.textContent || '').trim();
+        for (const el of menuItems) {
+          const text = (el.textContent || '').trim();
           if (
             /^(\+ )?connect$/i.test(text) ||
             (text.includes('Connect') &&
               !text.includes('Remove') &&
               !text.includes('Disconnect') &&
+              !text.includes('More profiles') &&
               text.length < 25)
           ) {
-            item.scrollIntoView({ behavior: 'instant', block: 'center' });
-            return item;
+            const parentItem =
+              el.closest('.artdeco-dropdown__item, [role="button"], [role="menuitem"], li') || el;
+            parentItem.scrollIntoView({ behavior: 'instant', block: 'center' });
+            return parentItem;
           }
         }
         return null;
       });
 
-      const connectNativeBtn = connectHandle.asElement();
+      const nativeItem = itemHandle.asElement();
 
-      if (connectNativeBtn) {
-        // Send REAL PHYSICAL MOUSE CLICK to exact center of red-circled "+ Connect" box!
-        const box = await connectNativeBtn.boundingBox();
-        if (box) {
-          await profilePage.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        } else {
-          await connectNativeBtn.click();
-        }
+      if (nativeItem) {
+        await nativeItem.click();
         console.log(
-          '      ⚡ Main Profile Dropdown lo Red-Circled "+ Connect" item clicked with real mouse click!'
+          '      ⚡ Main Profile Dropdown lo Red-Circled "+ Connect" item clicked natively!'
         );
       } else {
         console.log('      ⚠️ Main Profile Dropdown lo Red-Circled "+ Connect" option dorakaledu');
