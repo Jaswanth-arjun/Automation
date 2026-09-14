@@ -297,25 +297,45 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       } clicked natively!`
     );
 
-    // 2. Dropdown menu lo "Connect" option click (if 3-dots clicked)
+    // 2. Dropdown menu lo Red-Circled "+ Connect" option click natively!
     if (actionType === 'more') {
       await sleep(1800);
-      const connectClicked = await profilePage.evaluate(() => {
+      const connectHandle = await profilePage.evaluateHandle(() => {
+        const menus = Array.from(
+          document.querySelectorAll(
+            '.artdeco-dropdown__content--is-open, .artdeco-dropdown__content[aria-hidden="false"], [role="menu"]'
+          )
+        );
+        const scope = menus[0] || document;
         const items = Array.from(
-          document.querySelectorAll('.artdeco-dropdown__content--is-open *, [role="menu"] *')
+          scope.querySelectorAll(
+            'div[role="button"], button, li, div.artdeco-dropdown__item, span'
+          )
         );
         for (const item of items) {
           const text = (item.textContent || '').trim();
-          if (/^connect$/i.test(text) || (text.includes('Connect') && !text.includes('Remove'))) {
-            item.click();
-            return true;
+          const aria = (item.getAttribute('aria-label') || '').toLowerCase();
+          if (
+            text === 'Connect' ||
+            text.includes('Connect') ||
+            aria.includes('connect') ||
+            item.querySelector('svg[data-test-icon="connect-small"]')
+          ) {
+            if (!text.includes('Remove') && !text.includes('Disconnect')) {
+              item.scrollIntoView({ behavior: 'instant', block: 'center' });
+              return item;
+            }
           }
         }
-        return false;
+        return null;
       });
 
-      if (!connectClicked) {
-        console.log('      ⚠️  Dropdown lo Connect option dorakaledu');
+      const connectNativeBtn = connectHandle.asElement();
+      if (connectNativeBtn) {
+        await connectNativeBtn.click();
+        console.log('      ⚡ Open ayyina Dropdown lo Red-Circled "+ Connect" item clicked natively!');
+      } else {
+        console.log('      ⚠️ Dropdown lo Red-Circled "+ Connect" option dorakaledu');
         await profilePage.keyboard.press('Escape');
         await profilePage.close();
         return false;
