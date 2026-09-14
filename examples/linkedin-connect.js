@@ -297,46 +297,63 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       } clicked natively!`
     );
 
-    // 2. Dropdown menu lo Red-Circled "+ Connect" option click natively on parent item!
+    // 2. 3-dots open aiyaka, Dropdown Menu lo 3rd Option (+ Connect) ni direct ga click cheydam!
     if (actionType === 'more') {
-      await sleep(1500);
+      await sleep(1800);
 
-      const itemHandle = await profilePage.evaluateHandle(() => {
-        // Query elements inside open dropdown or menu
-        const menuItems = Array.from(
+      const thirdItemHandle = await profilePage.evaluateHandle(() => {
+        // Query elements inside open dropdowns
+        const allCandidates = Array.from(
           document.querySelectorAll(
-            '.artdeco-dropdown__content *, [role="menu"] *, .artdeco-dropdown__item *, .artdeco-dropdown__item'
+            '.artdeco-dropdown__content *, [role="menu"] *, div, li, span'
           )
         );
 
-        for (const el of menuItems) {
+        const rows = [];
+        for (const el of allCandidates) {
           const text = (el.textContent || '').trim();
-          if (
-            /^(\+ )?connect$/i.test(text) ||
-            (text.includes('Connect') &&
-              !text.includes('Remove') &&
-              !text.includes('Disconnect') &&
-              !text.includes('More profiles') &&
-              text.length < 25)
-          ) {
-            const parentItem =
-              el.closest('.artdeco-dropdown__item, [role="button"], [role="menuitem"], li') || el;
-            parentItem.scrollIntoView({ behavior: 'instant', block: 'center' });
-            return parentItem;
+          const parentText = el.parentElement ? (el.parentElement.textContent || '').trim() : '';
+
+          if (text.length > 0 && text.length < 30 && text !== parentText) {
+            if (
+              text.includes('Send profile in a message') ||
+              text.includes('Save to PDF') ||
+              text.includes('Connect') ||
+              text.includes('Report') ||
+              text.includes('Block') ||
+              text.includes('About this member')
+            ) {
+              rows.push({ el, text });
+            }
           }
         }
-        return null;
+
+        // Deduplicate unique menu options (1: Send, 2: Save, 3: Connect, etc.)
+        const uniqueRows = [];
+        const seenTexts = new Set();
+        for (const r of rows) {
+          if (!seenTexts.has(r.text)) {
+            seenTexts.add(r.text);
+            uniqueRows.push(r);
+          }
+        }
+
+        // Target option containing "Connect" OR 3rd option (index 2)
+        const connectRow = uniqueRows.find(
+          (r) => r.text.includes('Connect') && !r.text.includes('Remove')
+        );
+        if (connectRow) return connectRow.el;
+
+        return uniqueRows[2] ? uniqueRows[2].el : null;
       });
 
-      const nativeItem = itemHandle.asElement();
+      const nativeItem = thirdItemHandle.asElement();
 
       if (nativeItem) {
         await nativeItem.click();
-        console.log(
-          '      ⚡ Main Profile Dropdown lo Red-Circled "+ Connect" item clicked natively!'
-        );
+        console.log('      ⚡ Dropdown Menu lo 3rd Option (+ Connect) clicked natively!');
       } else {
-        console.log('      ⚠️ Main Profile Dropdown lo Red-Circled "+ Connect" option dorakaledu');
+        console.log('      ⚠️ Dropdown Menu lo 3rd Option (+ Connect) dorakaledu');
         await profilePage.keyboard.press('Escape');
         await profilePage.close();
         return false;
