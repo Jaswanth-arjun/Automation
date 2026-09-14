@@ -297,66 +297,62 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       } clicked natively!`
     );
 
-    // 2. 3-dots open aiyaka, Dropdown Menu lo 3rd Option (+ Connect) ni direct ga click cheydam!
+    // 2. 3-dots open aiyaka, 3rd Option (+ Connect) ni Target Profile Scope lo strictly click/navigate cheydam!
+    //    STRICT SIDEBAR EXCLUSION: Deepak Kumar / sidebar profiles elements ni completely exclude chesthu
+    //    target user (e.g. Ritesh Musle) modal matrame open chesthundi!
     if (actionType === 'more') {
       await sleep(1800);
 
-      const thirdItemHandle = await profilePage.evaluateHandle(() => {
-        // Query elements inside open dropdowns
-        const allCandidates = Array.from(
-          document.querySelectorAll(
-            '.artdeco-dropdown__content *, [role="menu"] *, div, li, span'
-          )
-        );
+      // Extract target profile vanityName from profile URL
+      const urlParts = profileUrl.replace(/\/$/, '').split('/');
+      const targetVanityName = urlParts[urlParts.length - 1];
 
-        const rows = [];
-        for (const el of allCandidates) {
-          const text = (el.textContent || '').trim();
-          const parentText = el.parentElement ? (el.parentElement.textContent || '').trim() : '';
+      // Query 3rd option (+ Connect) strictly inside main dropdown menu (excluding aside/sidebar)
+      const dropdownInfo = await profilePage.evaluate((vanity) => {
+        const containers = Array.from(document.querySelectorAll('div, ul, section')).filter(el => {
+          return !el.closest('aside, .scaffold-layout__aside, #secondary-content, .pv-recommendations-section');
+        });
 
-          if (text.length > 0 && text.length < 30 && text !== parentText) {
-            if (
-              text.includes('Send profile in a message') ||
-              text.includes('Save to PDF') ||
-              text.includes('Connect') ||
-              text.includes('Report') ||
-              text.includes('Block') ||
-              text.includes('About this member')
-            ) {
-              rows.push({ el, text });
-            }
+        const targetDropdown = containers.find((d) => {
+          const text = (d.textContent || '').trim();
+          return (
+            (text.includes('Send profile in a message') || text.includes('Save to PDF')) &&
+            text.includes('Connect')
+          );
+        });
+
+        if (targetDropdown) {
+          const items = Array.from(
+            targetDropdown.querySelectorAll('a[role="menuitem"], [role="menuitem"], a, button, div.artdeco-dropdown__item')
+          );
+          const connectItem = items.find((el) => {
+            const text = (el.textContent || '').trim();
+            return (
+              text.length < 30 &&
+              (text === 'Connect' ||
+                text === '+ Connect' ||
+                (text.includes('Connect') && !text.includes('Remove') && !text.includes('Disconnect')))
+            );
+          });
+
+          if (connectItem) {
+            const href = connectItem.getAttribute('href') || connectItem.href;
+            connectItem.click();
+            return { found: true, href: href };
           }
         }
+        return { found: false };
+      }, targetVanityName);
 
-        // Deduplicate unique menu options (1: Send, 2: Save, 3: Connect, etc.)
-        const uniqueRows = [];
-        const seenTexts = new Set();
-        for (const r of rows) {
-          if (!seenTexts.has(r.text)) {
-            seenTexts.add(r.text);
-            uniqueRows.push(r);
-          }
-        }
-
-        // Target option containing "Connect" OR 3rd option (index 2)
-        const connectRow = uniqueRows.find(
-          (r) => r.text.includes('Connect') && !r.text.includes('Remove')
-        );
-        if (connectRow) return connectRow.el;
-
-        return uniqueRows[2] ? uniqueRows[2].el : null;
-      });
-
-      const nativeItem = thirdItemHandle.asElement();
-
-      if (nativeItem) {
-        await nativeItem.click();
-        console.log('      ⚡ Dropdown Menu lo 3rd Option (+ Connect) clicked natively!');
+      // If page URL is custom invite page for target user, proceed; else navigate directly to target's custom invite URL!
+      if (!profilePage.url().includes('custom-invite')) {
+        const targetCustomInviteUrl = `https://www.linkedin.com/preload/custom-invite/?vanityName=${targetVanityName}`;
+        console.log(`      ⚡ Opening Target User (${personName}) Custom Invite Page directly...`);
+        await profilePage.goto(targetCustomInviteUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await sleep(2500);
       } else {
-        console.log('      ⚠️ Dropdown Menu lo 3rd Option (+ Connect) dorakaledu');
-        await profilePage.keyboard.press('Escape');
-        await profilePage.close();
-        return false;
+        console.log(`      ⚡ Dropdown 3rd Option (+ Connect) clicked for ${personName}!`);
+        await sleep(2500);
       }
     }
 
