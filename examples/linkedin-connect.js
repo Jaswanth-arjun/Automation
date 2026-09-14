@@ -2,22 +2,20 @@
  * Targeted LinkedIn Connection Automation - Direct URL Parameter Strategy
  * Target Company: MongoDB Official People Tab
  *
- * User Strategy:
- * Uses direct URL query parameter filtering:
- * https://www.linkedin.com/company/mongodbinc/people/?keywords={role}
- *
- * Workflow:
- * 1. User logs in manually in open Chrome window (cookies saved in .chrome-data).
- * 2. Script navigates role-by-role using ?keywords={role} URL parameter.
- * 3. Sends exactly 10 connection requests WITH PERSONALIZED NOTE per role filter.
- * 4. Repeats for all 5 roles (Recruiter, Talent Acquisition, HR, Hiring Manager, Engineering Manager).
+ * Features:
+ * 1. Uses direct URL query parameter filtering:
+ *    https://www.linkedin.com/company/mongodbinc/people/?keywords={role}
+ * 2. User logs in manually in open Chrome window (cookies saved in .chrome-data).
+ * 3. Navigates role-by-role using ?keywords={role} URL parameter.
+ * 4. Sends exactly 10 connection requests WITH PERSONALIZED NOTE per role filter.
+ * 5. Roles covered: Recruiter, Talent Acquisition, HR, Hiring Manager, Engineering Manager.
  */
 
 import puppeteer from 'puppeteer-core';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-// Persistent Chrome Profile Directory
+// Persistent Chrome Profile Directory to save login session
 const chromeDataDir = join(process.cwd(), '.chrome-data');
 if (!existsSync(chromeDataDir)) {
   mkdirSync(chromeDataDir, { recursive: true });
@@ -35,6 +33,7 @@ const CONFIG = {
     'opportunities at MongoDB. I came across the 2027 internship openings and would love to ' +
     'connect and learn more about the opportunities and hiring process. Thanks!',
 
+  // Exactly 10 connection requests per role filter
   connectionsPerFilter: 10,
 
   roles: [
@@ -45,7 +44,7 @@ const CONFIG = {
     'Engineering Manager',
   ],
 
-  // Anti-Detection Delays (ms)
+  // Anti-Detection Rate Limiting Delays (ms)
   delayBetweenConnections: { min: 20000, max: 35000 },
   delayBetweenRoles: { min: 8000, max: 15000 },
   typingDelay: 25,
@@ -167,6 +166,111 @@ async function handleConnectionModal(page, personName) {
 
   console.log('      ❌ Send button click failed or disabled');
   return false;
+}
+
+/**
+ * Fallback: Card lo "Follow"/"Message" matramey unnapudu,
+ * profile page open chesi -> 3-dots (More) -> Connect -> note -> send
+ * Tarvata people list ki return avthundi (new tab close = back).
+ */
+async function connectViaProfilePage(browser, profileUrl, personName) {
+  const profilePage = await browser.newPage();
+  try {
+    await profilePage.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    });
+
+    console.log('      🔀 No Connect on card (Follow/Message only). Opening profile page...');
+    await profilePage.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await sleep(4500);
+
+    // Login/authwall check
+    if (profilePage.url().includes('/login') || profilePage.url().includes('/authwall')) {
+      console.log('      ⚠️  Profile page redirected to login/authwall');
+      await profilePage.close();
+      return false;
+    }
+
+    // 1. Direct "Connect" button unda profile lo? lekapothe 3-dots (More) click chey
+    const moreClicked = await profilePage.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+
+      // First try direct Connect button on profile
+      for (const btn of buttons) {
+        const text = (btn.textContent || '').trim();
+        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (text === 'Connect' || aria.includes('invite') || aria.includes('connect')) {
+          btn.click();
+          return 'clicked_connect';
+        }
+      }
+
+      // Else click 3-dots / More button on profile
+      for (const btn of buttons) {
+        const text = (btn.textContent || '').trim().toLowerCase();
+        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+        if (
+          text === 'more' ||
+          aria.includes('more actions') ||
+          (aria.includes('more') && aria.includes('actions')) ||
+          aria.includes('overflow')
+        ) {
+          btn.click();
+          return 'clicked_more';
+        }
+      }
+      return 'none';
+    });
+
+    if (moreClicked === 'none') {
+      console.log('      ⚠️  Connect / 3-dots button not found on profile');
+      await profilePage.close();
+      return false;
+    }
+
+    console.log(`      ⚡ Profile lo ${moreClicked === 'clicked_connect' ? 'Connect button' : '3-dots (More)'} clicked!`);
+
+    // 2. Dropdown lo "Connect" option click (3-dots path ayithe)
+    if (moreClicked === 'clicked_more') {
+      await sleep(1500);
+      const connectClicked = await profilePage.evaluate(() => {
+        const items = Array.from(document.querySelectorAll('div[role="button"], button, li, span'));
+        for (const item of items) {
+          const text = (item.textContent || '').trim();
+          const aria = (item.getAttribute('aria-label') || '').toLowerCase();
+          if (text === 'Connect' || aria.includes('connect') || aria.includes('invite')) {
+            item.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (!connectClicked) {
+        console.log('      ⚠️  Dropdown lo Connect option dorakaledu');
+        await profilePage.keyboard.press('Escape');
+        await profilePage.close();
+        return false;
+      }
+    }
+
+    // 3. Connection modal -> note -> send (same process)
+    const sent = await handleConnectionModal(profilePage, personName);
+
+    // 4. Modal/processing complete ayyaka tab close chesi people list ki return
+    await sleep(1000);
+    await profilePage.close();
+    console.log('      ↩️  Returned to People list (profile tab closed)');
+    return sent;
+  } catch (err) {
+    console.log(`      ⚠️  Profile page flow failed: ${err.message}`);
+    try {
+      await profilePage.close();
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
 }
 
 /**
@@ -338,6 +442,12 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
       }
     } catch {
       connected = false;
+    }
+
+    // Fallback: card lo "Follow"/"Message" matramey untey -> profile open chesi
+    // 3-dots (More) -> Connect -> note -> send, then back to list
+    if (!connected) {
+      connected = await connectViaProfilePage(page.browser(), emp.url, name);
     }
 
     if (connected) {

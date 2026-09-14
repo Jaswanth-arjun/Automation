@@ -1,0 +1,13 @@
+{
+  "name": "linkedin-automation",
+  "version": "1.0.0",
+  "description": "Automated targeted LinkedIn connection requests with personalized notes for MongoDB employees.",
+  "main": "linkedin-connect.js",
+  "type": "module",
+  "scripts": {
+    "start": "node linkedin-connect.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^22.0.0"
+  }
+}
