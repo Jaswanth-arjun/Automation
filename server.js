@@ -139,11 +139,31 @@ app.post('/api/stop', async (req, res) => {
   res.json({ message: 'Stop signal sent successfully.' });
 });
 
-server.listen(PORT, () => {
+let currentPort = Number(PORT);
+
+function startServer(portToListen) {
+  server.listen(portToListen);
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`⚠️  Port ${currentPort} is already in use. Retrying on port ${currentPort + 1}...`);
+    currentPort++;
+    setTimeout(() => {
+      startServer(currentPort);
+    }, 500);
+  } else {
+    console.error('❌ Server Listen Error:', err.message);
+  }
+});
+
+server.on('listening', () => {
   console.log('');
   console.log('╔═══════════════════════════════════════════════════════════════╗');
   console.log(`║  🌐 LinkedIn Automation Web Dashboard Server Running!         ║`);
-  console.log(`║  URL: http://localhost:${PORT}                                 ║`);
+  console.log(`║  URL: http://localhost:${currentPort}                                 ║`);
   console.log('╚═══════════════════════════════════════════════════════════════╝');
   console.log('');
 });
+
+startServer(currentPort);
