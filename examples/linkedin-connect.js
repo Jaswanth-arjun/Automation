@@ -342,9 +342,15 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       const connectNativeBtn = connectHandle.asElement();
 
       if (connectNativeBtn) {
-        await connectNativeBtn.click();
+        // Send REAL PHYSICAL MOUSE CLICK to exact center of red-circled "+ Connect" box!
+        const box = await connectNativeBtn.boundingBox();
+        if (box) {
+          await profilePage.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        } else {
+          await connectNativeBtn.click();
+        }
         console.log(
-          '      ⚡ Main Profile Dropdown lo Red-Circled "+ Connect" item clicked natively!'
+          '      ⚡ Main Profile Dropdown lo Red-Circled "+ Connect" item clicked with real mouse click!'
         );
       } else {
         console.log('      ⚠️ Main Profile Dropdown lo Red-Circled "+ Connect" option dorakaledu');
