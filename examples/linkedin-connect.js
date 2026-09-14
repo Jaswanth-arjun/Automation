@@ -83,9 +83,43 @@ function ts() {
 
 /**
  * Handle Connection Modal: Click Add a note -> Type personalized text -> Click Send
+ * Safety: modal lo person name verify chestundi — verey person modal vachtey abort.
  */
 async function handleConnectionModal(page, personName) {
-  await sleep(2500);
+  await sleep(2000);
+
+  // 0. Modal open ayyinda? 10s varaku wait chey (late load)
+  try {
+    await page.waitForFunction(() => document.querySelector('div[role="dialog"]'), {
+      timeout: 10000,
+    });
+  } catch {
+    console.log('      ⚠️  Connection modal open avvaledu (10s wait)');
+    return false;
+  }
+
+  await sleep(1000);
+
+  // 0.5 WRONG PERSON CHECK — modal lo target person name undali.
+  // Lekapothey (sidebar lo inko person ki tappu ga click ayyi untey) abort + close.
+  const nameMatch = await page.evaluate((expectedName) => {
+    const modal = document.querySelector('div[role="dialog"]');
+    if (!modal) return { found: false };
+    const modalText = (modal.textContent || '').toLowerCase();
+    const expected = (expectedName || '').toLowerCase().trim();
+    const firstWord = expected.split(' ')[0] || '';
+    const ok = modalText.includes(expected) || (firstWord.length > 2 && modalText.includes(firstWord));
+    return { found: true, ok };
+  }, personName);
+
+  if (nameMatch.found && !nameMatch.ok) {
+    console.log(`      🚫 WRONG PERSON MODAL! Expected "${personName}" — aborting & closing...`);
+    await page.keyboard.press('Escape');
+    await sleep(1000);
+    await page.keyboard.press('Escape');
+    await sleep(800);
+    return false;
+  }
 
   // 1. Click "Add a note" button inside modal
   const addNoteClicked = await page.evaluate(() => {
@@ -191,34 +225,77 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
       return false;
     }
 
-    // 1. Direct "Connect" button unda profile lo? lekapothe 3-dots (More) click chey
+    // 1. Target ONLY the 3-dots (⋯) button in the main profile header card (Image 2),
+    //    strictly excluding right sidebars, ads, and secondary content.
     const moreClicked = await profilePage.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+      // Find main profile H1 heading (in main content area)
+      const h1 =
+        document.querySelector('main h1, .scaffold-layout__main h1, .pv-top-card h1') ||
+        Array.from(document.querySelectorAll('h1')).find(
+          (h) => (h.textContent || '').trim().length > 1 && !h.closest('aside, #secondary-content')
+        );
 
-      // First try direct Connect button on profile
+      if (!h1) return 'none';
+
+      // Find main profile container (strictly inside <main> or .pv-top-card)
+      const mainCard =
+        h1.closest('section, .pv-top-card, .artdeco-card') ||
+        h1.parentElement.parentElement.parentElement;
+
+      // Get buttons ONLY from main profile card
+      const buttons = Array.from(mainCard.querySelectorAll('button, div[role="button"]'));
+
+      // Check direct Connect button on main profile card
       for (const btn of buttons) {
         const text = (btn.textContent || '').trim();
         const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (text === 'Connect' || aria.includes('invite') || aria.includes('connect')) {
+        if (text === 'Connect' || (aria.includes('connect') && !aria.includes('disconnect') && !aria.includes('more'))) {
           btn.click();
           return 'clicked_connect';
         }
       }
 
-      // Else click 3-dots / More button on profile
-      for (const btn of buttons) {
-        const text = (btn.textContent || '').trim().toLowerCase();
-        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-        if (
-          text === 'more' ||
-          aria.includes('more actions') ||
-          (aria.includes('more') && aria.includes('actions')) ||
-          aria.includes('overflow')
-        ) {
-          btn.click();
-          return 'clicked_more';
+      // Find Message or Follow button on main card to locate exact sibling 3-dots button (Image 2)
+      let dotsCandidate = null;
+      const actionBtn = buttons.find((b) => {
+        const t = (b.textContent || '').trim().toLowerCase();
+        return t === 'message' || t === 'follow' || t === '+ follow';
+      });
+
+      if (actionBtn && actionBtn.parentElement) {
+        const siblingButtons = Array.from(
+          actionBtn.parentElement.querySelectorAll('button, div[role="button"]')
+        );
+        dotsCandidate = siblingButtons.find((b) => {
+          const txt = (b.textContent || '').trim().toLowerCase();
+          return txt !== 'message' && !txt.includes('follow') && !txt.includes('connect');
+        });
+      }
+
+      if (!dotsCandidate) {
+        for (const btn of buttons) {
+          const text = (btn.textContent || '').trim().toLowerCase();
+          const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+          if (
+            text === 'more' ||
+            text === '...' ||
+            text === '\u2022\u2022\u2022' ||
+            aria === 'more' ||
+            aria.includes('more actions') ||
+            aria.includes('overflow')
+          ) {
+            dotsCandidate = btn;
+            break;
+          }
         }
       }
+
+      if (dotsCandidate) {
+        dotsCandidate.scrollIntoView({ behavior: 'instant', block: 'center' });
+        dotsCandidate.click();
+        return 'clicked_more';
+      }
+
       return 'none';
     });
 
@@ -231,16 +308,33 @@ async function connectViaProfilePage(browser, profileUrl, personName) {
     console.log(`      ⚡ Profile lo ${moreClicked === 'clicked_connect' ? 'Connect button' : '3-dots (More)'} clicked!`);
 
     // 2. Dropdown lo "Connect" option click (3-dots path ayithe)
+    //    IMPORTANT: open ayyina dropdown menu lo matramey vetakali —
+    //    sidebar "More profiles for you" lo unna verey person "Connect" button
+    //    tappu ga match avvakudadhu
     if (moreClicked === 'clicked_more') {
-      await sleep(1500);
+      await sleep(1800);
       const connectClicked = await profilePage.evaluate(() => {
-        const items = Array.from(document.querySelectorAll('div[role="button"], button, li, span'));
-        for (const item of items) {
-          const text = (item.textContent || '').trim();
-          const aria = (item.getAttribute('aria-label') || '').toLowerCase();
-          if (text === 'Connect' || aria.includes('connect') || aria.includes('invite')) {
-            item.click();
-            return true;
+        // Open ayyina dropdown menus matramey
+        const menus = Array.from(
+          document.querySelectorAll(
+            '.artdeco-dropdown__content.artdeco-dropdown__content--is-open, [role="menu"], .artdeco-dropdown__content--is-open'
+          )
+        );
+        const scopes = menus.length
+          ? menus
+          : Array.from(document.querySelectorAll('.artdeco-dropdown__content, [role="menu"]'));
+
+        for (const scope of scopes) {
+          const items = Array.from(
+            scope.querySelectorAll('div[role="button"], button, li, span')
+          );
+          for (const item of items) {
+            const text = (item.textContent || '').trim();
+            // EXACT "Connect" matramey — "Remove connection" lanti vi kakudadhu
+            if (/^connect$/i.test(text)) {
+              item.click();
+              return true;
+            }
           }
         }
         return false;
@@ -369,10 +463,11 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
     console.log(`      🕐 ${ts()}`);
 
     let connected = false;
+    let clickResult = { status: 'no_card' };
 
     // Try direct Connect on card
     try {
-      const clickResult = await page.evaluate((targetUrl) => {
+      clickResult = await page.evaluate((targetUrl) => {
         const links = Array.from(document.querySelectorAll('a[href*="/in/"]'));
         let targetCard = null;
 
@@ -413,6 +508,14 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
           }
         }
 
+        // "Pending" button untey -> request already sent, skip (profile open cheyakkarledu)
+        for (const btn of buttons) {
+          const text = (btn.textContent || '').trim().toLowerCase();
+          if (text === 'pending') {
+            return { status: 'pending' };
+          }
+        }
+
         return { status: 'no_button' };
       }, emp.url);
 
@@ -420,15 +523,23 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
         console.log('      ⚡ Clicked Connect directly on MongoDB card!');
         connected = await handleConnectionModal(page, name);
       } else if (clickResult.status === 'clicked_more') {
-        await sleep(1500);
+        await sleep(1800);
         const dropdownClicked = await page.evaluate(() => {
-          const items = Array.from(document.querySelectorAll('div[role="button"], button, li, span'));
-          for (const item of items) {
-            const text = (item.textContent || '').trim();
-            const aria = (item.getAttribute('aria-label') || '').toLowerCase();
-            if (text === 'Connect' || (aria.includes('invite') && aria.includes('connect'))) {
-              item.click();
-              return true;
+          // Open ayyina dropdown menus lo matramey vetakali
+          const menus = Array.from(
+            document.querySelectorAll(
+              '.artdeco-dropdown__content.artdeco-dropdown__content--is-open, [role="menu"], .artdeco-dropdown__content--is-open'
+            )
+          );
+          const scopes = menus.length ? menus : Array.from(document.querySelectorAll('.artdeco-dropdown__content, [role="menu"]'));
+          for (const scope of scopes) {
+            const items = Array.from(scope.querySelectorAll('div[role="button"], button, li, span'));
+            for (const item of items) {
+              const text = (item.textContent || '').trim();
+              if (/^connect$/i.test(text)) {
+                item.click();
+                return true;
+              }
             }
           }
           return false;
@@ -445,8 +556,9 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
     }
 
     // Fallback: card lo "Follow"/"Message" matramey untey -> profile open chesi
-    // 3-dots (More) -> Connect -> note -> send, then back to list
-    if (!connected) {
+    // 3-dots (More) -> Connect -> note -> send, then back to list.
+    // "Pending" untey skip — profile open cheyakkarledu.
+    if (!connected && clickResult.status !== 'pending') {
       connected = await connectViaProfilePage(page.browser(), emp.url, name);
     }
 
@@ -456,6 +568,11 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
       sentProfiles.add(name);
       sentProfiles.add(emp.url);
       console.log(`      ✅ [Filter: ${roleKeyword}] (${filterSentCount}/${targetForThisFilter}) SENT NOTE TO ${name}!`);
+    } else if (clickResult.status === 'pending') {
+      console.log(`      ⏸️  ${name} — "Pending" already sent. Profile open cheyaledu, skip.`);
+      failedProfiles.add(name);
+      failedProfiles.add(emp.url);
+      continue;
     } else {
       console.log(`      ⏭️  Skipped ${name} (already connected, pending, or unavailable)`);
       failedProfiles.add(name);
@@ -479,6 +596,15 @@ async function process10ConnectionsForFilter(page, roleKeyword, sentProfiles, fa
 // ============================================
 // 🚀 MAIN EXECUTION
 // ============================================
+
+// Crash resilience: script silent ga die avvakunda, error log chesi continue
+process.on('uncaughtException', (err) => {
+  console.error(`💥 Uncaught Exception (recovering...): ${err.message}`);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(`💥 Unhandled Rejection (recovering...): ${reason}`);
+});
+
 async function main() {
   console.log('');
   console.log('╔═══════════════════════════════════════════════════╗');
@@ -593,5 +719,6 @@ async function main() {
 main().catch((err) => {
   console.error('💥 Fatal Script Error:', err.message);
   console.error(err.stack);
-  process.exit(1);
+  console.log('\n🖥️  Browser open ga untundi. Close cheyandi manual ga.');
+  // Don't exit — browser open ga undali, event loop alive ga untundi
 });
