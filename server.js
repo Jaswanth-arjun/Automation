@@ -103,7 +103,9 @@ app.post('/api/chat', async (req, res) => {
   }
 
   try {
-    const reply = await handleRagChat(message, geminiApiKey);
+    const existingBrowser = (activeTrackerInstance && activeTrackerInstance.browser) ? activeTrackerInstance.browser :
+                            (activeBotInstance && activeBotInstance.browser) ? activeBotInstance.browser : null;
+    const reply = await handleRagChat(message, geminiApiKey, existingBrowser);
     res.json({ reply });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Failed to process RAG chat request' });
