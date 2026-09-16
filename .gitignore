@@ -3,6 +3,8 @@ node_modules/
 
 # Local Chrome profile data & cookies
 .chrome-data/
+.chrome-data-tracker/
+linkdin-automation/
 
 # Environment files
 .env

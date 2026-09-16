@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  linkedin-automation:
+    build: .
+    container_name: linkedin_cloud_bot
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - linkedin_chrome_data:/app/.chrome-data
+      - linkedin_db_data:/app/data
+
+volumes:
+  linkedin_chrome_data:
+  linkedin_db_data:

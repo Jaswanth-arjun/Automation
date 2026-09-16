@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LinkedIn Connect AI Automation</title>
+  <title>LinkedIn Cloud Automation & Status Tracker</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -17,9 +17,20 @@
         <div class="brand-icon">⚡</div>
         <div class="brand-text">
           <h1>LinkedIn Connect AI</h1>
-          <p>Automated Recruitment & Outreach Engine</p>
+          <p>Cloud Background Automation & Status Tracker</p>
         </div>
       </div>
+
+      <!-- Center Navigation Tabs -->
+      <nav class="nav-tabs">
+        <button type="button" class="nav-tab active" data-tab="campaign">
+          <span class="tab-icon">🚀</span> Campaign Launcher
+        </button>
+        <button type="button" class="nav-tab" data-tab="tracker">
+          <span class="tab-icon">📊</span> Status Tracker & Analytics
+        </button>
+      </nav>
+
       <div class="header-status">
         <div id="statusPill" class="status-pill status-idle">
           <span class="status-dot"></span>
@@ -28,190 +39,267 @@
       </div>
     </header>
 
-    <!-- Main Dashboard Grid -->
-    <main class="dashboard-grid">
-      <!-- Left Column: Settings & Configuration -->
-      <section class="card config-card">
-        <div class="card-header">
-          <h2>🎯 Target & Outreach Settings</h2>
-          <p>Configure company, role keywords, note template, and speed.</p>
-        </div>
-
-        <form id="configForm" onsubmit="return false;">
-          <!-- Target Company Input -->
-          <div class="form-group">
-            <label for="companyInput">Target Company Name or LinkedIn URL</label>
-            <div class="input-with-icon">
-              <span class="input-icon">🏢</span>
-              <input
-                type="text"
-                id="companyInput"
-                placeholder="e.g. MongoDB, Microsoft, Google"
-                value="MongoDB"
-                required
-              />
-            </div>
-            <span class="field-hint">Enter company name (e.g. "MongoDB") or paste direct LinkedIn People URL</span>
+    <!-- TAB 1: CAMPAIGN LAUNCHER -->
+    <main class="tab-content active" id="tab-campaign">
+      <div class="dashboard-grid">
+        <!-- Left Column: Settings Form -->
+        <section class="card config-card">
+          <div class="card-header">
+            <h2>🎯 Target & Outreach Settings</h2>
+            <p>Configure target company, role keywords, delays, and personalized message template.</p>
           </div>
 
-          <!-- Role Filter Tags -->
-          <div class="form-group">
-            <label>Target Role Keywords (Filters)</label>
-            <div class="tags-container" id="tagsContainer">
-              <!-- Dynamic tags rendered here -->
+          <form id="configForm" onsubmit="return false;">
+            <!-- Target Company Input -->
+            <div class="form-group">
+              <label for="companyInput">Target Company Name or LinkedIn URL</label>
+              <div class="input-with-icon">
+                <span class="input-icon">🏢</span>
+                <input
+                  type="text"
+                  id="companyInput"
+                  placeholder="e.g. Electronic Arts, MongoDB, Google"
+                  value="Electronic Arts"
+                  required
+                />
+              </div>
+              <span class="field-hint">Enter company name (e.g. "MongoDB") or paste direct LinkedIn People URL</span>
             </div>
-            <div class="tag-input-row">
-              <input type="text" id="roleTagInput" placeholder="Add custom role (e.g. Lead Recruiter)" />
-              <button type="button" class="btn btn-secondary btn-sm" id="addTagBtn">+ Add Role</button>
-            </div>
-            <span class="field-hint">Add or remove roles. Automation navigates each filter sequentially.</span>
-          </div>
 
-          <!-- Target & Speed Settings -->
-          <div class="form-row">
-            <div class="form-group col-half">
-              <label for="connectionsPerFilter">Requests per Role</label>
-              <input type="number" id="connectionsPerFilter" min="1" max="100" value="10" />
+            <!-- Role Filter Tags -->
+            <div class="form-group">
+              <label>Target Role Keywords (Filters)</label>
+              <div class="tags-container" id="tagsContainer">
+                <!-- Dynamic tags rendered here -->
+              </div>
+              <div class="tag-input-row">
+                <input type="text" id="roleTagInput" placeholder="Add custom role (e.g. Lead Recruiter)" />
+                <button type="button" class="btn btn-secondary btn-sm" id="addTagBtn">+ Add Role</button>
+              </div>
+              <span class="field-hint">Automation navigates each filter sequentially and sends connection notes.</span>
             </div>
-            <div class="form-group col-half">
-              <label for="speedPreset">Speed & Safety Preset</label>
-              <select id="speedPreset">
-                <option value="safe" selected>🛡️ Safe (20s - 35s wait)</option>
-                <option value="balanced">⚖️ Balanced (10s - 20s wait)</option>
-                <option value="fast">⚡ Fast (5s - 10s wait)</option>
-                <option value="custom">⚙️ Custom Delay</option>
-              </select>
-            </div>
-          </div>
 
-          <!-- Custom Delay Inputs -->
-          <div class="form-row hidden" id="customDelaysRow">
-            <div class="form-group col-half">
-              <label for="minDelay">Min Delay (sec)</label>
-              <input type="number" id="minDelay" min="1" max="60" value="20" />
+            <!-- Target & Speed Settings -->
+            <div class="form-row">
+              <div class="form-group col-half">
+                <label for="connectionsPerFilter">Requests per Role</label>
+                <input type="number" id="connectionsPerFilter" min="1" max="100" value="10" />
+              </div>
+              <div class="form-group col-half">
+                <label for="speedPreset">Speed & Safety Preset</label>
+                <select id="speedPreset">
+                  <option value="safe" selected>🛡️ Safe (20s - 35s wait)</option>
+                  <option value="balanced">⚖️ Balanced (10s - 20s wait)</option>
+                  <option value="fast">⚡ Fast (5s - 10s wait)</option>
+                  <option value="custom">⚙️ Custom Delay</option>
+                </select>
+              </div>
             </div>
-            <div class="form-group col-half">
-              <label for="maxDelay">Max Delay (sec)</label>
-              <input type="number" id="maxDelay" min="2" max="120" value="35" />
-            </div>
-          </div>
 
-          <!-- Personalized Note Template -->
-          <div class="form-group">
-            <div class="label-with-badge">
-              <label for="connectionNote">Personalized Connection Note</label>
-              <span class="badge-tag">{name} placeholder</span>
+            <!-- Custom Delay Inputs -->
+            <div class="form-row hidden" id="customDelaysRow">
+              <div class="form-group col-half">
+                <label for="minDelay">Min Delay (sec)</label>
+                <input type="number" id="minDelay" min="1" max="60" value="20" />
+              </div>
+              <div class="form-group col-half">
+                <label for="maxDelay">Max Delay (sec)</label>
+                <input type="number" id="maxDelay" min="2" max="120" value="35" />
+              </div>
             </div>
-            <textarea
-              id="connectionNote"
-              rows="3"
-              placeholder="Type message template..."
-            >Hi {name}, I'm a 2027 B.Tech CSE student actively exploring Software Engineering Intern opportunities at MongoDB. I came across the 2027 internship openings and would love to connect and learn more!</textarea>
-          </div>
 
-          <!-- Gemini AI Toggle Card -->
-          <div class="ai-box">
-            <div class="ai-box-header">
-              <div>
-                <span class="ai-title">🤖 Gemini AI Note Personalization</span>
-                <span class="ai-desc">Automatically tailors custom notes per recipient name & headline</span>
+            <!-- Headless Mode Toggle -->
+            <div class="form-group toggle-group">
+              <div class="toggle-label-wrapper">
+                <span class="toggle-title">👻 Run Headlessly in Background</span>
+                <span class="toggle-desc">Hides Chrome window and runs silently in backend</span>
               </div>
               <label class="switch">
-                <input type="checkbox" id="useAINotes" checked />
+                <input type="checkbox" id="headlessMode" checked />
                 <span class="slider round"></span>
               </label>
             </div>
 
-            <div class="api-key-wrapper" id="apiKeyGroup">
-              <label for="geminiApiKey">Gemini API Key (Optional Override)</label>
-              <input type="password" id="geminiApiKey" placeholder="Paste GEMINI_API_KEY (or use .env default)" />
+            <!-- Personalized Note Template -->
+            <div class="form-group">
+              <div class="label-with-badge">
+                <label for="connectionNote">Personalized Connection Note</label>
+                <span class="badge-tag">{name} placeholder</span>
+              </div>
+              <textarea
+                id="connectionNote"
+                rows="3"
+                placeholder="Type message template..."
+              >Hi {name}, I'm a 2027 B.Tech CSE student actively exploring Full Stack Software Engineering Intern opportunities. I came across openings at your company and would love to connect and learn more!</textarea>
+            </div>
+
+            <!-- Gemini AI Toggle Card -->
+            <div class="ai-box">
+              <div class="ai-box-header">
+                <div>
+                  <span class="ai-title">🤖 Gemini AI Note Personalization</span>
+                  <span class="ai-desc">Automatically tailors custom notes per recipient name & headline</span>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="useAINotes" checked />
+                  <span class="slider round"></span>
+                </label>
+              </div>
+
+              <div class="api-key-wrapper" id="apiKeyGroup">
+                <label for="geminiApiKey">Gemini API Key (Optional Override)</label>
+                <input type="password" id="geminiApiKey" placeholder="Paste GEMINI_API_KEY (or use .env default)" />
+              </div>
+            </div>
+
+            <!-- Action Controls -->
+            <div class="action-row">
+              <button type="button" id="startBtn" class="btn btn-primary btn-lg">
+                <span class="btn-icon">🚀</span> Launch Campaign
+              </button>
+              <button type="button" id="stopBtn" class="btn btn-danger btn-lg" disabled>
+                <span class="btn-icon">🛑</span> Stop
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Right Column: Campaign Monitor & Live Console Logs -->
+        <section class="card monitor-card">
+          <div class="card-header">
+            <h2>⚡ Live Campaign Monitor & Console Logs</h2>
+            <p>Real-time campaign progress, role filter execution, and background log console.</p>
+          </div>
+
+          <!-- Progress Bar Section -->
+          <div class="progress-card">
+            <div class="progress-header">
+              <span id="currentRoleText" class="current-role-title">Current Filter: None</span>
+              <span id="progressPercentage" class="progress-pct">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="progressBarFill"></div>
             </div>
           </div>
 
-          <!-- Form Control Actions -->
-          <div class="action-row">
-            <button type="button" id="startBtn" class="btn btn-primary btn-lg">
-              <span class="btn-icon">🚀</span> Start Automation
-            </button>
-            <button type="button" id="stopBtn" class="btn btn-danger btn-lg" disabled>
-              <span class="btn-icon">🛑</span> Stop
+          <!-- Quick Metrics Banner -->
+          <div class="quick-metrics-row">
+            <div class="qm-box">
+              <span class="qm-value" id="qmSent">0</span>
+              <span class="qm-label">Total Sent</span>
+            </div>
+            <div class="qm-box">
+              <span class="qm-value" id="qmAccepted">0</span>
+              <span class="qm-label">Accepted</span>
+            </div>
+            <div class="qm-box">
+              <span class="qm-value" id="qmReplied">0</span>
+              <span class="qm-label">Replies</span>
+            </div>
+          </div>
+
+          <!-- Live Console Terminal -->
+          <div class="terminal-box campaign-terminal">
+            <div class="terminal-bar">
+              <div class="window-buttons">
+                <span class="wb wb-red"></span>
+                <span class="wb wb-yellow"></span>
+                <span class="wb wb-green"></span>
+              </div>
+              <span class="terminal-heading">Live Console Logs & Output</span>
+              <button class="btn-clear" id="clearLogsBtn">Clear Logs</button>
+            </div>
+            <div class="terminal-content" id="terminalBody">
+              <div class="log-entry log-info">
+                <span class="log-time">[00:00:00]</span> Engine ready. Click "Launch Campaign" to start.
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- TAB 2: STATUS TRACKER & ANALYTICS -->
+    <main class="tab-content" id="tab-tracker">
+      <section class="card full-width-card">
+        <div class="card-header header-with-action">
+          <div>
+            <h2>📊 Connection Status & Analytics Dashboard</h2>
+            <p>Track accepted connections, read receipts (seen), replies, and pending invitations across all targeted companies.</p>
+          </div>
+          <div class="header-action-group">
+            <span class="auto-tracker-badge">⚡ 24/7 Auto Tracker: ACTIVE</span>
+            <button type="button" id="syncStatusBtn" class="btn btn-secondary btn-md">
+              <span class="btn-icon">🔄</span> Sync Connection Statuses (Now)
             </button>
           </div>
-        </form>
-      </section>
-
-      <!-- Right Column: Dashboard & Execution Monitor -->
-      <section class="card dashboard-card">
-        <div class="card-header">
-          <h2>📊 Live Execution Dashboard</h2>
-          <p>Monitor real-time progress, console log output, and connection history.</p>
         </div>
 
-        <!-- Metrics Overview Cards -->
-        <div class="metrics-grid">
+        <!-- Metrics Overview Cards (5 Columns) -->
+        <div class="metrics-grid metrics-grid-5">
           <div class="metric-card metric-sent">
             <div class="metric-value" id="metricSent">0</div>
-            <div class="metric-label">NOTES SENT</div>
+            <div class="metric-label">📤 TOTAL SENT</div>
           </div>
-          <div class="metric-card metric-skipped">
-            <div class="metric-value" id="metricSkipped">0</div>
-            <div class="metric-label">PENDING / SKIPPED</div>
+          <div class="metric-card metric-accepted">
+            <div class="metric-value" id="metricAccepted">0</div>
+            <div class="metric-label">✅ ACCEPTED</div>
           </div>
-          <div class="metric-card metric-failed">
-            <div class="metric-value" id="metricFailed">0</div>
-            <div class="metric-label">FAILED / OTHER</div>
+          <div class="metric-card metric-seen">
+            <div class="metric-value" id="metricSeen">0</div>
+            <div class="metric-label">👁️ SEEN (NO REPLY)</div>
           </div>
-          <div class="metric-card metric-target">
-            <div class="metric-value" id="metricTarget">0</div>
-            <div class="metric-label">TOTAL TARGET</div>
+          <div class="metric-card metric-replied">
+            <div class="metric-value" id="metricReplied">0</div>
+            <div class="metric-label">💬 REPLIED</div>
           </div>
-        </div>
-
-        <!-- Live Progress Section -->
-        <div class="progress-card">
-          <div class="progress-header">
-            <span id="currentRoleText" class="current-role-title">Current Filter: None</span>
-            <span id="progressPercentage" class="progress-pct">0%</span>
-          </div>
-          <div class="progress-track">
-            <div class="progress-fill" id="progressBarFill"></div>
+          <div class="metric-card metric-pending">
+            <div class="metric-value" id="metricPending">0</div>
+            <div class="metric-label">⏳ PENDING</div>
           </div>
         </div>
 
-        <!-- Live Console Terminal -->
-        <div class="terminal-box">
-          <div class="terminal-bar">
-            <div class="window-buttons">
-              <span class="wb wb-red"></span>
-              <span class="wb wb-yellow"></span>
-              <span class="wb wb-green"></span>
+        <!-- Tracker Filter Toolbar -->
+        <div class="tracker-toolbar">
+          <div class="filter-controls">
+            <div class="select-wrapper">
+              <label for="companyFilter">🏢 Target Company:</label>
+              <select id="companyFilter">
+                <option value="all">All Companies</option>
+              </select>
             </div>
-            <span class="terminal-heading">Console Output Logs</span>
-            <button class="btn-clear" id="clearLogsBtn" title="Clear console logs">Clear Logs</button>
-          </div>
-          <div class="terminal-content" id="terminalBody">
-            <div class="log-entry log-info">
-              <span class="log-time">[00:00:00]</span> Engine ready. Configure settings and click "Start Automation" to begin.
+            <div class="select-wrapper">
+              <label for="statusFilter">🏷️ Status:</label>
+              <select id="statusFilter">
+                <option value="all">All Statuses</option>
+                <option value="accepted">✅ Accepted</option>
+                <option value="seen">👁️ Seen (No Reply)</option>
+                <option value="replied">💬 Replied</option>
+                <option value="pending">⏳ Pending</option>
+              </select>
             </div>
           </div>
+          <div class="search-wrapper">
+            <input type="text" id="tableSearchInput" placeholder="🔍 Search by name or role..." />
+          </div>
         </div>
 
-        <!-- Sent Connection History Table -->
+        <!-- Expanded Connection History & Status Table -->
         <div class="sent-history-card">
-          <h3>📬 Sent Requests History</h3>
-          <div class="table-container">
+          <div class="table-container full-height-table">
             <table class="history-table">
               <thead>
                 <tr>
-                  <th style="width: 90px;">Time</th>
-                  <th style="width: 150px;">Name</th>
-                  <th style="width: 130px;">Role Filter</th>
-                  <th>Note Preview</th>
+                  <th style="width: 180px;">Person</th>
+                  <th style="width: 140px;">Company</th>
+                  <th style="width: 140px;">Role Filter</th>
+                  <th style="width: 160px;">Status</th>
+                  <th>Note Sent / Reply Snippet</th>
                 </tr>
               </thead>
               <tbody id="sentTableBody">
                 <tr id="emptyTableMsg">
-                  <td colspan="4" class="empty-state">No connection requests sent in this session yet.</td>
+                  <td colspan="5" class="empty-state">No tracked connection requests yet.</td>
                 </tr>
               </tbody>
             </table>
@@ -219,6 +307,53 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- RAG AI Chatbot Bottom-Right Floating Widget -->
+  <div id="ragChatWidget" class="rag-chat-widget">
+    <!-- Floating Trigger Button (Round Circle with AI Icon) -->
+    <button type="button" id="ragChatToggleBtn" class="rag-chat-fab" aria-label="Open RAG AI Assistant" title="Open RAG AI Assistant">
+      <span class="rag-fab-icon">🤖</span>
+    </button>
+
+    <!-- Chat Modal Window -->
+    <div id="ragChatBox" class="rag-chat-box hidden">
+      <div class="rag-chat-header">
+        <div class="rag-header-title">
+          <span class="rag-header-icon">🤖</span>
+          <div>
+            <h3>LinkedIn Connect RAG AI</h3>
+            <span class="rag-status-subtitle">● Live Knowledge & Database Assistant</span>
+          </div>
+        </div>
+        <button type="button" id="ragChatCloseBtn" class="rag-close-btn">&times;</button>
+      </div>
+
+      <!-- Quick Suggestion Pills -->
+      <div class="rag-quick-pills">
+        <button type="button" class="rag-pill-btn" data-query="Who replied to my notes?">💬 Who replied?</button>
+        <button type="button" class="rag-pill-btn" data-query="Show dashboard summary">📊 Summary</button>
+        <button type="button" class="rag-pill-btn" data-query="Did Sushmitha reply?">👤 Sushmitha status</button>
+      </div>
+
+      <!-- Chat Messages Container -->
+      <div id="ragChatMessages" class="rag-chat-messages">
+        <div class="rag-msg rag-msg-bot">
+          <div class="rag-msg-avatar">🤖</div>
+          <div class="rag-msg-bubble">
+            Hello! I am your <b>RAG AI Assistant</b>. Ask me anything about your tracked connections, replies, target companies, or application settings!
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input Area -->
+      <form id="ragChatForm" class="rag-chat-form">
+        <input type="text" id="ragChatInput" placeholder="Ask RAG AI about your data..." autocomplete="off" />
+        <button type="submit" id="ragChatSendBtn" class="btn btn-primary btn-sm">
+          <span>Send</span>
+        </button>
+      </form>
+    </div>
   </div>
 
   <script src="app.js"></script>
