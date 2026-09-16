@@ -1158,6 +1158,21 @@ input:checked + .slider:before { transform: translateX(20px); }
   border-top-right-radius: 4px;
 }
 
+/* Clickable LinkedIn profile links inside RAG chat bubbles */
+.rag-msg-bubble a.rag-profile-link {
+  color: #38bdf8;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(56, 189, 248, 0.5);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.rag-msg-bubble a.rag-profile-link:hover {
+  color: #7dd3fc;
+  border-bottom-color: #7dd3fc;
+  text-decoration: underline;
+}
+
 .rag-chat-form {
   padding: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);

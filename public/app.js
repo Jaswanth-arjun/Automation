@@ -617,9 +617,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const appendRagMessage = (sender, text) => {
     const msgDiv = document.createElement('div');
     msgDiv.className = `rag-msg rag-msg-${sender}`;
-    const formattedText = text
+    const formattedText = escapeHtml(text)
       .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
       .replace(/\*(.*?)\*/g, '<i>$1</i>')
+      // Render markdown links as clickable anchors (open LinkedIn in new tab)
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="rag-profile-link">$1</a>')
       .replace(/\n/g, '<br>');
 
     msgDiv.innerHTML = `
