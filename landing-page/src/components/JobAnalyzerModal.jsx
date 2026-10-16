@@ -8,7 +8,7 @@ import { api, profileStore, resumeStore } from '../lib/api';
 import { adminJobStore } from '../lib/adminJobStore';
 import { DEMO_JOBS } from '../lib/mockData';
 import { shortenJobTitle } from './jobTitle';
-import { mapProfileForBackend, profileResumeText, keywordAudit, scoreValue, scoreLabel } from './JobAnalyzerModal.helpers';
+import { mapProfileForBackend, extractResumeLocation, profileResumeText, keywordAudit, scoreValue, scoreLabel } from './JobAnalyzerModal.helpers';
 import './JobAnalyzerModal.css';
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -117,6 +117,13 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
       if (!originalSourceText) originalSourceText = profileResumeText(rawProfile).trim();
       if (!originalSourceText) {
         throw new Error('Add a readable resume PDF in Profile before tailoring.');
+      }
+      const resumeLocation = extractResumeLocation(originalSourceText, rawProfile.location);
+      if (resumeLocation) {
+        mappedProfile.location = resumeLocation;
+        if (rawProfile.location !== resumeLocation) {
+          profileStore.save({ ...rawProfile, location: resumeLocation });
+        }
       }
 
       const result = await api.tailorExternalJob({

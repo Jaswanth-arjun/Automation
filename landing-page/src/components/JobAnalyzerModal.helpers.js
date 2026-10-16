@@ -10,6 +10,16 @@ export function mapProfileForBackend(profile = {}) {
   return mapped;
 }
 
+export function extractResumeLocation(resumeText, fallback = '') {
+  const lines = String(resumeText || '').replace(/\r/g, '').split('\n').map(line => line.trim()).filter(Boolean);
+  const nameIndex = lines.findIndex(line => /^[A-Za-z][A-Za-z .'-]{2,45}$/.test(line));
+  const candidates = lines.slice(Math.max(0, nameIndex + 1), Math.min(lines.length, (nameIndex >= 0 ? nameIndex + 5 : 5)));
+  return candidates
+    .map(line => line.replace(/[⋄|•]/g, ' ').replace(/\s+/g, ' ').trim())
+    .find(line => /[A-Za-z]/.test(line) && /,/.test(line) && !/@|https?:\/\/|linkedin|github|\+?\d[\d\s().-]{7,}/i.test(line))
+    || (String(fallback || '').length < 90 && !/engineer|developer|rest api|database|software|intern/i.test(fallback) ? fallback : '');
+}
+
 export function profileResumeText(profile = {}) {
   const mapped = mapProfileForBackend(profile);
   return [

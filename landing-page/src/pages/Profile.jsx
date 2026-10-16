@@ -83,7 +83,14 @@ export default function Profile() {
     const topLines = lines.slice(0, 12);
     const nameCandidate = topLines.find(line => /^[A-Za-z][A-Za-z .'-]{2,45}$/.test(line) && !heading.test(line) && !/@|https?:\/\//i.test(line) && !/\d{5,}/.test(line)) || current.fullName;
     const contactLine = lines.find(line => line.includes('@')) || '';
-    const locationCandidate = contactLine.split('|').map(part => part.trim()).filter(Boolean).find(part => /[A-Za-z]/.test(part) && !/@|linkedin|github|\d{5,}/i.test(part)) || current.location || '';
+    // The first line after the candidate name is the most reliable location
+    // source. Do not use the summary/profile text as a location fallback: old
+    // profiles could otherwise save an entire headline as the address.
+    const nameIndex = nameCandidate ? lines.findIndex(line => line === nameCandidate) : -1;
+    const locationFromHeader = lines.slice(Math.max(0, nameIndex + 1), Math.min(lines.length, (nameIndex >= 0 ? nameIndex + 5 : 5)))
+      .map(line => line.replace(/[⋄|•]/g, ' ').replace(/\s+/g, ' ').trim())
+      .find(line => /[A-Za-z]/.test(line) && /,/.test(line) && !/@|https?:\/\/|linkedin|github|\+?\d[\d\s().-]{7,}/i.test(line) && !heading.test(line));
+    const locationCandidate = locationFromHeader || contactLine.split(/[|⋄]/).map(part => part.trim()).filter(Boolean).find(part => /[A-Za-z]/.test(part) && !/@|linkedin|github|\d{5,}/i.test(part)) || (String(current.location || '').length < 90 && !/engineer|developer|rest api|database|software|intern/i.test(current.location) ? current.location : '');
     const skillCatalog = ['JavaScript', 'TypeScript', 'Python', 'SQL', 'Java', 'C', 'React', 'HTML5', 'HTML', 'CSS3', 'CSS', 'Node.js', 'RESTful APIs', 'API Integration', 'Microservices', 'Django', 'Flask', 'Spring Boot', 'PostgreSQL', 'MySQL', 'MongoDB', 'SQL & NoSQL', 'Database Design', 'Query Optimization', 'AWS', 'Git', 'GitHub', 'Docker', 'Postman', 'GitHub Actions', 'VS Code', 'Code Reviews', 'Debugging', 'Unit & Integration Testing', 'Data Structures & Algorithms', 'OOP', 'Generative AI', 'AI Agents', 'Prompt Engineering', 'Agile/Scrum', 'Version Control', 'Technical Documentation', 'Performance Optimization', 'Lazy Loading', 'Code Splitting', 'PHP', 'Flutter', 'CI'];
     const skills = skillCatalog.filter(skill => new RegExp(`(^|[^a-z])${skill.replace(/[.+]/g, '\\$&')}(?=$|[^a-z])`, 'i').test(source));
     const sectionLines = (names) => {
