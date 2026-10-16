@@ -1,0 +1,85 @@
+.job-analyzer-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.job-analyzer-file-box { flex-wrap: wrap; gap: 10px; }
+.job-analyzer-actions { flex-wrap: wrap; }
+.job-analyzer-actions button { min-width: 0; }
+.ats-comparison-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, .8fr) minmax(220px, 1fr);
+  align-items: center;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid #dbe3ee;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+.ats-comparison-side {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.ats-comparison-side.improved {
+  justify-content: flex-end;
+  padding: 8px 14px;
+  border: 1px solid #b7f1df;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #f0fdf9, #f7fffc);
+}
+.ats-comparison-side strong {
+  display: block;
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.2;
+}
+.ats-comparison-side span {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 13px;
+}
+.ats-comparison-side.improved > div:first-child strong { color: #059669; }
+.ats-score-ring {
+  position: relative;
+  display: flex;
+  width: 74px;
+  height: 74px;
+  flex: 0 0 74px;
+  align-items: center;
+  justify-content: center;
+}
+.ats-score-ring strong {
+  position: absolute;
+  color: #0f172a;
+  font-size: 17px;
+}
+.ats-comparison-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #64748b;
+  text-align: center;
+}
+.ats-comparison-message > span {
+  color: #64748b;
+  font-size: 32px;
+  line-height: 1;
+}
+.ats-comparison-message p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+@media (max-width: 700px) {
+  .job-analyzer-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+  .job-analyzer-file-box { align-items: flex-start !important; }
+  .job-analyzer-file-box > div:last-child { width: 100%; }
+  .job-analyzer-file-box > div:last-child button { flex: 1; justify-content: center; }
+  .job-analyzer-actions { flex-direction: column; }
+  .job-analyzer-actions button { width: 100%; }
+  .ats-comparison-card { grid-template-columns: 1fr; gap: 12px; }
+  .ats-comparison-side, .ats-comparison-side.improved { justify-content: space-between; }
+  .ats-comparison-message { justify-content: flex-start; }
+  .ats-comparison-message > span { transform: rotate(90deg); }
+}

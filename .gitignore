@@ -4,11 +4,35 @@ node_modules/
 # Local Chrome profile data & cookies
 .chrome-data/
 .chrome-data-tracker/
+.chrome-data-autoapply/
+.freebuff/
+.opencode/
 linkdin-automation/
+sessions/
+uploads/
+
+# Build & Sensitive Data
+dist/
+build/
+data/gmail_tokens.json
+data/sent_emails.json
+data/user_vault.json
+github-profile/
+temp_scripts/
+HR-Email/backend/__pycache__/
+HR-Email/backend/credentials/
+HR-Email/backend/*.db
+data/employees*.json
+data/master-resume.json
+landing-page/build-*.txt
+landing-page/hamster-loader.mp4
+HAMZO*.html
+data/linkedin-company-slugs.json
 
 # Environment files
 .env
 .env.local
+*.env
 
 # Logs
 *.log

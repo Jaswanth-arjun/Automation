@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ${profileLinkHtml}
           </div>
         </td>
-        <td><strong>${escapeHtml(extractCompanyName(rec.company) || 'MongoDB')}</strong></td>
+        <td><strong>${escapeHtml(extractCompanyName(rec.company) || 'N/A')}</strong></td>
         <td><span class="tag-chip">${escapeHtml(rec.role || 'Outreach')}</span></td>
         <td>${statusBadge}</td>
         <td>
@@ -697,10 +697,369 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ═══════════════════════════════════════════════════════
+  // JOBS BOARD LOGIC
+  // ═══════════════════════════════════════════════════════
+
+  const userSkillsInput = document.getElementById('userSkillsInput');
+  const userExperienceLevel = document.getElementById('userExperienceLevel');
+  const userPreferredMode = document.getElementById('userPreferredMode');
+  const saveProfileBtn = document.getElementById('saveProfileBtn');
+  const jobsGrid = document.getElementById('jobsGrid');
+  const totalJobsBadge = document.getElementById('totalJobsBadge');
+  let boardJobs = [];
+
+  // Load user profile from localStorage
+  function loadUserProfile() {
+    try {
+      const saved = localStorage.getItem('jobs_board_user_profile');
+      if (!saved) return;
+      const profile = JSON.parse(saved);
+      if (userSkillsInput && profile.skills) userSkillsInput.value = profile.skills;
+      if (userExperienceLevel && profile.experience) userExperienceLevel.value = profile.experience;
+      if (userPreferredMode && profile.preferredMode) userPreferredMode.value = profile.preferredMode;
+    } catch {}
+  }
+
+  function saveUserProfile() {
+    try {
+      const profile = {
+        skills: userSkillsInput ? userSkillsInput.value.trim() : '',
+        experience: userExperienceLevel ? userExperienceLevel.value : 'fresher',
+        preferredMode: userPreferredMode ? userPreferredMode.value : 'any',
+      };
+      localStorage.setItem('jobs_board_user_profile', JSON.stringify(profile));
+    } catch {}
+  }
+
+  function getUserProfile() {
+    const raw = userSkillsInput ? userSkillsInput.value.trim() : '';
+    const skills = raw
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean);
+    return {
+      skills,
+      experience: userExperienceLevel ? userExperienceLevel.value : 'fresher',
+      preferredMode: userPreferredMode ? userPreferredMode.value : 'any',
+    };
+  }
+
+  if (saveProfileBtn) {
+    saveProfileBtn.addEventListener('click', () => {
+      saveUserProfile();
+      renderJobsBoard();
+      // Flash feedback
+      saveProfileBtn.innerHTML = '<span class="btn-icon">✅</span> Saved!';
+      setTimeout(() => {
+        saveProfileBtn.innerHTML = '<span class="btn-icon">💾</span> Save Profile';
+      }, 1500);
+    });
+  }
+
+  // ─── Deterministic Match Score Algorithm ───
+  function calculateMatchScore(job, userProfile) {
+    if (!userProfile.skills.length) return 0;
+
+    let score = 0;
+    let maxScore = 0;
+
+    // 1. Must-have skills match (weight: 60%)
+    const mustHave = (job.mustHaveSkills || []).map(s => s.toLowerCase());
+    if (mustHave.length > 0) {
+      maxScore += 60;
+      let matchCount = 0;
+      mustHave.forEach(skill => {
+        if (userProfile.skills.some(us => us.includes(skill) || skill.includes(us))) {
+          matchCount++;
+        }
+      });
+      score += Math.round((matchCount / mustHave.length) * 60);
+    }
+
+    // 2. Good-to-have skills match (weight: 20%)
+    const goodToHave = (job.goodToHaveSkills || []).map(s => s.toLowerCase());
+    if (goodToHave.length > 0) {
+      maxScore += 20;
+      let matchCount = 0;
+      goodToHave.forEach(skill => {
+        if (userProfile.skills.some(us => us.includes(skill) || skill.includes(us))) {
+          matchCount++;
+        }
+      });
+      score += Math.round((matchCount / goodToHave.length) * 20);
+    }
+
+    // 3. Experience level match (weight: 10%)
+    const filters = job.filters || {};
+    maxScore += 10;
+    const experienceFilter = (filters.experience || '').toLowerCase();
+    if (experienceFilter === 'freshers' && userProfile.experience === 'fresher') {
+      score += 10;
+    } else if (experienceFilter !== 'freshers' && userProfile.experience !== 'fresher') {
+      score += 7;
+    } else if (!experienceFilter) {
+      score += 5; // neutral
+    }
+
+    // 4. Work mode preference match (weight: 10%)
+    maxScore += 10;
+    const workMode = (filters.workMode || '').toLowerCase();
+    const preferredMode = userProfile.preferredMode.toLowerCase();
+    if (preferredMode === 'any') {
+      score += 10;
+    } else if (workMode === preferredMode) {
+      score += 10;
+    } else if (workMode === 'remote' || preferredMode === 'remote') {
+      score += 5;
+    }
+
+    // Normalize to 0-100
+    const finalScore = maxScore > 0 ? Math.min(100, Math.round((score / maxScore) * 100)) : 0;
+    return finalScore;
+  }
+
+  // ─── Format Job Description ───
+  function formatJobDescription(text) {
+    if (!text) return '<p>No description provided.</p>';
+
+    const lines = text.split('\n');
+    let html = '';
+    let hashtagBuf = [];
+
+    const headingPatterns = [
+      /^(must have skills|good to have skills|required skills|preferred skills|key responsibilities|about the opportunity|about the company|who can apply|what you will learn|ideal candidate profile|why join|application deadline|similar jobs|about us|our key services|company industry|headquarters|about|company|job type|work mode|location|internship duration|stipend|application deadline|founded in)/i,
+    ];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+
+      if (!line) continue;
+
+      // Hashtag line
+      if (/^#\w/.test(line)) {
+        const tags = line.match(/#\w[\w]*/g) || [];
+        tags.forEach(t => {
+          hashtagBuf.push(`<span class="jd-hashtag">${escapeHtml(t)}</span>`);
+        });
+        continue;
+      }
+
+      // Title header (first line or lines with pipes)
+      if (i === 0 || (i <= 2 && line.includes('|'))) {
+        html += `<div class="jd-header-line">${escapeHtml(line)}</div>`;
+        continue;
+      }
+
+      // Bullet points
+      if (/^[•\-\*]\s/.test(line)) {
+        html += `<div class="jd-bullet">${escapeHtml(line.replace(/^[•\-\*]\s*/, ''))}</div>`;
+        continue;
+      }
+
+      // Headings
+      const cleanLine = line.replace(/:?\s*$/, '');
+      const isHeading = headingPatterns.some(p => p.test(cleanLine)) && line.length < 80;
+      const endsWithColon = line.endsWith(':') && line.length < 80;
+
+      if (isHeading || endsWithColon) {
+        html += `<h3>${escapeHtml(line.replace(/:?\s*$/, ''))}</h3>`;
+        continue;
+      }
+
+      // Meta lines (Key: Value)
+      const metaMatch = line.match(/^([A-Za-z\s\/\u2013\u2014]+):\s*(.+)$/);
+      if (metaMatch && metaMatch[1].length < 35) {
+        html += `<div class="jd-paragraph"><strong>${escapeHtml(metaMatch[1])}:</strong> ${escapeHtml(metaMatch[2])}</div>`;
+        continue;
+      }
+
+      html += `<div class="jd-paragraph">${escapeHtml(line)}</div>`;
+    }
+
+    if (hashtagBuf.length) {
+      html += '<div class="jd-hashtags">' + hashtagBuf.join('') + '</div>';
+    }
+
+    return html;
+  }
+
+  // ─── Get filter chip class ───
+  function getFilterChipClass(value) {
+    const v = (value || '').toLowerCase();
+    if (v.includes('fresher')) return 'chip-freshers';
+    if (v.includes('confidential')) return 'chip-confidential';
+    if (v.includes('remote')) return 'chip-remote';
+    if (v.includes('full time') || v.includes('fulltime') || v.includes('permanent')) return 'chip-fulltime';
+    return 'chip-remote'; // default
+  }
+
+  // ─── Render Jobs Board ───
+  function renderJobsBoard() {
+    if (!jobsGrid) return;
+
+    const profile = getUserProfile();
+
+    if (totalJobsBadge) {
+      totalJobsBadge.textContent = `${boardJobs.length} job${boardJobs.length !== 1 ? 's' : ''}`;
+    }
+
+    if (boardJobs.length === 0) {
+      jobsGrid.innerHTML = `
+        <div class="empty-state">
+          <p>No jobs available yet. Check back soon!</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Calculate scores and sort by score desc (highest match first)
+    const jobsWithScores = boardJobs.map(job => ({
+      ...job,
+      matchScore: calculateMatchScore(job, profile),
+    }));
+    jobsWithScores.sort((a, b) => b.matchScore - a.matchScore);
+
+    jobsGrid.innerHTML = '';
+
+    jobsWithScores.forEach((job) => {
+      const card = document.createElement('div');
+      card.className = 'job-card';
+
+      // Logo
+      const logoHtml = job.logo
+        ? `<img src="${escapeHtml(job.logo)}" alt="${escapeHtml(job.company)}" class="job-card-logo" />`
+        : `<div class="job-card-logo-placeholder">🏢</div>`;
+
+      // Score
+      const score = job.matchScore;
+      const scoreClass = score >= 70 ? 'score-high' : score >= 40 ? 'score-medium' : 'score-low';
+
+      // Filters
+      const filters = job.filters || {};
+      const filterValues = Object.values(filters).filter(Boolean);
+      // Deduplicate filter values
+      const uniqueFilters = [...new Set(filterValues)];
+      const filterChipsHtml = uniqueFilters.map(f =>
+        `<span class="job-filter-chip ${getFilterChipClass(f)}">${escapeHtml(f)}</span>`
+      ).join('');
+
+      // Skills
+      const userSkillsLower = profile.skills;
+      const mustSkillsHtml = (job.mustHaveSkills || []).map(s => {
+        const isMatch = userSkillsLower.some(us => us.includes(s.toLowerCase()) || s.toLowerCase().includes(us));
+        return `<span class="skill-chip skill-chip-must ${isMatch ? 'skill-match' : ''}">${escapeHtml(s)}${isMatch ? ' ✓' : ''}</span>`;
+      }).join('');
+
+      const goodSkillsHtml = (job.goodToHaveSkills || []).map(s => {
+        const isMatch = userSkillsLower.some(us => us.includes(s.toLowerCase()) || s.toLowerCase().includes(us));
+        return `<span class="skill-chip skill-chip-good ${isMatch ? 'skill-match' : ''}">${escapeHtml(s)}${isMatch ? ' ✓' : ''}</span>`;
+      }).join('');
+
+      // Date
+      const posted = job.postedAt ? new Date(job.postedAt).toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'short', year: 'numeric'
+      }) : '';
+
+      // Description formatted
+      const descHtml = formatJobDescription(job.description);
+
+      const jobId = escapeHtml(job.id || Math.random().toString(36).slice(2));
+
+      card.innerHTML = `
+        <!-- Top: Logo + Info + Score -->
+        <div class="job-card-top">
+          ${logoHtml}
+          <div class="job-card-info">
+            <div class="job-card-role">${escapeHtml(job.role)}</div>
+            <div class="job-card-company">${escapeHtml(job.company)}</div>
+            <div class="job-card-date">${posted ? 'Posted: ' + posted : ''}</div>
+          </div>
+          <div class="match-score-circle ${scoreClass}" style="--score-pct: ${score}">
+            <div class="match-score-inner">
+              <span class="user-score-icon">👤</span>
+              <span class="match-score-value">${score}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter Tags -->
+        <div class="job-card-filters">${filterChipsHtml}</div>
+
+        <!-- Skills -->
+        ${mustSkillsHtml ? `
+          <div class="job-card-skills">
+            <div class="skills-section-title">Must Have Skills</div>
+            <div class="skills-chips">${mustSkillsHtml}</div>
+          </div>
+        ` : ''}
+        ${goodSkillsHtml ? `
+          <div class="job-card-skills">
+            <div class="skills-section-title">Good to Have Skills</div>
+            <div class="skills-chips">${goodSkillsHtml}</div>
+          </div>
+        ` : ''}
+
+        <!-- Description Toggle -->
+        <button class="job-card-desc-toggle" data-job-id="${jobId}">
+          📄 View Full Description ▾
+        </button>
+        <div class="job-card-desc-body" id="desc-${jobId}">
+          <div class="job-card-desc-content">${descHtml}</div>
+        </div>
+
+        <!-- Footer: Apply -->
+        <div class="job-card-footer">
+          <span class="job-card-posted-label">${posted ? '📅 ' + posted : ''}</span>
+          <a href="${escapeHtml(job.applyLink)}" target="_blank" rel="noopener noreferrer" class="btn-apply">
+            <span class="btn-apply-icon">🚀</span> Apply Now
+          </a>
+        </div>
+      `;
+
+      jobsGrid.appendChild(card);
+    });
+
+    // Description toggle handlers
+    document.querySelectorAll('.job-card-desc-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.jobId;
+        const body = document.getElementById(`desc-${id}`);
+        if (body) {
+          body.classList.toggle('expanded');
+          btn.textContent = body.classList.contains('expanded')
+            ? '📄 Hide Description ▴'
+            : '📄 View Full Description ▾';
+        }
+      });
+    });
+  }
+
+  // Fetch jobs for the board
+  async function fetchBoardJobs() {
+    try {
+      const res = await fetch('/api/jobs');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        boardJobs = data;
+        renderJobsBoard();
+      }
+    } catch (err) {
+      console.warn('Failed to fetch board jobs:', err.message);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // END JOBS BOARD LOGIC
+  // ═══════════════════════════════════════════════════════
+
   // Initialize
   loadFormState();
   renderTags();
+  loadUserProfile();
   initWebSocket();
   fetchConnections();
   fetchAnalytics();
+  fetchBoardJobs();
 });

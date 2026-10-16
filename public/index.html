@@ -29,6 +29,9 @@
         <button type="button" class="nav-tab" data-tab="tracker">
           <span class="tab-icon">📊</span> Status Tracker & Analytics
         </button>
+        <button type="button" class="nav-tab" data-tab="jobs">
+          <span class="tab-icon">💼</span> Jobs Board
+        </button>
       </nav>
 
       <div class="header-status">
@@ -58,12 +61,12 @@
                 <input
                   type="text"
                   id="companyInput"
-                  placeholder="e.g. Electronic Arts, MongoDB, Google"
-                  value="Electronic Arts"
+                  placeholder="e.g. Google, Microsoft, Electronic Arts"
+                  value=""
                   required
                 />
               </div>
-              <span class="field-hint">Enter company name (e.g. "MongoDB") or paste direct LinkedIn People URL</span>
+              <span class="field-hint">Enter target company name or paste direct LinkedIn People URL</span>
             </div>
 
             <!-- Role Filter Tags -->
@@ -303,6 +306,59 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- TAB 3: JOBS BOARD -->
+    <main class="tab-content" id="tab-jobs">
+      <!-- User Profile Mini-Form for Match Score -->
+      <section class="card user-profile-card">
+        <div class="card-header header-with-action">
+          <div>
+            <h2>👤 Your Profile (for Job Match Score)</h2>
+            <p>Enter your skills and preferences to see how well each job matches you.</p>
+          </div>
+          <button type="button" id="saveProfileBtn" class="btn btn-primary btn-sm">
+            <span class="btn-icon">💾</span> Save Profile
+          </button>
+        </div>
+        <div class="profile-form-grid">
+          <div class="form-group">
+            <label for="userSkillsInput">Your Skills (comma-separated)</label>
+            <input type="text" id="userSkillsInput" placeholder="e.g. Python, Node.js, SQL, Flask, React" />
+          </div>
+          <div class="form-group">
+            <label for="userExperienceLevel">Experience Level</label>
+            <select id="userExperienceLevel">
+              <option value="fresher">Fresher / Entry Level</option>
+              <option value="junior">Junior (1-2 years)</option>
+              <option value="mid">Mid-Level (3-5 years)</option>
+              <option value="senior">Senior (5+ years)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="userPreferredMode">Preferred Work Mode</label>
+            <select id="userPreferredMode">
+              <option value="any">Any</option>
+              <option value="Remote">Remote</option>
+              <option value="Hybrid">Hybrid</option>
+              <option value="Onsite">Onsite</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Jobs Grid -->
+      <section class="jobs-board-section">
+        <div class="jobs-board-header">
+          <h2>🔥 Latest Job Openings</h2>
+          <span class="jobs-total-badge" id="totalJobsBadge">0 jobs</span>
+        </div>
+        <div class="jobs-grid" id="jobsGrid">
+          <div class="empty-state" id="noJobsBoardMsg">
+            <p>No jobs available yet. Check back soon!</p>
           </div>
         </div>
       </section>

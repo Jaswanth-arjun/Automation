@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Posting Admin Dashboard</title>
+  <meta name="description" content="Admin panel to create and manage job postings for the Jobs Board." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div class="admin-container">
+    <!-- Header -->
+    <header class="admin-header">
+      <div class="brand">
+        <div class="brand-icon">📋</div>
+        <div class="brand-text">
+          <h1>Job Posting Dashboard</h1>
+          <p>Create & manage job listings for the Jobs Board</p>
+        </div>
+      </div>
+      <a href="/" class="btn btn-outline btn-sm" id="backToDashboardBtn">
+        <span>←</span> Back to Main Dashboard
+      </a>
+    </header>
+
+    <div class="admin-grid">
+      <!-- Left Column: Post Job Form -->
+      <section class="card post-card">
+        <div class="card-header">
+          <h2>✏️ Create New Job Posting</h2>
+          <p>Fill in the job details below. The posting will appear on the user Jobs Board instantly.</p>
+        </div>
+
+        <form id="postJobForm" onsubmit="return false;">
+          <!-- Company Logo -->
+          <div class="form-group">
+            <label for="logoUpload">Company Logo</label>
+            <div class="logo-upload-area" id="logoDropZone">
+              <input type="file" id="logoUpload" accept="image/*" hidden />
+              <div class="logo-preview-wrap" id="logoPreviewWrap">
+                <img id="logoPreview" src="" alt="Logo Preview" class="logo-preview-img hidden" />
+                <div id="logoPlaceholder" class="logo-placeholder">
+                  <span class="logo-placeholder-icon">🏢</span>
+                  <span>Click or drag to upload logo</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Role -->
+          <div class="form-group">
+            <label for="jobRole">Job Role / Title</label>
+            <input type="text" id="jobRole" placeholder="e.g. Backend Developer Intern" required />
+          </div>
+
+          <!-- Company Name -->
+          <div class="form-group">
+            <label for="jobCompany">Company Name</label>
+            <input type="text" id="jobCompany" placeholder="e.g. Crossing Infotech" required />
+          </div>
+
+          <!-- 4 Filter Dropdowns -->
+          <div class="form-row">
+            <div class="form-group col-half">
+              <label for="filterExperience">Experience Level</label>
+              <select id="filterExperience">
+                <option value="Freshers">Freshers</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Remote">Remote</option>
+                <option value="Full time Permanent Position">Full time Permanent Position</option>
+              </select>
+            </div>
+            <div class="form-group col-half">
+              <label for="filterVisibility">Visibility</label>
+              <select id="filterVisibility">
+                <option value="Freshers">Freshers</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Remote">Remote</option>
+                <option value="Full time Permanent Position">Full time Permanent Position</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group col-half">
+              <label for="filterWorkMode">Work Mode</label>
+              <select id="filterWorkMode">
+                <option value="Freshers">Freshers</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Remote" selected>Remote</option>
+                <option value="Full time Permanent Position">Full time Permanent Position</option>
+              </select>
+            </div>
+            <div class="form-group col-half">
+              <label for="filterType">Job Type</label>
+              <select id="filterType">
+                <option value="Freshers">Freshers</option>
+                <option value="Confidential">Confidential</option>
+                <option value="Remote">Remote</option>
+                <option value="Full time Permanent Position" selected>Full time Permanent Position</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Must Have Skills -->
+          <div class="form-group">
+            <label>Must Have Skills</label>
+            <div class="skills-input-area">
+              <div class="tags-container" id="mustHaveTagsContainer"></div>
+              <div class="tag-input-row">
+                <input type="text" id="mustHaveSkillInput" placeholder="e.g. Python, Node.js" />
+                <button type="button" class="btn btn-secondary btn-sm" id="addMustHaveBtn">+ Add</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Good to Have Skills -->
+          <div class="form-group">
+            <label>Good to Have Skills</label>
+            <div class="skills-input-area">
+              <div class="tags-container" id="goodToHaveTagsContainer"></div>
+              <div class="tag-input-row">
+                <input type="text" id="goodToHaveSkillInput" placeholder="e.g. Express.js, Flask" />
+                <button type="button" class="btn btn-secondary btn-sm" id="addGoodToHaveBtn">+ Add</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Apply Link -->
+          <div class="form-group">
+            <label for="applyLink">Apply Link (URL)</label>
+            <input type="url" id="applyLink" placeholder="https://example.com/apply" required />
+            <span class="field-hint">Users will be redirected to this URL when they click "Apply".</span>
+          </div>
+
+          <!-- Job Description -->
+          <div class="form-group">
+            <label for="jobDescription">Job Description</label>
+            <span class="field-hint" style="margin-bottom:8px;">Use headings like <b>"About the opportunity"</b>, <b>"Key responsibilities"</b>, <b>"Required skills"</b>, etc. Bullet points start with •</span>
+            <textarea id="jobDescription" rows="16" placeholder="Paste or type the full job description here...&#10;&#10;Backend Developer Intern | Entry Level | Fresher&#10;&#10;Company: Crossing Infotech&#10;&#10;Job Type: Full-time Internship&#10;&#10;About the opportunity&#10;...&#10;&#10;Key responsibilities&#10;• Assist with developing backend features&#10;• Write server-side code using Python, Node.js&#10;..."></textarea>
+          </div>
+
+          <!-- Description Preview -->
+          <div class="form-group">
+            <label>📄 Live Description Preview</label>
+            <div class="description-preview-box" id="descriptionPreview">
+              <p class="preview-placeholder">Start typing in the description field to see a live preview...</p>
+            </div>
+          </div>
+
+          <!-- Submit -->
+          <div class="action-row">
+            <button type="button" id="postJobBtn" class="btn btn-primary btn-lg">
+              <span class="btn-icon">🚀</span> Post Job
+            </button>
+            <button type="button" id="clearFormBtn" class="btn btn-danger btn-lg">
+              <span class="btn-icon">🗑️</span> Clear
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Right Column: Posted Jobs List -->
+      <section class="card jobs-list-card">
+        <div class="card-header">
+          <h2>📌 All Posted Jobs</h2>
+          <p>Manage your existing job postings. Click delete to remove a posting.</p>
+        </div>
+
+        <div class="posted-jobs-count">
+          <span id="jobsCountBadge">0</span> active job postings
+        </div>
+
+        <div class="posted-jobs-list" id="postedJobsList">
+          <div class="empty-state" id="noJobsMsg">
+            <span class="empty-icon">📭</span>
+            <p>No jobs posted yet. Create your first job posting!</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toastNotification" class="toast hidden">
+    <span id="toastMessage"></span>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>

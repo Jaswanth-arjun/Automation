@@ -1,16 +1,42 @@
 version: '3.8'
 
 services:
+  freellmapi:
+    image: ghcr.io/tashfeenahmed/freellmapi:latest
+    container_name: freellmapi_gateway
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      # Reuse the local FreeLLMAPI database, including its encrypted provider keys.
+      - ../freellmapi/server/data:/app/server/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/ping').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+
   linkedin-automation:
     build: .
     container_name: linkedin_cloud_bot
     restart: always
+    depends_on:
+      freellmapi:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - NODE_ENV=production
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Containers use the Compose service name, not localhost.
+      - FREELLMAPI_BASE_URL=http://freellmapi:3001/v1
+      - FREELLMAPI_KEY=${FREELLMAPI_KEY}
+      - FREELLMAPI_MODEL=${FREELLMAPI_MODEL:-auto}
     volumes:
       - linkedin_chrome_data:/app/.chrome-data
       - linkedin_db_data:/app/data
