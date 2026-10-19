@@ -87,6 +87,7 @@ export const api = {
   deleteEmployee: (id) => apiFetch('', `/api/employees/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getSentEmails: () => apiFetch('', '/api/sent-emails'),
   tailorExternalJob: (payload) => apiFetch('', '/api/external-job/tailor', { method: 'POST', body: JSON.stringify(payload) }),
+  renderEditedResumePdf: (html) => apiFetch('', '/api/resume/render-edited-pdf', { method: 'POST', body: JSON.stringify({ html }) }),
 
   // Auto-Apply (Puppeteer engine)
   autoApply: (payload) => apiFetch('', '/api/auto-apply', { method: 'POST', body: JSON.stringify(payload) }),

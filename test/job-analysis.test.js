@@ -27,6 +27,22 @@ test('keyword matching uses boundaries and aliases for short technical names', (
   assert.equal(calculateKeywordCoverage([], '', '').hasRequirements, false);
 });
 
+test('short keywords do not match inside unrelated words and aliases provide evidence', () => {
+  const google = calculateKeywordCoverage(['Go'], '', 'Google Cloud and algorithms');
+  assert.deepEqual(google.matchedKeywordsAfter, []);
+  assert.deepEqual(google.missingKeywords, ['Go']);
+  const golang = calculateKeywordCoverage(['Go'], '', 'Built services with Golang');
+  assert.deepEqual(golang.matchedKeywordsAfter, ['Go']);
+  assert.match(golang.evidence.Go.after, /Golang/);
+});
+
+test('ATS estimate keeps an uncertainty margin and never reports 100%', () => {
+  const score = calculateKeywordCoverage(['C++', 'REST'], 'C++ REST', 'C++ REST');
+  assert.equal(score.beforeScore, 97);
+  assert.equal(score.afterScore, 97);
+  assert.equal(score.scoreCap, 97);
+});
+
 test('invalid model output is rejected instead of fabricated', () => {
   assert.throws(() => validateTailoredResume({ skills: [] }), /invalid resume/);
   assert.throws(() => validateTailoredResume({ summary: 'ok', skills: [], projects: 'fake' }), /invalid projects/);

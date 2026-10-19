@@ -1,5 +1,8 @@
 export function mapProfileForBackend(profile = {}) {
   const mapped = { ...profile };
+  if (profile.resume?.links?.length) {
+    mapped.resume = { ...(mapped.resume || {}), links: [...new Set(profile.resume.links.filter(Boolean))] };
+  }
   if (profile.education?.length) mapped.education = profile.education.map((e) => ({ degree: [e.degree, e.branch].filter(Boolean).join(' in '), school: e.institution || e.school || '', dates: e.graduationYear || e.dates || '', detail: e.cgpa ? `CGPA: ${e.cgpa}` : (e.detail || '') }));
   if (profile.experience?.length) mapped.experience = profile.experience.map((e) => ({ title: e.title || '', company: e.company || '', dates: e.duration || e.dates || '', description: e.description || '', detail: e.description || e.detail || '' }));
   if (profile.projects?.length) mapped.projects = profile.projects.map((p) => ({ name: p.title || p.name || '', stack: p.technologies || p.stack || '', url: p.link || p.url || '', detail: p.description || p.detail || '', linkLabel: (p.link || p.url) ? 'GitHub' : '' }));

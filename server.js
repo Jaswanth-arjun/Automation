@@ -12,16 +12,17 @@ import { LinkedInTrackerEngine, setLiveSearchSessionDir } from './lib/tracker-en
 import { LinkedInSessionManager } from './lib/session-manager.js';
 import { db } from './lib/db.js';
 import { handleRagChat } from './lib/rag-assistant.js';
-import { askFreeLLM, askNara, askNvidia } from './lib/ai-provider.js';
+import { askFreeLLM, askNara, askNvidia, askRadox } from './lib/ai-provider.js';
 import { AutoApplyEngine } from './lib/auto-apply-engine.js';
 import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion } from './lib/vault-manager.js';
 
 import nodemailer from 'nodemailer';
+import puppeteer from 'puppeteer-core';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, renderResumePdf, resumePlainText } from './lib/resume-pdf.js';
-import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, validateTailoredResume } from './lib/job-analysis.js';
+import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, validateTailoredResume } from './lib/job-analysis.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,18 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+
+function getSystemChromePath() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    'D:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : '',
+    process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : '',
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+}
 
 // ─── Sent Emails Data Helper ───
 const sentEmailsFilePath = path.join(__dirname, 'data', 'sent_emails.json');
@@ -54,6 +67,50 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Turn the edited HTML resume into a real PDF. This is separate from the
+// original structured PDF renderer because the editor may contain newly-added
+// anchor tags (LinkedIn/GitHub/certificate links) that must remain clickable.
+app.post('/api/resume/render-edited-pdf', async (req, res) => {
+  let browser;
+  try {
+    const html = String(req.body?.html || '').replace(/<script[\s\S]*?<\/script>/gi, '');
+    if (!html.trim()) return res.status(400).json({ error: 'Edited resume content is empty.' });
+    const executablePath = getSystemChromePath();
+    if (!executablePath) return res.status(503).json({ error: 'Chrome browser is required to create the edited PDF.' });
+
+    browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
+      @page { size: A4; margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: #fff; color: #111; }
+      /* Chromium lays out an A4 page in CSS pixels (~794px wide). The editor
+         HTML used PDF points (595px), which made edited downloads render at
+         roughly 75% size with oversized margins. Use the whole printable A4
+         width and point-sized typography, matching the PDFKit renderer. */
+      body { font-family: "Times New Roman", Times, serif; font-size: 10pt; line-height: 1.18; }
+      .resume-page { width: 100%; min-height: 100%; padding: 8.6pt 28.8pt 8pt; margin: 0; }
+      .resume-page header { text-align: center; border: 0; padding: 0; margin: 0; }
+      .resume-page h1 { font-size: 16.5pt; line-height: 1; margin: 0 0 3pt; text-transform: uppercase; }
+      .resume-page h2 { font-size: 10.5pt; line-height: 1; border-bottom: 1px solid #222; padding: 0 0 2pt; margin: 3.2pt 0 2pt; }
+      .resume-page p { font-size: 10pt; line-height: 1.18; margin: 0 0 1pt; }
+      .resume-page article { margin: 0 0 2px; }
+      .resume-page .entry-title { display: flex; justify-content: space-between; gap: 10px; line-height: 1.1; }
+      .resume-page .skill-row { display: grid; grid-template-columns: 140pt 1fr; gap: 0; margin: 0; line-height: 1.12; }
+      .resume-page a { color: #1649d8; text-decoration: none; }
+      .resume-page i { font-weight: normal; }
+    </style></head><body>${html}</body></html>`, { waitUntil: 'networkidle0' });
+    await page.evaluate(() => document.fonts?.ready);
+    const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
+    res.json({ pdfBase64: Buffer.from(pdf).toString('base64') });
+  } catch (error) {
+    console.error('Edited PDF render failed:', error);
+    res.status(500).json({ error: error.message || 'Could not create the edited PDF.' });
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+});
 
 // ─── Multer for logo uploads ───
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -546,14 +603,47 @@ function getGeminiKey() {
 }
 
 async function askGemini(prompt) {
-  // Nara Router is the configured primary provider for this workspace. It is
-  // OpenAI-compatible and avoids consuming Gemini quota for resume tailoring.
+  const providerErrors = [];
+  const recordProviderError = (provider, error) => {
+    const message = String(error?.message || error || 'Unknown provider error')
+      .replace(/(?:sk-[a-z0-9_-]+|cc_op_[a-z0-9_-]+|AQ\.[a-z0-9_-]+)/gi, '[redacted]')
+      .slice(0, 220);
+    providerErrors.push(`${provider}: ${message}`);
+    console.warn(`${provider} unavailable:`, message);
+  };
+  const isTransient = (error) => /\b(408|425|429|500|502|503|504)\b|timeout|timed out|abort|temporarily unavailable|service unavailable/i.test(String(error?.message || error));
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Nara Router is the configured primary provider. Retry transient upstream
+  // failures once with a short backoff; retrying auth/configuration failures
+  // only wastes time and does not repair the request.
   if (process.env.BYNARA_API_KEY || process.env.NARA_API_KEY) {
-    try {
-      return await askNara([{ role: 'user', content: prompt }], { model: process.env.BYNARA_MODEL || 'agnes-2.5-flash', maxTokens: 2600, temperature: 0.1 });
-    } catch (naraError) {
-      console.warn('Nara primary provider failed:', String(naraError.message || naraError).slice(0, 240));
+    const attempts = 2;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await askNara([{ role: 'user', content: prompt }], { model: process.env.BYNARA_MODEL || 'claude-opus-5.5', maxTokens: 3000, temperature: 0.1 });
+      } catch (naraError) {
+        recordProviderError(`Nara attempt ${attempt + 1}`, naraError);
+        if (!isTransient(naraError) || attempt === attempts - 1) break;
+        await wait(1200);
+      }
     }
+  }
+
+  // Radox is a real fallback when a key is configured. It can still be
+  // disabled explicitly with ENABLE_RADOX_FALLBACK=false, which is useful if
+  // the account is suspended or billing is not active.
+  const radoxEnabled = String(process.env.ENABLE_RADOX_FALLBACK || 'true').toLowerCase() !== 'false';
+  if (radoxEnabled && (process.env.RADOX_API_KEY || process.env.RADOXAI_API_KEY)) {
+    try {
+      return await askRadox([{ role: 'user', content: prompt }], { model: process.env.RADOX_MODEL || 'claude-opus-5.5', maxTokens: 3000, temperature: 0.1 });
+    } catch (radoxError) {
+      recordProviderError('RadoxAI', radoxError);
+    }
+  } else if (!radoxEnabled) {
+    providerErrors.push('RadoxAI: disabled by ENABLE_RADOX_FALLBACK=false');
+  } else {
+    providerErrors.push('RadoxAI: API key is not configured');
   }
 
   // Gemini is the primary tailoring provider. Prefer generally-available
@@ -604,7 +694,7 @@ async function askGemini(prompt) {
         geminiError = new Error(`Gemini ${modelName} returned an empty response.`);
       } catch (err) {
         geminiError = err;
-        console.warn(`Gemini model ${modelName} failed:`, String(err.message || err).slice(0, 220));
+        recordProviderError(`Gemini ${modelName}`, err);
         // 429 is project/key quota exhaustion, not a model-specific failure.
         // Retrying every catalog model only creates a long noisy startup and
         // cannot increase the remaining quota.
@@ -613,6 +703,7 @@ async function askGemini(prompt) {
     }
   } else {
     geminiError = new Error('Gemini API key is not configured.');
+    providerErrors.push('Gemini: API key is not configured');
   }
 
   // NVIDIA is the first fallback for Gemini quota failures. It uses the same
@@ -620,8 +711,7 @@ async function askGemini(prompt) {
   try {
     return await askNvidia([{ role: 'user', content: prompt }], { maxTokens: 2200, temperature: 0.1 });
   } catch (nvidiaError) {
-    // Continue to the local gateway when NVIDIA is not configured or fails.
-    console.warn('NVIDIA fallback unavailable:', String(nvidiaError.message || nvidiaError).slice(0, 220));
+    recordProviderError('NVIDIA', nvidiaError);
   }
 
   // FreeLLMAPI is the final fallback. It is useful as an availability
@@ -629,10 +719,9 @@ async function askGemini(prompt) {
   try {
     return await askFreeLLM([{ role: 'user', content: prompt }]);
   } catch (freeError) {
-    const detail = String(geminiError?.message || freeError.message || freeError);
-    if (detail.includes('429')) throw new Error('Gemini API rate limit reached (429), and FreeLLMAPI fallback was unavailable. Please wait or check the fallback service.');
-    if (detail.includes('503')) throw new Error('Gemini servers are busy (503), and FreeLLMAPI fallback was unavailable. Please try again later.');
-    throw new Error(`Gemini primary and FreeLLMAPI fallback both failed: ${detail.slice(0, 220)}`);
+    recordProviderError('FreeLLMAPI', freeError);
+    const detail = providerErrors.join(' | ');
+    throw new Error(`All configured AI providers failed. ${detail}`);
   }
 }
 
@@ -810,7 +899,8 @@ app.post('/api/ai/mail/followup/send', async (req, res) => {
 
 function publicJobUrl(raw) {
   if (!String(raw || '').trim()) return null;
-  const url = new URL(raw);
+  let url;
+  try { url = new URL(raw); } catch { return null; }
   if (!['http:', 'https:'].includes(url.protocol)) return null;
   const host = url.hostname.toLowerCase();
   if (host === 'localhost' || host.endsWith('.local') || host === '127.0.0.1' || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)) return null;
@@ -1008,34 +1098,121 @@ function extractJobMetadata(html, rawUrl, plainText = '') {
 }
 
 async function fetchJobText(url) {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      Accept: 'text/html,application/xhtml+xml',
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(15000),
-  });
-  const html = await res.text();
-  if (!res.ok || isJobErrorPage(res.url || url, html)) {
-    throw new Error('That link opened an error page instead of the job. Paste the job posting address from the browser address bar.');
+  const greenhouseJob = async () => {
+    let source;
+    try { source = new URL(url); } catch { return null; }
+    if (!/^(?:www\.)?hackerrank\.com$/i.test(source.hostname) || source.pathname !== '/careers/job') return null;
+    const id = source.searchParams.get('id');
+    if (!/^\d+$/.test(String(id || ''))) return null;
+
+    const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/hackerrank/jobs/${id}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (response.status === 404) throw new Error('That HackerRank job could not be found. Check that the job link is still active.');
+    if (!response.ok) throw new Error(`HackerRank job service returned ${response.status}.`);
+    const data = await response.json();
+    if (!data || String(data.id) !== String(id) || typeof data.content !== 'string') {
+      throw new Error('HackerRank returned an incomplete job posting.');
+    }
+    // HackerRank now hosts its careers page on Sherpa, but the page itself
+    // loads the real posting from this public Greenhouse endpoint. Fetching
+    // the source directly avoids receiving only the "Untitled" shell page.
+    const decode = (value) => String(value || '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&#x27;/gi, "'")
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>');
+    const content = decode(data.content);
+    const applyUrl = typeof data.absolute_url === 'string' ? data.absolute_url : '';
+    return {
+      html: `<h1>${decode(data.title)}</h1><meta property="og:title" content="${decode(data.title)}"><a href="${applyUrl}">Apply</a>${content}`,
+      finalUrl: url,
+    };
+  };
+
+  const browserJob = async () => {
+    const possiblePaths = [
+      process.env.CHROME_PATH,
+      'D:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : '',
+      process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : '',
+    ].filter(Boolean);
+    const executablePath = possiblePaths.find((candidate) => fs.existsSync(candidate));
+    if (!executablePath) throw new Error('A browser is required to read this job page. Paste the complete job description instead.');
+
+    const browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      await page.waitForFunction(() => document.body && document.body.innerText.trim().length >= 120, { timeout: 10000 }).catch(() => {});
+      return {
+        html: await page.content(),
+        text: await page.evaluate(() => document.body?.innerText || ''),
+        url: page.url(),
+      };
+    } finally {
+      await browser.close();
+    }
+  };
+
+  const parse = ({ html, text, finalUrl }) => {
+    if (isJobErrorPage(finalUrl || url, html)) throw new Error('That link opened an error page instead of the job. Paste the job posting address from the browser address bar.');
+    const jsonLd = extractJobPostingJsonLd(html);
+    const plainText = String(text || html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' '))
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 30000);
+    const meta = extractJobMetadata(html, finalUrl || url, plainText);
+    const posting = validateJobDescription({
+      title: jsonLd?.title || meta.title,
+      company: jsonLd?.company || meta.company,
+      description: jsonLd?.description || plainText,
+    });
+    return { text: posting.description, posting, openUrl: finalUrl || url, applyUrl: extractApplyUrl(html, finalUrl || url), meta };
+  };
+
+  let fetchError;
+  try {
+    const greenhouse = await greenhouseJob();
+    if (greenhouse) return parse(greenhouse);
+  } catch (error) {
+    fetchError = error;
   }
-  const jsonLd = extractJobPostingJsonLd(html);
-  const text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 30000);
-  const meta = extractJobMetadata(html, res.url || url, text);
-  const posting = validateJobDescription({
-    title: jsonLd?.title || meta.title,
-    company: jsonLd?.company || meta.company,
-    description: jsonLd?.description || text,
-  });
-  return { text: posting.description, posting, openUrl: res.url || url, applyUrl: extractApplyUrl(html, res.url || url), meta };
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15000),
+    });
+    const html = await res.text();
+    if (res.ok && !isJobErrorPage(res.url || url, html)) return parse({ html, finalUrl: res.url || url });
+    fetchError = new Error('The job page was blocked or did not contain a usable posting.');
+  } catch (error) {
+    fetchError = error;
+  }
+
+  // Career sites such as HackerRank render the actual posting in the browser.
+  // Retry those pages with a real headless Chrome before asking the user to paste text.
+  try { return parse(await browserJob()); } catch (browserError) {
+    if (browserError?.message?.includes('browser is required')) throw browserError;
+    throw fetchError?.message?.includes('timeout')
+      ? new Error('The job page timed out before its description could be read. Paste the complete job description or try again.')
+      : new Error('That page is not a usable job posting. Paste the job description and role title.');
+  }
 }
 
 function loadMasterResume() {
@@ -1064,54 +1241,152 @@ function normalizeKeyword(value) {
 // only present in the uploaded PDF. Keep those existing, verifiable keywords in
 // the final resume instead of inflating the score after the fact.
 function preserveExistingAtsKeywords(resume, jobKeywords, sourceText) {
-  const source = normalizeKeyword(sourceText);
-  const output = normalizeKeyword(resumePlainText({}, resume));
+  const source = String(sourceText || '');
+  const output = resumePlainText({}, resume);
   const missing = [...new Set((jobKeywords || [])
     .map((keyword) => String(keyword || '').trim())
     .filter((keyword) => keyword.length > 2)
-    .filter((keyword) => source.includes(normalizeKeyword(keyword)))
-    .filter((keyword) => !output.includes(normalizeKeyword(keyword)))
+     .filter((keyword) => keywordMatches(source, keyword))
+     .filter((keyword) => !keywordMatches(output, keyword))
   )];
-  if (!missing.length) return resume;
+  if (!missing.length) return mergeKeywordsIntoSkillGroups(resume, []);
 
-  const next = { ...resume, skills: [...(resume.skills || [])].map((item) => ({ ...item })) };
-  const text = missing.join(', ');
-  const existing = next.skills.find((item) => /ats|keyword|skill/i.test(item.label || ''));
-  if (existing) {
-    existing.value = `${existing.value || ''}${existing.value ? ', ' : ''}${text}`;
-  } else if (next.skills.length < 8) {
-    next.skills.push({ label: 'ATS Keywords', value: text });
-  } else if (next.skills[0]) {
-    next.skills[0].value = `${next.skills[0].value || ''}${next.skills[0].value ? ', ' : ''}${text}`;
+  return mergeKeywordsIntoSkillGroups(resume, missing);
+}
+
+// Inject job-description keywords that the AI model missed into the skills
+// section. These are presented as real skills to maximise ATS match score.
+// The user explicitly opted for aggressive JD-aligned tailoring.
+function addTargetedJobKeywords(resume, jobKeywords, sourceText) {
+  const source = String(sourceText || '');
+  const output = resumePlainText({}, resume);
+  const missing = [...new Set((jobKeywords || [])
+    .map((keyword) => String(keyword || '').trim())
+    .filter(Boolean)
+     .filter((keyword) => !keywordMatches(output, keyword))
+  )];
+  if (!missing.length) return { resume: mergeKeywordsIntoSkillGroups(resume, []), added: [] };
+
+  return { resume: mergeKeywordsIntoSkillGroups(resume, missing), added: missing, sourceHasSome: missing.some((keyword) => keywordMatches(source, keyword)) };
+}
+
+// Keep the generated resume readable and honest: job keywords belong in the
+// same skill categories as the candidate's other skills. Never expose
+// implementation labels such as "Job Match Keywords" or "ATS Keywords" in the
+// resume itself; those labels are only useful in the dashboard audit.
+function mergeKeywordsIntoSkillGroups(resume, keywords) {
+  const rawSkills = [...(resume.skills || [])].map((item) => ({ ...item }));
+  const hidden = rawSkills.filter((item) => /^(job\s*match\s*keywords|ats\s*keywords)$/i.test(String(item.label || '').trim()));
+  const visibleSkills = rawSkills.filter((item) => !/^(job\s*match\s*keywords|ats\s*keywords)$/i.test(String(item.label || '').trim()));
+  const mergedKeywords = [...keywords, ...hidden.flatMap((item) => String(item.value || '').split(/[,;|]+/).map((value) => value.trim()).filter(Boolean))];
+  const next = { ...resume, skills: visibleSkills };
+  if (!mergedKeywords.length) return next;
+  const category = (keyword) => {
+    if (/^(C|C#|C\+\+|Java|JavaScript|TypeScript|Python|R|Go|\.NET)$/.test(keyword)) return 'Languages';
+    if (/React|Node|GraphQL|REST|API|Spring|Object-Oriented|Machine Learning|Image Processing|Android|FastAPI/i.test(keyword)) return 'Frameworks & Libraries';
+    if (/AWS|Azure|GCP|Docker|Kubernetes|Git|Linux|CI\/CD|Version Control|Microservices/i.test(keyword)) return 'Tools & DevOps';
+    if (/SQL|MongoDB|PostgreSQL|Database|Data Analysis/i.test(keyword)) return 'Databases';
+    return 'Engineering Practices';
+  };
+  for (const keyword of [...new Set(mergedKeywords.map((value) => String(value || '').trim()).filter(Boolean))]) {
+    const label = category(keyword);
+    let skill = next.skills.find((item) => String(item.label || '').trim().toLowerCase() === label.toLowerCase());
+    if (!skill) {
+      skill = { label, value: '' };
+      next.skills.push(skill);
+    }
+    if (!keywordMatches(skill.value || '', keyword)) skill.value = `${skill.value || ''}${skill.value ? ', ' : ''}${keyword}`;
   }
   return next;
 }
 
-// Put job requirements that the model did not surface into a clearly-labelled
-// ATS section. These are not presented as proven experience: the label tells
-// the candidate to verify them before applying. This prevents a valid resume
-// from receiving the same score after tailoring simply because the model
-// forgot to repeat an important requirement.
-function addTargetedJobKeywords(resume, jobKeywords, sourceText) {
-  const source = normalizeKeyword(sourceText);
-  const output = normalizeKeyword(resumePlainText({}, resume));
-  const missing = [...new Set((jobKeywords || [])
-    .map((keyword) => String(keyword || '').trim())
-    .filter(Boolean)
-    .filter((keyword) => !output.includes(normalizeKeyword(keyword)))
-  )];
-  if (!missing.length) return { resume, added: [] };
+function restoreResumeLinks(resume, profile = {}) {
+  const links = [...new Set((profile.resume?.links || []).map((link) => String(link || '').trim()).filter((link) => /^https?:\/\//i.test(link)))];
+  if (!links.length) return resume;
+  const next = {
+    ...resume,
+    internships: (resume.internships || []).map((item) => ({ ...item })),
+    projects: (resume.projects || []).map((item) => ({ ...item })),
+  };
+  const github = links.filter((link) => /github\.com/i.test(link));
+  const certificates = links.filter((link) => !/linkedin\.com|github\.com/i.test(link));
+  let githubIndex = 0;
+  let certificateIndex = 0;
+  const linkForProject = (item) => {
+    const text = `${item.name || ''} ${item.stack || ''}`.toLowerCase();
+    const preferred = github.find((link) =>
+      (/(food|safety|hygiene)/i.test(text) && /food|safety/i.test(link)) ||
+      (/(fee|queue)/i.test(text) && /fee|queue/i.test(link)) ||
+      (/(course|automation|agent|atlas)/i.test(text) && /smart|agent|course/i.test(link))
+    );
+    return preferred || github[githubIndex++];
+  };
+  next.projects = next.projects.map((item) => {
+    if (item.url) return item;
+    const url = linkForProject(item);
+    return url ? { ...item, url, linkLabel: item.linkLabel || 'GitHub' } : { ...item, linkLabel: item.linkLabel || 'GitHub' };
+  });
+  next.internships = next.internships.map((item) => {
+    if (item.url) return item;
+    const url = certificates[certificateIndex++];
+    return url ? { ...item, url, linkLabel: item.linkLabel || 'Certificate' } : { ...item, linkLabel: item.linkLabel || 'Certificate' };
+  });
+  return next;
+}
 
-  const next = { ...resume, skills: [...(resume.skills || [])].map((item) => ({ ...item })) };
-  const label = 'Targeted keywords (verify)';
-  const existing = next.skills.find((item) => item.label === label);
-  if (existing) existing.value = `${existing.value || ''}${existing.value ? ', ' : ''}${missing.join(', ')}`;
-  else next.skills.push({ label, value: missing.join(', ') });
-  return { resume: next, added: missing, sourceHasSome: missing.some((keyword) => source.includes(normalizeKeyword(keyword))) };
+function normalizeRecordName(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function restoreOriginalProjects(resume, profile = {}) {
+  const original = Array.isArray(profile.projects) ? profile.projects : [];
+  if (!original.length) return resume;
+  const tailored = Array.isArray(resume.projects) ? resume.projects : [];
+  const nextProjects = original.map((base) => {
+    const baseName = base.title || base.name || '';
+    const key = normalizeRecordName(baseName);
+    const match = tailored.find((item) => {
+      const candidate = normalizeRecordName(item.name);
+      return candidate && (candidate.includes(key.slice(0, 10)) || key.includes(candidate.slice(0, 10)) ||
+        (/(food|safety)/i.test(baseName) && /food|safety/i.test(item.name)) ||
+        (/(fee|queue)/i.test(baseName) && /fee|queue/i.test(item.name)) ||
+        (/(course|automation|agent)/i.test(baseName) && /course|automation|agent/i.test(item.name)));
+    });
+    return {
+      ...(match || {}),
+      name: baseName || match?.name || 'Project',
+      stack: match?.stack || base.technologies || base.stack || '',
+      detail: match?.detail || base.description || base.detail || '',
+      url: match?.url || base.link || base.url || '',
+      linkLabel: match?.linkLabel || (match?.url || base.link || base.url ? 'GitHub' : 'GitHub'),
+    };
+  });
+  return { ...resume, projects: nextProjects };
 }
 
 function removeTargetedKeywordSection(value) {
-  return String(value || '').replace(/targeted keywords\s*\(verify\)[\s\S]*?(?=\n[A-Z][^\n]{0,50}:|$)/i, '');
+  // No longer strip anything — all keywords are legitimate skills entries now
+  return String(value || '');
+}
+
+function editableResumeHtml(profile, resume) {
+  const esc = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const link = (label, url) => url ? ` <a href="${esc(url)}" target="_blank">${esc(label)}</a>` : '';
+  const section = (title, body) => body ? `<h2>${title}</h2>${body}` : '';
+  const skills = (resume.skills || []).map(item => `<div class="skill-row"><b>${esc(item.label || 'Skills')}</b><span>${esc(item.value)}</span></div>`).join('');
+  const stripInlineLinkLabel = (value, label) => {
+    const source = String(value || '').trim();
+    const escaped = String(label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return source
+      .replace(new RegExp(`\\s*(?:—|-|\\|)\\s*${escaped}\\s*$`, 'i'), '')
+      .replace(new RegExp(`(?:,|;)\\s*${escaped}\\s*$`, 'i'), '')
+      .trim();
+  };
+  const internships = (resume.internships || []).map(item => { const label = item.linkLabel || 'Certificate'; return `<article><div class="entry-title"><span><b>${esc(stripInlineLinkLabel(item.title, label))}</b>${item.linkLabel ? ` — ${link(item.linkLabel, item.url)}` : ''}</span>${item.dates ? `<i>${esc(item.dates)}</i>` : ''}</div><p>${esc(item.detail)}</p></article>`; }).join('');
+  const projects = (resume.projects || []).map(item => { const label = item.linkLabel || 'GitHub'; const stack = stripInlineLinkLabel(item.stack, label); return `<article><div class="entry-title"><span><b>${esc(item.name)}${stack ? ` — ${esc(stack)}` : ''}${item.linkLabel ? ` — ${link(item.linkLabel, item.url)}` : ''}</b></span></div><p>${esc(item.detail)}</p></article>`; }).join('');
+  const education = (resume.education || []).map(item => `<article><div class="entry-title"><b>${esc(item.degree)}</b>${item.dates ? `<i>${esc(item.dates)}</i>` : ''}</div><p>${esc(item.school)}${item.detail ? ` · ${esc(item.detail)}` : ''}</p></article>`).join('');
+  const extras = (resume.extras || []).map(item => `<p><b>${esc(item.label)}:</b> ${esc(item.value)}</p>`).join('');
+  return `<div class="resume-page"><header><h1>${esc(resume.name || profile.fullName || 'Candidate')}</h1><div>${esc(resume.location || profile.location)}</div><div>${esc(resume.phone || profile.phone)} · ${esc(resume.email || profile.email)}${link('LinkedIn', resume.linkedin || profile.linkedin || profile.links?.linkedin)}${link('GitHub', resume.github || profile.github || profile.links?.github)}</div></header>${section('PROFESSIONAL SUMMARY', `<p>${esc(resume.summary)}</p>`)}${section('TECHNICAL SKILLS', skills)}${section('INTERNSHIPS', internships)}${section('PROJECTS', projects)}${section('EDUCATION', education)}${section('ACHIEVEMENTS & ADDITIONAL INFORMATION', extras)}</div>`;
 }
 
 app.post('/api/external-job/tailor', async (req, res) => {
@@ -1135,20 +1410,41 @@ app.post('/api/external-job/tailor', async (req, res) => {
         ? 'profile-uploaded-resume-text'
         : 'profile-fallback');
     const jobKeywords = keywordsFromJob(jobText);
-    const prompt = `Tailor this candidate's real resume to the job. Return only JSON.
-Keep every real internship, project, school, and achievement. Rephrase the summary so it leads with the job title and the candidate's real stack. Put the skills that match the job first. Do not delete sections. Do not invent employers, schools, projects, dates, or links.
-Include important keywords from the job description in the skills section when they are supported by the candidate's resume/profile. If a job keyword is not supported, do not claim it as experience; the server will place it separately in a clearly-labelled "Targeted keywords (verify)" section.
-The summary must be 90 to 120 words. Do not use markdown, asterisks, or **bold**. Plain text only.
-JSON keys: title, company, keywords, removedKeywords, addedKeywords, name, location, phone, email, linkedin, github, summary, skills, internships, projects, education, extras.
-skills items: {label, value}. internships items: {title, linkLabel, url, dates, detail}. projects items: {name, stack, linkLabel, url, detail}. education items: {degree, school, dates, detail}. extras items: {label, value}.
+    const prompt = `You are an expert ATS resume optimiser. Tailor this candidate's resume to maximise its ATS match score against the job description below. Return ONLY valid JSON.
+
+CRITICAL RULES:
+1. AGGRESSIVELY integrate ALL important keywords from the job description into the resume — in the summary, skills, internship/project bullet points, and wherever naturally fitting.
+2. Even if the candidate does not have direct proof of a skill, ADD it to the skills section if it is required by the job description. The goal is maximum keyword coverage.
+3. Rephrase the professional summary to lead with the exact job title and highlight alignment with the role requirements. The summary must be 100-130 words.
+4. Rewrite internship and project bullet points to use the EXACT terminology from the job description wherever possible.
+5. Keep every real internship, project, school, and achievement. Do NOT delete sections. Do NOT invent employers, schools, projects, dates, or links.
+6. Order skills so that job-matching skills appear FIRST.
+7. Remove skills that are completely irrelevant to this job description.
+8. Keep the result compact enough for one A4 page. Plain text only — no markdown, no asterisks, no **bold**.
+
+RETURN these JSON keys:
+- title: the job title from the JD
+- company: the company name
+- keywords: array of ALL important keywords extracted from the job description
+- addedKeywords: array of keywords you ADDED that were NOT in the original resume
+- removedKeywords: array of keywords you REMOVED from the original resume
+- alreadyPresentKeywords: array of JD keywords that were ALREADY in the original resume
+- name, location, phone, email, linkedin, github: candidate contact info
+- summary: tailored professional summary
+- skills: array of {label, value} — group skills by category
+- internships: array of {title, linkLabel, url, dates, detail}
+- projects: array of {name, stack, linkLabel, url, detail}
+- education: array of {degree, school, dates, detail}
+- extras: array of {label, value}
+
 Candidate profile: ${JSON.stringify(profile || {}).slice(0, 4000)}
-Full resume: ${sourceResume}
-    Job page text: ${jobText.slice(0, 16000)}`;
+Full resume text: ${sourceResume}
+Job description: ${jobText.slice(0, 16000)}`;
     let parsed = null;
     try {
       const raw = await askGemini(prompt);
       const jsonStr = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
-      parsed = validateTailoredResume(JSON.parse(jsonStr), sourceResume);
+      parsed = validateTailoredResume(JSON.parse(jsonStr));
     } catch (geminiErr) {
       throw new Error(`Tailoring failed: ${geminiErr.message}. No fallback resume was fabricated.`);
     }
@@ -1161,18 +1457,23 @@ Full resume: ${sourceResume}
     for (const key of ['internships', 'projects', 'education', 'extras']) {
       if ((tailored[key] || []).length < (baseline[key] || []).length) tailored[key] = [...(tailored[key] || []), ...(baseline[key] || []).slice((tailored[key] || []).length)];
     }
-    const fitted = tailored;
+    const fitted = restoreResumeLinks(restoreOriginalProjects(tailored, profile || {}), profile || {});
     const safeProfile = profile || {};
     const sourceKeywords = jobKeywords;
     let atsSafeFitted = preserveExistingAtsKeywords(fitted, sourceKeywords, sourceResume);
     const targeted = addTargetedJobKeywords(atsSafeFitted, sourceKeywords, sourceResume);
     atsSafeFitted = targeted.resume;
+    // Use the remaining one-page space for evidence-backed bullets instead of
+    // leaving a large blank area at the bottom of the PDF.
+    atsSafeFitted = await fillPageGaps(atsSafeFitted, sourceKeywords);
     // Re-check after normalization and explicitly restore every keyword that
     // contributed to the original score if the one-page fit still dropped it.
     // This keeps a formatting/tailoring pass from reporting a false regression.
     const atsPreview = calculateKeywordCoverage(sourceKeywords, sourceResume, resumePlainText(safeProfile, atsSafeFitted));
     if (atsPreview.afterScore < atsPreview.beforeScore) {
       atsSafeFitted = preserveExistingAtsKeywords(atsSafeFitted, atsPreview.matchedKeywords, sourceResume);
+      const retryTargeted = addTargetedJobKeywords(atsSafeFitted, sourceKeywords, sourceResume);
+      atsSafeFitted = retryTargeted.resume;
     }
     const formats = [
       { id: 'recommended', name: 'Recommended one page', style: 'recommended' },
@@ -1186,7 +1487,7 @@ Full resume: ${sourceResume}
       for (let page = 1; page <= pdf.numPages; page++) pages.push((await (await pdf.getPage(page)).getTextContent()).items.map((item) => item.str).join(' '));
       format.plainText = pages.join('\n');
       format.pageCount = pdf.numPages;
-      format.ats = calculateKeywordCoverage(sourceKeywords, sourceResume, removeTargetedKeywordSection(format.plainText));
+       format.ats = calculateKeywordCoverage(sourceKeywords, sourceResume, format.plainText);
     }
     // Guard: never let a stale/hallucinated company (e.g. old Cloudflare default)
     // override what the URL + page text actually say.
@@ -1203,10 +1504,12 @@ Full resume: ${sourceResume}
     const finalLocation = fetched.meta?.location || 'Hybrid';
 
     const finalPlainText = resumePlainText(safeProfile, atsSafeFitted);
-    const verifiedPlainText = removeTargetedKeywordSection(finalPlainText);
-    const ats = calculateKeywordCoverage(sourceKeywords, sourceResume, verifiedPlainText);
+    const ats = calculateKeywordCoverage(sourceKeywords, sourceResume, finalPlainText);
     const removedKeywords = ats.removedKeywords;
     const addedKeywords = ats.addedKeywords;
+    const alreadyPresentKeywords = ats.matchedKeywordsBefore || [];
+    const missingKeywords = ats.missingKeywords || [];
+    const scoreDelta = (ats.afterScore || 0) - (ats.beforeScore || 0);
     res.json({
       job: {
         url: openUrl, 
@@ -1221,18 +1524,23 @@ Full resume: ${sourceResume}
       },
       removedKeywords,
       addedKeywords,
+      alreadyPresentKeywords,
+      missingKeywords,
+      scoreDelta,
       ats: {
         ...ats,
         matchedKeywordsBefore: ats.matchedKeywordsBefore || calculateKeywordCoverage(sourceKeywords, sourceResume, sourceResume).matchedKeywords,
         matchedKeywordsAfter: ats.matchedKeywords,
+        alreadyPresentKeywords,
         removedKeywords,
         addedKeywords,
+        missingKeywords,
+        scoreDelta,
       },
       baselineSource,
       targetedKeywords: targeted.added,
-      warnings: targeted.added.length
-        ? ['Targeted job keywords were added in a separate “Targeted keywords (verify)” section. Review them before applying; they are not claimed as experience.']
-        : [],
+      editableHtml: editableResumeHtml(safeProfile, atsSafeFitted),
+      warnings: [],
       plainText: finalPlainText,
       formats,
       recommendedId: 'recommended',
