@@ -28,6 +28,9 @@ landing-page/build-*.txt
 landing-page/hamster-loader.mp4
 HAMZO*.html
 data/linkedin-company-slugs.json
+MailMind AI/
+hamster-whirl-loader/
+landing-page/public/company-logos/*.pdf
 
 # Environment files
 .env

@@ -244,15 +244,15 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
       // Parse meaningful error message
       const raw = err.message || '';
       let message = 'Could not tailor a resume for that link.';
-      if (/failed to fetch|networkerror|load failed|fetch/i.test(raw)) {
-        message = 'Could not connect to the server. Make sure the backend is running (npm start) and try again.';
+      const jsonStart = raw.indexOf('{');
+      if (jsonStart >= 0) {
+        try { message = JSON.parse(raw.slice(jsonStart)).error || message; } catch { message = raw; }
+      } else if (/^(?:TypeError:\s*)?failed to fetch$/i.test(raw.trim()) || /^networkerror\b/i.test(raw.trim()) || /^load failed\b/i.test(raw.trim())) {
+        message = 'Could not connect to the server. Make sure the backend is running and try again.';
       } else if (/timeout|timed out|aborted/i.test(raw)) {
         message = 'The request timed out. The job page may be slow or unreachable. Try a different link or try again.';
-      } else {
-        const jsonStart = raw.indexOf('{');
-        if (jsonStart >= 0) {
-          try { message = JSON.parse(raw.slice(jsonStart)).error || message; } catch { message = raw; }
-        } else if (raw) message = raw;
+      } else if (raw) {
+        message = raw;
       }
 
       setErrorMsg(message);

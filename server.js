@@ -23,6 +23,7 @@ import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, renderResumePdf, resumePlainText } from './lib/resume-pdf.js';
 import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, validateTailoredResume } from './lib/job-analysis.js';
+import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -433,11 +434,89 @@ const uploadList = multer({
   },
 });
 
-app.get('/api/employees', (req, res) => {
-  const company = req.query.company;
+app.get('/api/employees', async (req, res) => {
+  const company = String(req.query.company || '').trim();
+  const autoDiscover = String(req.query.autoDiscover || 'true').toLowerCase() !== 'false';
   const all = readEmployees();
-  const list = company ? all.filter(e => companiesMatch(e.company, company)) : all;
+  let list = company ? all.filter(e => companiesMatch(e.company, company)) : all;
+
+  // If a company is specified and no employees exist yet, automatically discover them
+  if (company && list.length === 0 && autoDiscover) {
+    try {
+      console.log(`[Employee Discovery] No contacts found for "${company}". Auto-discovering from multi-source engine...`);
+      const result = await discoverCompanyEmployees({
+        company,
+        jobTitle: String(req.query.jobTitle || '').trim(),
+        existingEmployees: all,
+      });
+      if (result.contacts && result.contacts.length > 0) {
+        saveEmployeeRecords(result.contacts.map((c) => ({
+          name: c.name,
+          company: c.company || company,
+          role: c.role,
+          email: c.email,
+          details: c.source || 'Auto-Discovered',
+        })), 'auto-discovery');
+        list = readEmployees().filter(e => companiesMatch(e.company, company));
+        console.log(`[Employee Discovery] Discovered and saved ${list.length} contacts for "${company}".`);
+      }
+    } catch (err) {
+      console.warn(`[Employee Discovery] Auto-discovery failed for "${company}":`, err.message);
+    }
+  }
+
   res.json(list);
+});
+
+app.post('/api/employees/discover', async (req, res) => {
+  const { company, jobUrl, jobHtml, jobTitle } = req.body || {};
+  if (!company && !jobUrl) {
+    return res.status(400).json({ error: 'Company name or job URL is required for discovery.' });
+  }
+  try {
+    const all = readEmployees();
+    const result = await discoverCompanyEmployees({
+      company: String(company || '').trim(),
+      jobUrl: String(jobUrl || '').trim(),
+      jobHtml: String(jobHtml || '').trim(),
+      jobTitle: String(jobTitle || '').trim(),
+      existingEmployees: all,
+    });
+    if (result.contacts && result.contacts.length > 0) {
+      saveEmployeeRecords(result.contacts.map((c) => ({
+        name: c.name,
+        company: c.company || company,
+        role: c.role,
+        email: c.email,
+        details: c.source || 'Auto-Discovered',
+      })), 'auto-discovery');
+    }
+    const updated = readEmployees().filter(e => companiesMatch(e.company, company || result.company));
+    res.json({
+      success: true,
+      company: company || result.company,
+      domain: result.domain,
+      mailServerVerified: result.mailServerVerified,
+      mailProvider: result.mailProvider,
+      contacts: updated,
+    });
+  } catch (err) {
+    console.error('[Employee Discovery] Error:', err);
+    res.status(500).json({ error: err.message || 'Discovery failed' });
+  }
+});
+
+app.post('/api/employees/verify-email', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email address is required.' });
+  }
+  try {
+    const verdict = await verifyEmailAddress(email, 5000);
+    res.json(verdict);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Email verification failed' });
+  }
 });
 
 app.post('/api/employees/bulk', (req, res) => {
@@ -614,36 +693,35 @@ async function askGemini(prompt) {
   const isTransient = (error) => /\b(408|425|429|500|502|503|504)\b|timeout|timed out|abort|temporarily unavailable|service unavailable/i.test(String(error?.message || error));
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // Nara Router is the configured primary provider. Retry transient upstream
-  // failures once with a short backoff; retrying auth/configuration failures
-  // only wastes time and does not repair the request.
-  if (process.env.BYNARA_API_KEY || process.env.NARA_API_KEY) {
-    const attempts = 2;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      try {
-        return await askNara([{ role: 'user', content: prompt }], { model: process.env.BYNARA_MODEL || 'claude-opus-5.5', maxTokens: 3000, temperature: 0.1 });
-      } catch (naraError) {
-        recordProviderError(`Nara attempt ${attempt + 1}`, naraError);
-        if (!isTransient(naraError) || attempt === attempts - 1) break;
-        await wait(1200);
-      }
-    }
-  }
-
-  // Radox is a real fallback when a key is configured. It can still be
-  // disabled explicitly with ENABLE_RADOX_FALLBACK=false, which is useful if
-  // the account is suspended or billing is not active.
+  // RadoxAI / Coarena is the primary high-speed OpenAI-compatible provider.
   const radoxEnabled = String(process.env.ENABLE_RADOX_FALLBACK || 'true').toLowerCase() !== 'false';
   if (radoxEnabled && (process.env.RADOX_API_KEY || process.env.RADOXAI_API_KEY)) {
-    try {
-      return await askRadox([{ role: 'user', content: prompt }], { model: process.env.RADOX_MODEL || 'claude-opus-5.5', maxTokens: 3000, temperature: 0.1 });
-    } catch (radoxError) {
-      recordProviderError('RadoxAI', radoxError);
+    const rawModel = String(process.env.RADOX_MODEL || 'claude-sonnet-5-5').replace(/\./g, '-');
+    const radoxModels = [...new Set([rawModel, 'claude-sonnet-5-5', 'claude-opus-5-5'])];
+    for (const rModel of radoxModels) {
+      try {
+        return await askRadox([{ role: 'user', content: prompt }], { model: rModel, maxTokens: 3000, temperature: 0.1 });
+      } catch (radoxError) {
+        recordProviderError(`RadoxAI (${rModel})`, radoxError);
+      }
     }
   } else if (!radoxEnabled) {
     providerErrors.push('RadoxAI: disabled by ENABLE_RADOX_FALLBACK=false');
-  } else {
-    providerErrors.push('RadoxAI: API key is not configured');
+  }
+
+  // Nara Router fallback.
+  if (process.env.BYNARA_API_KEY || process.env.NARA_API_KEY) {
+    const rawNara = String(process.env.BYNARA_MODEL || 'claude-sonnet-5-5').replace(/\./g, '-');
+    const naraModels = [...new Set([rawNara, 'claude-sonnet-5-5'])];
+    for (const naraModel of naraModels) {
+      try {
+        return await askNara([{ role: 'user', content: prompt }], { model: naraModel, maxTokens: 3000, temperature: 0.1 });
+      } catch (naraError) {
+        recordProviderError(`Nara (${naraModel})`, naraError);
+        // Do not block on non-transient auth/not found errors
+        if (!isTransient(naraError)) break;
+      }
+    }
   }
 
   // Gemini is the primary tailoring provider. Prefer generally-available
@@ -981,6 +1059,8 @@ function cleanTitleText(str) {
     .replace(/<[^>]+>/g, '')
     .replace(/[\r\n\t]+/g, ' ')
     .replace(/^(?:<|&lt;)?\s*Back to jobs\s*/i, '')
+    .replace(/^Job Application for\s+/i, '')
+    .replace(/^(?:application for|apply for)\s+/i, '')
     .replace(/^will require you to be based in [^.]*\.?\s*/i, '')
     .replace(/About the\s*(?:Department)?/i, '')
     .replace(/\s*-\s*Job Details.*/i, '')
@@ -1013,6 +1093,10 @@ function extractJobMetadata(html, rawUrl, plainText = '') {
     if (!company) company = companyFromHostname(hostname);
 
     // 2) Company hint from page text: "About Angel One:" / "at Angel One" beats hostname guess.
+    const atMatch = (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || '').match(/\s+at\s+([A-Z][A-Za-z0-9&.'\- ]{2,50})/i);
+    if (atMatch && atMatch[1] && !/department|role|job|team|work|home/i.test(atMatch[1])) {
+      company = atMatch[1].trim();
+    }
     const aboutMatch = (plainText || html).match(/About\s+([A-Z][A-Za-z0-9&.'\- ]{2,40})\s*:/);
     if (aboutMatch && aboutMatch[1] && !/department|role|job|team/i.test(aboutMatch[1])) {
       company = aboutMatch[1].trim();
@@ -1150,11 +1234,17 @@ async function fetchJobText(url) {
       const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
       await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-      await page.waitForFunction(() => document.body && document.body.innerText.trim().length >= 120, { timeout: 10000 }).catch(() => {});
+      // Some career sites (notably IBM) first return an AWS WAF shell and
+      // populate the actual posting asynchronously after the challenge is
+      // solved. Do not treat that short shell as a usable job description.
+      await page.waitForFunction(() => {
+        const text = document.body?.innerText?.trim() || '';
+        return text.length >= 600 && /responsibilities|required technical|preferred technical|qualifications|about the role|your role|job description/i.test(text);
+      }, { timeout: 30000 }).catch(() => {});
       return {
         html: await page.content(),
         text: await page.evaluate(() => document.body?.innerText || ''),
-        url: page.url(),
+        finalUrl: page.url(),
       };
     } finally {
       await browser.close();
@@ -1510,6 +1600,28 @@ Job description: ${jobText.slice(0, 16000)}`;
     const alreadyPresentKeywords = ats.matchedKeywordsBefore || [];
     const missingKeywords = ats.missingKeywords || [];
     const scoreDelta = (ats.afterScore || 0) - (ats.beforeScore || 0);
+    // Auto-discover company employee outreach contacts for referral outreach
+    if (finalCompany) {
+      discoverCompanyEmployees({
+        company: finalCompany,
+        jobUrl: openUrl,
+        jobHtml: fetched.posting?.description || '',
+        jobTitle: finalTitle,
+        existingEmployees: readEmployees()
+      }).then((disc) => {
+        if (disc?.contacts?.length) {
+          saveEmployeeRecords(disc.contacts.map((c) => ({
+            name: c.name,
+            company: c.company || finalCompany,
+            role: c.role,
+            email: c.email,
+            details: c.source || 'Auto-Discovered',
+          })), 'auto-discovery');
+          console.log(`[Auto-Apply Discovery] Successfully cached ${disc.contacts.length} outreach contacts for ${finalCompany}`);
+        }
+      }).catch((e) => console.warn('[Auto-Apply Discovery] Error:', e.message));
+    }
+
     res.json({
       job: {
         url: openUrl, 
@@ -1742,11 +1854,30 @@ app.post('/api/gmail/disconnect', (req, res) => {
 
 app.get('/api/config/gmail', (req, res) => {
   const tokens = readGmailTokens();
-  const configured = tokens.connected === true && Boolean(tokens.refresh_token || (process.env.GMAIL_USER && process.env.GMAIL_APP_PASS));
+  const hasOAuth = Boolean(GOOGLE_CLIENT_ID && tokens.connected && tokens.refresh_token);
+
+  // Priority 1: User's connected Google Account (via OAuth 2.0 in Mail dashboard)
+  if (hasOAuth) {
+    return res.json({
+      configured: true,
+      method: 'oauth',
+      email: tokens.email || '',
+    });
+  }
+
+  // Priority 2: App password if manually set
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASS) {
+    return res.json({
+      configured: true,
+      method: 'app_password',
+      email: process.env.GMAIL_USER,
+    });
+  }
+
   res.json({
-    configured,
-    method: tokens.refresh_token ? 'oauth' : 'app_password',
-    email: configured ? (tokens.email || process.env.GMAIL_USER || '') : ''
+    configured: false,
+    method: 'none',
+    email: '',
   });
 });
 
@@ -1788,53 +1919,71 @@ app.post('/api/send-email', async (req, res) => {
   }
 
   const tokens = readGmailTokens();
+  const hasOAuth = Boolean(GOOGLE_CLIENT_ID && tokens.connected && tokens.refresh_token);
   const gmailPass = process.env.GMAIL_APP_PASS;
-  const connectedGmail = tokens.connected && tokens.refresh_token ? tokens.email : '';
-  const targetEmail = connectedGmail || senderEmail || process.env.GMAIL_USER || '';
+  const gmailUser = String(process.env.GMAIL_USER || senderEmail || '').trim();
 
   if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
     return res.status(400).json({ error: 'Recipients array is required.' });
   }
 
   try {
-    let transporter;
+    let transporter = null;
+    let targetEmail = '';
 
-    if (connectedGmail) {
+    // Priority 1: User's connected Google account via OAuth2 (nlr.jaswanth2004@gmail.com)
+    if (hasOAuth) {
       const accessToken = await getValidAccessToken();
-      if (!accessToken) {
-        return res.status(401).json({
-          requireGmailAuth: true,
-          error: 'Invalid Gmail Credentials',
-          message: 'Gmail needs to be connected again. Open Mail and click Connect, then send this referral.'
+      if (accessToken) {
+        targetEmail = tokens.email;
+        const oauthTransporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            type: 'OAuth2',
+            user: tokens.email,
+            clientId: GOOGLE_CLIENT_ID,
+            clientSecret: GOOGLE_CLIENT_SECRET,
+            refreshToken: tokens.refresh_token,
+            accessToken,
+          }
         });
-      }
-      transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          type: 'OAuth2',
-          user: connectedGmail,
-          clientId: GOOGLE_CLIENT_ID,
-          clientSecret: GOOGLE_CLIENT_SECRET,
-          refreshToken: tokens.refresh_token,
-          accessToken,
+        try {
+          await oauthTransporter.verify();
+          transporter = oauthTransporter;
+          console.log(`[Send Email] Authenticated via User Connected Google Account: ${targetEmail}`);
+        } catch (oauthErr) {
+          console.warn('[Send Email] OAuth verify warning:', oauthErr.message);
+          // If verify had a transient issue, still assign oauthTransporter
+          transporter = oauthTransporter;
         }
-      });
-    } else if (gmailPass && targetEmail) {
-      // 2. Send via Gmail App Password
-      transporter = nodemailer.createTransport({
+      }
+    }
+
+    // Priority 2: Fallback to system App Password if user hasn't connected Google OAuth
+    if (!transporter && gmailPass && gmailUser) {
+      targetEmail = gmailUser;
+      const passTransporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
         port: 465,
         secure: true,
         auth: {
-          user: targetEmail,
+          user: gmailUser,
           pass: gmailPass,
         },
       });
-    } else {
-      return res.status(400).json({
+      try {
+        await passTransporter.verify();
+        transporter = passTransporter;
+      } catch (verifyErr) {
+        console.warn('[Send Email] App Password SMTP verification failed:', verifyErr.message);
+      }
+    }
+
+    if (!transporter) {
+      return res.status(401).json({
         requireGmailAuth: true,
-        error: 'Google Mail Connection required for ' + targetEmail,
-        message: 'Please connect your Google account with full permissions via Mail Automation -> Connect.'
+        error: 'Google Mail Connection required',
+        message: 'Please connect your Google account in Mail Automation first.'
       });
     }
 

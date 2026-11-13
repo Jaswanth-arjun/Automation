@@ -271,6 +271,30 @@ export default function Apply() {
     setEmployeeList(prev => prev.map(e => e.id === id ? { ...e, selected: !e.selected } : e));
   };
 
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const handleDiscoverContacts = async () => {
+    if (!job?.company || isDiscovering) return;
+    setIsDiscovering(true);
+    try {
+      const res = await api.discoverEmployees({
+        company: job.company,
+        jobTitle: job.title || '',
+        jobUrl: job.applyLink || ''
+      });
+      if (res && Array.isArray(res.contacts) && res.contacts.length > 0) {
+        setEmployeeList(res.contacts.map((emp) => ({
+          ...emp,
+          selected: true,
+          role: emp.role || `${emp.company || job.company} Representative`,
+        })));
+      }
+    } catch (err) {
+      console.error('Discovery error:', err);
+    } finally {
+      setIsDiscovering(false);
+    }
+  };
+
   const selectedEmployees = employeeList.filter(e => e.selected);
 
   // Referral Email Template Draft (matching reference image format)
@@ -995,22 +1019,69 @@ ${firstName}`;
             </div>
           </div>
 
-          {/* Target Company Employees Selection (Extracted from Admin PDF/database) */}
+          {/* Target Company Employees Selection (Extracted from Admin PDF/database & Auto-Discovery) */}
           <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#1a202c', margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <UserCheck size={18} style={{ color: '#059669' }} /> Target Employee Outreach Contacts ({selectedEmployees.length} selected)
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '4px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#1a202c', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <UserCheck size={18} style={{ color: '#059669' }} /> Target Employee Outreach Contacts ({selectedEmployees.length} selected)
+              </h3>
+              <button
+                onClick={handleDiscoverContacts}
+                disabled={isDiscovering || employeesLoading}
+                style={{
+                  background: isDiscovering ? '#f1f5f9' : '#ecfdf5',
+                  color: isDiscovering ? '#64748b' : '#059669',
+                  border: '1px solid #a7f3d0',
+                  borderRadius: '20px',
+                  padding: '6px 14px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: isDiscovering ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s'
+                }}
+              >
+                <Sparkles size={13} />
+                {isDiscovering ? 'Discovering Contacts...' : 'Auto-Discover Contacts'}
+              </button>
+            </div>
             <p style={{ fontSize: '12.5px', color: '#718096', margin: '0 0 16px' }}>
               Extracted from verified employee records for <strong>{job.company}</strong>. Each employee will receive a personalized version of your referral request.
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {employeesLoading ? (
-                <p style={{ fontSize: '13px', color: '#718096', margin: 0 }}>Loading employee contacts…</p>
+              {employeesLoading || isDiscovering ? (
+                <div style={{ padding: '16px 20px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', textAlign: 'center' }}>
+                  <p style={{ fontSize: '13px', fontWeight: 700, color: '#15803d', margin: 0 }}>
+                    🔍 Auto-discovering verified employee & recruiter contacts for {job.company} via Multi-Source Engine (Hunter.io / Mini-Hunter)...
+                  </p>
+                </div>
               ) : employeeList.length === 0 ? (
-                <div style={{ padding: '16px 20px', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '12px', textAlign: 'center' }}>
-                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#64748b', margin: 0 }}>No contact found</p>
-                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>No target employee contacts exist for {job.company}. Ask admin to add employee contacts or use Direct Apply.</span>
+                <div style={{ padding: '20px', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '12px', textAlign: 'center' }}>
+                  <p style={{ fontSize: '14px', fontWeight: 700, color: '#64748b', margin: '0 0 6px' }}>No contacts found for {job.company}</p>
+                  <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 12px' }}>
+                    Click below to discover corporate employee contacts and verified recruiter inboxes automatically.
+                  </p>
+                  <button
+                    onClick={handleDiscoverContacts}
+                    style={{
+                      background: 'linear-gradient(135deg, #059669, #047857)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '20px',
+                      padding: '8px 20px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <Sparkles size={14} /> Auto-Discover Contacts for {job.company}
+                  </button>
                 </div>
               ) : null}
               {employeeList.map((emp) => (
@@ -1038,7 +1109,14 @@ ${firstName}`;
                     />
                     <div>
                       <strong style={{ fontSize: '14px', color: '#1a202c', display: 'block' }}>{emp.name}</strong>
-                      <span style={{ fontSize: '12px', color: '#718096' }}>{emp.role} · <code style={{ color: '#047857' }}>{emp.email}</code></span>
+                      <span style={{ fontSize: '12px', color: '#718096' }}>
+                        {emp.role} · <code style={{ color: '#047857' }}>{emp.email}</code>
+                        {emp.details && (
+                          <span style={{ marginLeft: '8px', fontSize: '10.5px', color: '#059669', background: '#d1fae5', padding: '1px 6px', borderRadius: '4px', fontWeight: '600' }}>
+                            {emp.details}
+                          </span>
+                        )}
+                      </span>
                     </div>
                   </div>
                   <span style={{ fontSize: '11px', fontWeight: '800', color: emp.selected ? '#047857' : '#9ca3af', background: emp.selected ? '#d1fae5' : '#f3f4f6', padding: '3px 10px', borderRadius: '12px' }}>

@@ -5,6 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
+    "hamzo": "node scripts/dev-hamzo.mjs",
     "start": "node server.js",
     "dev": "node scripts/dev-with-freellmapi.mjs",
     "dev:automation": "node server.js",

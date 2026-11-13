@@ -13,6 +13,7 @@ test('JSON-LD @graph JobPosting is preferred and preserves real metadata', () =>
 test('blocked and insufficient pages are rejected', () => {
   assert.throws(() => validateJobDescription({ title: 'Careers', description: 'Sign in to continue' }), /not a usable|too short/);
   assert.throws(() => validateJobDescription({ title: 'Untitled', description: 'A complete-looking page that is actually a JavaScript shell. '.repeat(3) }), /not a usable/);
+  assert.throws(() => validateJobDescription({ title: '', description: 'AWSWAF challenge-container: verify that you are not a robot. '.repeat(3) }), /not a usable/);
   assert.throws(() => validateJobDescription({ title: 'Engineer', description: 'Short' }), /too short/);
 });
 
