@@ -343,8 +343,8 @@ const BrowserWindow = memo(function BrowserWindow({ active, onOpen }) {
 
 export default function AutoApplyWalkthrough({ onOpen }) {
   const [activeStep, setActiveStep] = useState(0);
-  const stepRefs = useRef([]);
-  const fillRefs = useRef([]);
+  const [rawProgress, setRawProgress] = useState(0);
+  const wrapperRef = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -354,62 +354,59 @@ export default function AutoApplyWalkthrough({ onOpen }) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Scroll spy: maps scroll position across the 4 steps
+  // Sticky Scroll Engine: Pins user in section while scrolling through 380vh
   useEffect(() => {
     if (isMobile) return undefined;
     let raf = 0;
 
-    const update = () => {
+    const handleScroll = () => {
       raf = 0;
-      const mid = window.innerHeight / 2;
-      const els = stepRefs.current;
-      let p = els.length;
-      for (let i = 0; i < els.length; i += 1) {
-        if (!els[i]) continue;
-        const r = els[i].getBoundingClientRect();
-        if (mid < r.top) { p = i; break; }
-        if (mid <= r.bottom) { p = i + (mid - r.top) / r.height; break; }
-      }
-      const active = Math.min(Math.floor(p), STEPS.length - 1);
-      setActiveStep((prev) => (prev !== active ? active : prev));
-      fillRefs.current.forEach((el, i) => {
-        if (el) el.style.transform = `scaleX(${Math.min(1, Math.max(0, p - i)).toFixed(3)})`;
-      });
+      const el = wrapperRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const totalScroll = rect.height - window.innerHeight;
+      if (totalScroll <= 0) return;
+
+      // Scrolled ratio from 0.0 to 1.0
+      const scrolled = -rect.top;
+      const progress = Math.min(1, Math.max(0, scrolled / totalScroll));
+      setRawProgress(progress);
+
+      // Maps smoothly to 4 steps (0, 1, 2, 3)
+      const nextStep = Math.min(3, Math.floor(progress * 4));
+      setActiveStep((prev) => (prev !== nextStep ? nextStep : prev));
     };
 
     const onScroll = () => {
-      if (!raf) raf = requestAnimationFrame(update);
+      if (!raf) raf = requestAnimationFrame(handleScroll);
     };
 
-    update();
+    handleScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
+    window.addEventListener('resize', handleScroll);
     return () => {
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
       if (raf) cancelAnimationFrame(raf);
     };
   }, [isMobile]);
 
+  // Click handler to smoothly scroll to any step
   const goToStep = useCallback((index) => {
     setActiveStep(index);
-    stepRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!wrapperRef.current) return;
+    const el = wrapperRef.current;
+    const rect = el.getBoundingClientRect();
+    const elemTop = window.scrollY + rect.top;
+    const totalScroll = el.offsetHeight - window.innerHeight;
+    const targetY = elemTop + (index / 3.99) * totalScroll + 2;
+    window.scrollTo({ top: targetY, behavior: 'smooth' });
   }, []);
 
-  const onTabKeyDown = (e) => {
-    let next = null;
-    if (e.key === 'ArrowRight') next = (activeStep + 1) % STEPS.length;
-    if (e.key === 'ArrowLeft') next = (activeStep - 1 + STEPS.length) % STEPS.length;
-    if (next !== null) {
-      e.preventDefault();
-      goToStep(next);
-      document.getElementById(`aaw-tab-${next}`)?.focus();
-    }
-  };
-
   return (
-    <section className="aaw" id="resume" aria-labelledby="aaw-heading">
-      <div className="aaw-container">
+    <section className="aaw-wrapper" id="resume" ref={wrapperRef} aria-labelledby="aaw-heading">
+      <div className="aaw-sticky-stage">
+        {/* Header with generous top padding to clear floating navbar */}
         <header className="aaw-header">
           <span className="hmz-kicker">AUTO APPLY COPILOT</span>
           <h2 id="aaw-heading" className="aaw-heading">
@@ -420,88 +417,90 @@ export default function AutoApplyWalkthrough({ onOpen }) {
           </p>
         </header>
 
+        {/* 2-Column Split: Left Moving Steps Carousel + Right Sticky Mac Window */}
         <div className="aaw-grid">
-          <ol className="aaw-steps">
-            {STEPS.map((step, i) => (
-              <li
-                key={step.title}
-                ref={(el) => (stepRefs.current[i] = el)}
-                data-index={i}
-                className={`aaw-step${i === activeStep ? ' is-active' : ''}`}
+          {/* Left Column: Moving Steps Carousel (Bottom to Up Motion) */}
+          <div className="aaw-steps-col">
+            <div className="aaw-steps-window">
+              <div
+                className="aaw-steps-track"
+                style={{ transform: `translateY(-${activeStep * 100}%)` }}
               >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className="aaw-step-body"
-                  onClick={() => goToStep(i)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      goToStep(i);
-                    }
-                  }}
-                  aria-current={i === activeStep ? 'step' : undefined}
-                >
-                  <div className="aaw-title-row">
-                    <span className="aaw-badge" aria-hidden="true">{i + 1}</span>
-                    <div>
-                      <span className="aaw-step-kicker">{step.kicker}</span>
-                      <h3 className="aaw-step-title">{step.title}</h3>
+                {STEPS.map((step, i) => {
+                  const isCurrent = i === activeStep;
+                  return (
+                    <div
+                      key={step.title}
+                      className={`aaw-step-slide ${isCurrent ? 'is-active' : ''}`}
+                      onClick={() => goToStep(i)}
+                    >
+                      <div className="aaw-step-card">
+                        <div className="aaw-title-row">
+                          <span className="aaw-badge" aria-hidden="true">{step.n}</span>
+                          <div>
+                            <span className="aaw-step-kicker">{step.kicker}</span>
+                            <h3 className="aaw-step-title">{step.title}</h3>
+                          </div>
+                        </div>
+                        <ul className="aaw-points">
+                          {step.points.map((p) => (
+                            <li key={p}>{p}</li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
-                  </div>
-                  <ul className="aaw-points">
-                    {step.points.map((p) => (
-                      <li key={p}>{p}</li>
-                    ))}
-                  </ul>
-                </div>
+                  );
+                })}
+              </div>
+            </div>
 
-                {isMobile && (
-                  <div className="aaw-mobile-preview">
-                    <BrowserWindow active={i} onOpen={onOpen} />
-                  </div>
-                )}
-              </li>
-            ))}
             <div className="aaw-cta-wrap">
               <button className="hmz-cta" onClick={() => onOpen?.('/dashboard/resume')}>
                 Get Chrome Extension <ArrowRight size={15} />
               </button>
               <span className="aaw-cta-note">Free to start · No credit card required</span>
             </div>
-          </ol>
+          </div>
 
-          {!isMobile && (
-            <div className="aaw-stage-col">
-              <BrowserWindow active={activeStep} onOpen={onOpen} />
-            </div>
-          )}
+          {/* Right Column: Interactive Mac Window Preview */}
+          <div className="aaw-stage-col">
+            <BrowserWindow active={activeStep} onOpen={onOpen} />
+          </div>
         </div>
-      </div>
 
-      {!isMobile && (
+        {/* Bottom Pinned Progress Tabs */}
         <nav className="aaw-progress" aria-label="Walkthrough steps">
-          <div className="aaw-tabs" role="tablist" onKeyDown={onTabKeyDown}>
-            {STEPS.map((step, i) => (
-              <button
-                key={step.tab}
-                id={`aaw-tab-${i}`}
-                type="button"
-                role="tab"
-                aria-selected={i === activeStep}
-                tabIndex={i === activeStep ? 0 : -1}
-                className={`aaw-tab${i === activeStep ? ' is-active' : ''}`}
-                onClick={() => goToStep(i)}
-              >
-                <span className="aaw-track">
-                  <span className="aaw-fill" ref={(el) => (fillRefs.current[i] = el)} />
-                </span>
-                <span className="aaw-tab-label">{step.tab}</span>
-              </button>
-            ))}
+          <div className="aaw-tabs" role="tablist">
+            {STEPS.map((step, i) => {
+              const isTabActive = i === activeStep;
+              // Fill progress for this segment (0.0 to 1.0)
+              const segProgress = Math.min(1, Math.max(0, (rawProgress * 4) - i));
+              return (
+                <button
+                  key={step.tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={isTabActive}
+                  className={`aaw-tab ${isTabActive ? 'is-active' : ''}`}
+                  onClick={() => goToStep(i)}
+                >
+                  <span className="aaw-track">
+                    <span
+                      className="aaw-fill"
+                      style={{
+                        transform: `scaleX(${isTabActive ? Math.max(0.15, segProgress) : i < activeStep ? 1 : 0})`,
+                      }}
+                    />
+                  </span>
+                  <span className="aaw-tab-label">
+                    <b className="tab-n">{step.n}.</b> {step.tab}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </nav>
-      )}
+      </div>
     </section>
   );
 }
