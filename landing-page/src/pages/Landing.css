@@ -247,27 +247,66 @@ html,body{overflow-x:hidden}
 .hmz-chip.black{background:#0f1222;color:#fff}
 .hmz-chip.ghost{background:#EEF2FF;color:#335CFF;font-weight:600}
 
-/* Smooth fade entrance without vertical layout jump/shift */
-.hmz-hero.is-entering .hmz-chips{opacity:0}
-.hmz-hero.is-mounted .hmz-chips{opacity:1;transition:opacity .5s .1s ease}
+/* Smooth progressive cinematic entrance on mount / refresh */
+.hmz-hero.is-entering .hmz-chips{
+  opacity: 0;
+  transform: scale(0.96);
+  filter: blur(4px);
+}
+.hmz-hero.is-mounted .hmz-chips{
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  transition: opacity .8s .15s ease, transform .85s .15s cubic-bezier(.16,1,.3,1), filter .8s .15s ease;
+}
 
-.hmz-hero.is-entering .hmz-hero-title{opacity:0}
-.hmz-hero.is-mounted .hmz-hero-title{opacity:1;transition:opacity .6s .15s ease}
+.hmz-hero.is-entering .hmz-hero-title{
+  opacity: 0;
+  transform: scale(0.97);
+  filter: blur(8px);
+}
+.hmz-hero.is-mounted .hmz-hero-title{
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  transition: opacity .9s .28s ease, transform .95s .28s cubic-bezier(.16,1,.3,1), filter .85s .28s ease;
+}
 
 .hmz-sub{font-size:clamp(15px,2vw,18px);color:#475069;max-width:660px;margin:20px auto 28px}
-.hmz-hero.is-entering .hmz-sub{opacity:0}
-.hmz-hero.is-mounted .hmz-sub{opacity:1;transition:opacity .6s .2s ease}
+.hmz-hero.is-entering .hmz-sub{
+  opacity: 0;
+  transform: scale(0.98);
+  filter: blur(4px);
+}
+.hmz-hero.is-mounted .hmz-sub{
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  transition: opacity .85s .42s ease, transform .9s .42s cubic-bezier(.16,1,.3,1), filter .8s .42s ease;
+}
 
 .hmz-actions{display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap}
-.hmz-hero.is-entering .hmz-actions{opacity:0}
-.hmz-hero.is-mounted .hmz-actions{opacity:1;transition:opacity .6s .25s ease}
+.hmz-hero.is-entering .hmz-actions{
+  opacity: 0;
+  transform: scale(0.96);
+}
+.hmz-hero.is-mounted .hmz-actions{
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity .85s .55s ease, transform .9s .55s cubic-bezier(.16,1,.3,1);
+}
 
 .hmz-textlink{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:#0f1222;text-decoration:none;transition:.25s}
 .hmz-textlink:hover{color:#335CFF;gap:12px}
 
 .hmz-proof{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:24px;font-size:13px;color:#5b6478}
-.hmz-hero.is-entering .hmz-proof{opacity:0}
-.hmz-hero.is-mounted .hmz-proof{opacity:1;transition:opacity .6s .3s ease}
+.hmz-hero.is-entering .hmz-proof{
+  opacity: 0;
+}
+.hmz-hero.is-mounted .hmz-proof{
+  opacity: 1;
+  transition: opacity .8s .68s ease;
+}
 
 .hmz-avatars{display:flex}
 .hmz-av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff;border:2px solid #fff;margin-left:-9px;transition:transform .3s}

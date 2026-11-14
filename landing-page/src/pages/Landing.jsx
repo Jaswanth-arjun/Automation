@@ -1077,8 +1077,14 @@ function Hero({ onGetStarted, onOpen }) {
   const [heroMounted, setHeroMounted] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setHeroMounted(true), 60);
-    return () => clearTimeout(timer);
+    let timer;
+    const raf = requestAnimationFrame(() => {
+      timer = setTimeout(() => setHeroMounted(true), 100);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   const onMouse = useCallback((e) => {
