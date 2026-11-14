@@ -51,10 +51,13 @@ const STEPS = [
 ];
 
 const JOBS = [
-  { co: 'Apple', role: 'Senior Software Engineer, Find My', loc: 'Bangalore (Hybrid)', c: '#0f172a' },
+  { co: 'Apple', role: 'Senior Software Engineer, Find My', loc: 'Bangalore (Hybrid)', c: '#1f1b16' },
   { co: 'Amazon', role: 'Software Dev Engineer II', loc: 'Bangalore (Hybrid)', c: '#ff9900' },
   { co: 'Zomato', role: 'SDE III, Backend Systems', loc: 'Gurugram (On-site)', c: '#cb202d' },
-  { co: 'Angel One', role: 'Agentic AI Intern', loc: 'Bengaluru (Hybrid)', c: '#0d9488' },
+  { co: 'Angel One', role: 'Agentic AI Intern', loc: 'Bengaluru (Hybrid)', c: '#e8944a' },
+  { co: 'Flipkart', role: 'Frontend Engineer II', loc: 'Bangalore (Hybrid)', c: '#2874f0' },
+  { co: 'Razorpay', role: 'Backend Engineer', loc: 'Remote (India)', c: '#3395ff' },
+  { co: 'Swiggy', role: 'SDE II, Platform', loc: 'Bangalore (Hybrid)', c: '#fc8019' },
 ];
 
 const FORM_FIELDS = [
@@ -64,6 +67,8 @@ const FORM_FIELDS = [
   { label: 'Phone Number', value: '+91 94405 52825' },
   { label: 'LinkedIn Profile', value: 'linkedin.com/in/arjun-dev' },
   { label: 'GitHub / Portfolio', value: 'github.com/arjun-dev' },
+  { label: 'Work Authorization', value: 'Indian citizen · no sponsorship' },
+  { label: 'Notice Period', value: '15 days' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -92,7 +97,7 @@ function JobBoardScene({ onOpen }) {
 
       <div className="aaw-job-detail">
         <div className="aaw-co-line">
-          <span className="aaw-co-tile apple" style={{ background: '#0f172a' }}></span>
+          <span className="aaw-co-tile apple" style={{ background: '#1f1b16' }}></span>
           <span>Apple Inc.</span>
         </div>
         <h4 className="aaw-job-title">Senior Software Engineer, Find My</h4>
@@ -168,7 +173,7 @@ function FormScene() {
           </div>
         ))}
         {/* Tailored Resume File Attachment Box */}
-        <div className="aaw-field aaw-field-resume" style={{ '--i': 6 }}>
+        <div className="aaw-field aaw-field-resume" style={{ '--i': 8 }}>
           <label>Resume / CV *</label>
           <div className="aaw-attach">
             <span className="aaw-pdf-icon" aria-hidden="true">
@@ -186,6 +191,16 @@ function FormScene() {
             ✓ Attached automatically via DataTransfer by Hamzo AI Copilot
           </div>
         </div>
+      </div>
+
+      <div className="aaw-form-foot">
+        <span className="aaw-form-progress">
+          <span className="aaw-form-progress-fill" />
+        </span>
+        <span className="aaw-form-foot-note">
+          <CheckCircle2 size={13} /> 10 of 10 fields filled
+        </span>
+        <span className="aaw-form-continue">Continue →</span>
       </div>
     </div>
   );
@@ -491,21 +506,19 @@ export default function AutoApplyWalkthrough({ onOpen }) {
   return (
     <section className="aaw-runway" id="resume" ref={runwayRef} aria-labelledby="aaw-heading">
       <div className="aaw-pinned-stage" ref={stageRef}>
-        {/* Header with generous top padding to clear floating navbar */}
-        <header className="aaw-header">
-          <span className="hmz-kicker">AUTO APPLY COPILOT</span>
-          <h2 id="aaw-heading" className="aaw-heading">
-            How Auto Apply works on <em>autopilot.</em>
-          </h2>
-          <p className="aaw-lede">
-            HAMZO detects the job, autofills 15+ fields, attaches your tailored ATS resume, and asks your confirmation before submission.
-          </p>
-        </header>
+        <div className="aaw-layout">
+          {/* Left Column: header + moving steps (bottom → top) */}
+          <div className="aaw-copy-col">
+            <header className="aaw-header">
+              <span className="hmz-kicker">AUTO APPLY COPILOT</span>
+              <h2 id="aaw-heading" className="aaw-heading">
+                How Auto Apply works on <em>autopilot.</em>
+              </h2>
+              <p className="aaw-lede">
+                HAMZO detects the job, autofills 15+ fields, attaches your tailored ATS resume, and asks your confirmation before submission.
+              </p>
+            </header>
 
-        {/* 2-Column Split: Clean Left Step (Bottom to Top Motion) + Right Mac Window Mockup */}
-        <div className="aaw-grid">
-          {/* Left Column: Moving Steps (Bottom to Top animation, clean typography like Uplers) */}
-          <div className="aaw-steps-col">
             <div className="aaw-steps-stack">
               {STEPS.map((step, i) => {
                 let state = 'is-upcoming';
@@ -536,7 +549,7 @@ export default function AutoApplyWalkthrough({ onOpen }) {
             </div>
           </div>
 
-          {/* Right Column: Interactive Mac Window Preview */}
+          {/* Right Column: tall interactive Mac Window fills the frame */}
           <div className="aaw-stage-col">
             <BrowserWindow active={activeStep} onOpen={onOpen} />
           </div>

@@ -29,6 +29,7 @@ import {
 import { useAuth } from '../lib/auth';
 import PawLogo from '../components/PawLogo';
 import AutoApplyWalkthrough from '../components/AutoApplyWalkthrough';
+import OutreachWalkthrough from '../components/OutreachWalkthrough';
 import './Landing.css';
 
 /* ================= helpers ================= */
@@ -1304,6 +1305,11 @@ function ScrollResume({ onOpen }) {
   return <AutoApplyWalkthrough onOpen={onOpen} />;
 }
 
+/* Reversed scrollytelling — Outreach & Referrals (Email + LinkedIn) */
+function ScrollOutreach({ onOpen }) {
+  return <OutreachWalkthrough onOpen={onOpen} />;
+}
+
 function Pillars({ onOpen }) {
   const [ref, visible] = useReveal();
   const [gridRef, gridVisible] = useStagger();
@@ -1671,6 +1677,7 @@ export default function Landing() {
         <Integrations />
         <ScrollResume onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <Pillars onOpen={(r) => go(isAuthenticated ? r : undefined)} />
+        <ScrollOutreach onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <ExtensionSpot onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <Compare />
         <Setup onOpen={(r) => go(isAuthenticated ? r : undefined)} />
