@@ -1604,7 +1604,7 @@ export default function Landing() {
   return (
     <div className="hmz-page">
       <div className="hmz-ambient" aria-hidden="true"><i className="b1" /><i className="b2" /><i className="b3" /><i className="b4" /></div>
-      <VideoLoader isLoading={loading} maxWaitMs={2200} fadeDurationMs={350} />
+      <VideoLoader isLoading={loading} />
       <TopBar onGetStarted={() => go()} authed={isAuthenticated} />
       <EmailOtpModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onSuccess={() => { setShowAuthModal(false); navigate('/dashboard'); }} />
       <main>

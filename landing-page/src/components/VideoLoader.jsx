@@ -1,42 +1,36 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export default function VideoLoader({ isLoading, fadeDurationMs = 450, maxWaitMs = 15000 }) {
-  const [overlayMounted, setOverlayMounted] = useState(true);
-  const [firstPassDone, setFirstPassDone] = useState(false);
+/**
+ * Hamzo Loop Video Loader
+ * Displays the mascot typing animation in a continuous loop during actual loading time only.
+ * Dismisses immediately when isLoading becomes false without any artificial delays.
+ */
+export default function VideoLoader({ isLoading, fadeDurationMs = 260 }) {
+  const [mounted, setMounted] = useState(Boolean(isLoading));
+  const [visible, setVisible] = useState(Boolean(isLoading));
   const videoRef = useRef(null);
-  const firstPassRef = useRef(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (video) video.muted = true;
 
     if (isLoading) {
-      setOverlayMounted(true);
+      setMounted(true);
+      requestAnimationFrame(() => setVisible(true));
       video?.play().catch(() => {});
-      return;
+    } else {
+      // Dismiss immediately according to actual loader time (no waiting for video loop)
+      setVisible(false);
+      const timer = window.setTimeout(() => {
+        setMounted(false);
+        video?.pause();
+      }, fadeDurationMs);
+      return () => window.clearTimeout(timer);
     }
-
-    if (!firstPassDone) return;
-
-    const timer = window.setTimeout(() => {
-      setOverlayMounted(false);
-      video?.pause();
-    }, fadeDurationMs);
-    return () => window.clearTimeout(timer);
-  }, [isLoading, fadeDurationMs, firstPassDone]);
+  }, [isLoading, fadeDurationMs]);
 
   useEffect(() => {
-    const fallback = window.setTimeout(() => {
-      if (!firstPassRef.current) {
-        firstPassRef.current = true;
-        setFirstPassDone(true);
-      }
-    }, maxWaitMs);
-    return () => window.clearTimeout(fallback);
-  }, [maxWaitMs]);
-
-  useEffect(() => {
-    if (overlayMounted) {
+    if (mounted && visible) {
       document.documentElement.style.overflow = 'hidden';
       document.body.style.overflow = 'hidden';
     } else {
@@ -47,30 +41,25 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 450, maxWaitMs
       document.documentElement.style.overflow = '';
       document.body.style.overflow = '';
     };
-  }, [overlayMounted]);
+  }, [mounted, visible]);
 
-  const handleTimeUpdate = () => {
-    const video = videoRef.current;
-    if (!video || firstPassRef.current || !video.duration) return;
-    if (video.currentTime >= video.duration - 0.1) {
-      firstPassRef.current = true;
-      setFirstPassDone(true);
-    }
-  };
-
-  const show = isLoading || !firstPassDone;
+  if (!mounted && !isLoading) {
+    return null;
+  }
 
   return (
     <div
-      aria-hidden={!show}
+      aria-hidden={!visible}
       aria-label="Loading"
       role="status"
-      className={`video-loader ${show ? 'show' : 'hide'}`}
-      style={{ transitionDuration: `${fadeDurationMs}ms`, visibility: overlayMounted ? 'visible' : 'hidden' }}
+      className={`video-loader ${visible ? 'show' : 'hide'}`}
+      style={{
+        transitionDuration: `${fadeDurationMs}ms`,
+        visibility: mounted ? 'visible' : 'hidden',
+      }}
     >
       <video
         ref={videoRef}
-        src="/hamster-loader.mp4"
         autoPlay
         muted
         loop
@@ -78,8 +67,10 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 450, maxWaitMs
         preload="auto"
         disablePictureInPicture
         controlsList="nodownload nofullscreen noremoteplayback"
-        onTimeUpdate={handleTimeUpdate}
-      />
+      >
+        <source src="/hamzo-loader.mp4" type="video/mp4" />
+        <source src="/hamster-loader.mp4" type="video/mp4" />
+      </video>
     </div>
   );
 }

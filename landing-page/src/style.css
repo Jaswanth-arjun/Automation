@@ -269,11 +269,11 @@ nav{height:82px;padding:0 28px;top:30px;left:50%;right:auto;width:min(1280px,68v
 .loading-spinner{width:36px;height:36px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* Hamster whirl video loader — small, centered, blended into page background */
-.video-loader{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;overflow:hidden;transition-property:opacity;transition-timing-function:ease-out;background:var(--paper)}
+/* Hamzo loop video loader — centered, blends into page background */
+.video-loader{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;overflow:hidden;transition-property:opacity;transition-timing-function:ease-out;background:var(--paper)}
 .video-loader.show{opacity:1;pointer-events:auto}
 .video-loader.hide{opacity:0;pointer-events:none}
-.video-loader video{width:min(46vw,340px);height:min(46vw,340px);object-fit:contain;mask-image:radial-gradient(closest-side,#000 62%,transparent 100%);-webkit-mask-image:radial-gradient(closest-side,#000 62%,transparent 100%)}
+.video-loader video{width:min(50vw,360px);max-height:min(50vh,360px);object-fit:contain;mix-blend-mode:multiply}
 
 /* Auth page */
 .auth-page{min-height:100vh;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px}
