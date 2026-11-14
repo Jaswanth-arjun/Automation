@@ -936,11 +936,11 @@ function TopBar({ onGetStarted, authed }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const fn = () => setScrolled(window.scrollY > 16);
+    const fn = () => setScrolled(window.scrollY > 20);
     fn();
     window.addEventListener('scroll', fn, { passive: true });
-    // Trigger smooth small-to-big morph effect on mount / refresh
-    const timer = setTimeout(() => setMounted(true), 50);
+    // First paints in wide state, then visibly SHRINKS into the actual capsule position!
+    const timer = setTimeout(() => setMounted(true), 180);
     return () => {
       window.removeEventListener('scroll', fn);
       clearTimeout(timer);
@@ -948,7 +948,7 @@ function TopBar({ onGetStarted, authed }) {
   }, []);
 
   return (
-    /* Floating Capsule Pill Navbar with dynamic small-to-big expand effect */
+    /* Floating Capsule Pill Navbar with dynamic shrink-to-position effect */
     <div className={`hmz-topwrap ${scrolled ? 'is-scrolled' : ''} ${mounted ? 'is-mounted' : 'is-entering'}`}>
         <div className="hmz-top">
           <a className="hmz-brand" href="#top"><PawLogo size={28} /><span>HAMZO</span></a>

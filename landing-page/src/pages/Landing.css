@@ -48,44 +48,55 @@ html,body{overflow-x:hidden}
 .hmz-page main{position:relative;z-index:1}
 @media (prefers-reduced-motion:reduce){.hmz-ambient i{animation:none}}
 
-/* ===== NAVBAR DYNAMIC MORPH (SMALL TO BIG ON LOAD / REFRESH) ===== */
+/* ===== NAVBAR DYNAMIC SHRINK (STARTS WIDE -> SHRINKS TO ACTUAL POSITION) ===== */
 .hmz-topwrap{
   position:fixed;
   top:18px;
   left:50%;
   transform:translateX(-50%);
-  width:min(1240px,calc(100% - 48px));
+  width:min(1080px,calc(100% - 48px));
   z-index:60;
   transition:width .85s cubic-bezier(.16,1,.3,1),
-             transform .8s cubic-bezier(.16,1,.3,1),
-             opacity .6s ease,
-             top .3s ease;
-  will-change:width,transform,opacity;
+             max-width .85s cubic-bezier(.16,1,.3,1),
+             top .4s cubic-bezier(.16,1,.3,1),
+             transform .85s cubic-bezier(.16,1,.3,1),
+             box-shadow .4s ease;
+  will-change:width,top,transform;
 }
-.hmz-topwrap.is-entering{
-  width:min(340px,calc(100% - 48px));
-  opacity:.15;
-  transform:translateX(-50%) translateY(-12px) scale(.92);
-}
-.hmz-topwrap.is-mounted{
-  width:min(1240px,calc(100% - 48px));
-  opacity:1;
-  transform:translateX(-50%) translateY(0) scale(1);
-}
-.hmz-topwrap.is-scrolled{top:12px}
 
-/* Navbar inner links reveal gracefully as navbar expands */
-.hmz-topwrap.is-entering .hmz-links,
-.hmz-topwrap.is-entering .hmz-topright{
-  opacity:0;
-  transform:translateY(-4px) scale(.95);
-  pointer-events:none;
+/* Initial state on page open / refresh: wide across screen */
+.hmz-topwrap.is-entering{
+  width:min(1380px,calc(100% - 24px));
+  top:8px;
+  transform:translateX(-50%) translateY(-2px);
 }
-.hmz-topwrap.is-mounted .hmz-links,
-.hmz-topwrap.is-mounted .hmz-topright{
-  opacity:1;
-  transform:translateY(0) scale(1);
-  transition:opacity .5s .25s ease,transform .6s .25s cubic-bezier(.16,1,.3,1);
+.hmz-topwrap.is-entering .hmz-top{
+  border-radius:20px;
+  padding:10px 20px 10px 26px;
+}
+
+/* Mounted state: smoothly shrinks inwards into the exact floating capsule pill position */
+.hmz-topwrap.is-mounted{
+  width:min(1080px,calc(100% - 48px));
+  top:18px;
+  transform:translateX(-50%) translateY(0);
+}
+.hmz-topwrap.is-mounted .hmz-top{
+  border-radius:999px;
+  padding:8px 12px 8px 24px;
+  transition:border-radius .75s cubic-bezier(.16,1,.3,1),
+             padding .75s cubic-bezier(.16,1,.3,1);
+}
+
+/* Scrolled state: shrinks even more compactly as user scrolls down */
+.hmz-topwrap.is-scrolled{
+  top:12px;
+  width:min(960px,calc(100% - 40px));
+}
+.hmz-topwrap.is-scrolled .hmz-top{
+  padding:6px 10px 6px 20px;
+  box-shadow:0 14px 36px rgba(15,18,34,.12);
+  border-color:rgba(203,213,225,.95);
 }
 
 .hmz-top{background:rgba(255,255,255,.94);backdrop-filter:blur(16px);border-radius:999px;border:1.5px solid rgba(226,232,240,.9);box-shadow:0 10px 30px rgba(15,18,34,.07);padding:8px 12px 8px 24px;display:flex;align-items:center;gap:18px}
