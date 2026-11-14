@@ -365,8 +365,49 @@ html,body{overflow-x:hidden}
 .hmz-logos{overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);position:relative;z-index:1}
 .hmz-logos>div{display:flex;gap:12px;width:max-content;animation:hmzslide 22s linear infinite;will-change:transform}
 .hmz-logos:hover>div{animation-play-state:paused}
-.hmz-logos span{white-space:nowrap;border:1px solid #dce3f5;background:rgba(255,255,255,.78);border-radius:12px;padding:11px 20px;font-size:13px;font-weight:700;color:#3d4663;box-shadow:0 4px 14px rgba(50,70,120,.06);transition:all .3s;cursor:default}
-.hmz-logos span:hover{border-color:#9eafff;box-shadow:0 8px 22px rgba(51,92,255,.16);color:#335CFF;transform:scale(1.05)}
+.hmz-platform-cell{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  white-space:nowrap;
+  border:1px solid #dce3f5;
+  background:rgba(255,255,255,.88);
+  backdrop-filter:blur(8px);
+  border-radius:12px;
+  padding:7px 16px 7px 9px;
+  box-shadow:0 4px 14px rgba(50,70,120,.05);
+  transition:all .28s cubic-bezier(.16,1,.3,1);
+  cursor:default;
+}
+.hmz-platform-cell:hover{
+  border-color:#9eafff;
+  box-shadow:0 8px 24px rgba(51,92,255,.16);
+  transform:scale(1.05) translateY(-2px);
+  background:#ffffff;
+}
+.hmz-platform-mark{
+  display:grid;
+  place-items:center;
+  width:26px;
+  height:26px;
+  border-radius:6px;
+  overflow:hidden;
+  flex-shrink:0;
+  transition:transform .2s ease;
+}
+.hmz-platform-cell:hover .hmz-platform-mark{
+  transform:scale(1.1);
+}
+.hmz-platform-txt{
+  font-size:13.5px;
+  font-weight:700;
+  color:#3a3f5c;
+  letter-spacing:-.01em;
+  transition:color .25s ease;
+}
+.hmz-platform-cell:hover .hmz-platform-txt{
+  color:#335CFF;
+}
 @keyframes hmzslide{from{transform:translateX(-50%)}to{transform:translateX(0)}}
 
 /* ===== COMPANY LOGO MARQUEE (Nyeras-style trust band) ===== */

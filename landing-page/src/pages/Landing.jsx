@@ -1187,13 +1187,108 @@ function LogoMarquee() {
   );
 }
 
+function PlatformLogo({ name }) {
+  switch (name) {
+    case 'LinkedIn':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#0A66C2" />
+          <path fill="#FFFFFF" d="M19 19h-3.1v-4.9c0-1.2 0-2.7-1.7-2.7-1.7 0-1.9 1.3-1.9 2.6V19H9.2V9.6h3v1.3h.1c.4-.8 1.4-1.6 2.9-1.6 3.1 0 3.8 2 3.8 4.7V19zM5.5 8.3c-1 0-1.8-.8-1.8-1.8s.8-1.8 1.8-1.8 1.8.8 1.8 1.8-.8 1.8-1.8 1.8zm1.5 10.7H4V9.6h3V19z" />
+        </svg>
+      );
+    case 'Gmail':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#FFFFFF" stroke="#EA4335" strokeWidth="0.6" />
+          <path fill="#4285F4" d="M3.5 18.5h3v-8L3.5 8v10.5z" />
+          <path fill="#34A853" d="M17.5 18.5h3V8l-3 2.5v8z" />
+          <path fill="#EA4335" d="M17.5 5.5l-5.5 4.2-5.5-4.2a2 2 0 0 0-3 1.8v1l8.5 6.4 8.5-6.4v-1a2 2 0 0 0-3-1.8z" />
+          <path fill="#FBBC05" d="M20.5 7.3L17.5 9.6v1l3-2.3V7.3z" />
+          <path fill="#C5221F" d="M3.5 7.3l3 2.3v1l-3-2.3V7.3z" />
+        </svg>
+      );
+    case 'Greenhouse':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#008264" />
+          <path fill="#FFFFFF" d="M12 4.5c-3.8 0-6.8 2.8-7 6.4h4.2c.2-1.3 1.3-2.3 2.8-2.3 1.6 0 2.8 1.1 2.8 2.5 0 1.2-.8 2.1-2 2.4l-1.8.4c-2.6.6-4.2 2.2-4.2 4.6 0 2.8 2.3 4.9 5.6 4.9 4.1 0 7.2-2.9 7.4-6.6h-4.3c-.2 1.4-1.4 2.4-3.1 2.4-1.7 0-2.8-1-2.8-2.4 0-1.2.9-2 2.2-2.3l1.8-.4c2.6-.6 4-2.2 4-4.5 0-3-2.4-5.1-5.6-5.1z" />
+        </svg>
+      );
+    case 'Lever':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#1C2530" />
+          <path fill="#29C4A9" d="M5.5 6.5h3.8v11H5.5z" />
+          <path fill="#00A2B8" d="M9.8 10.5h3.8v7H9.8z" />
+          <path fill="#FFFFFF" d="M14.2 13.5h3.8v4h-3.8z" />
+        </svg>
+      );
+    case 'Ashby':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#5A51E8" />
+          <path fill="#FFFFFF" d="M12 4.5L5.5 17h3.4l1.6-3.4h4l1.6 3.4h3.4L12 4.5zm0 5.4l1.2 2.6h-2.4L12 9.9z" />
+        </svg>
+      );
+    case 'Workday':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#005CB9" />
+          <path fill="#FF7900" d="M12 5.5a4.2 4.2 0 0 0-4.2 4.2c0 2.3 4.2 6.8 4.2 6.8s4.2-4.5 4.2-6.8a4.2 4.2 0 0 0-4.2-4.2z" />
+          <circle cx="12" cy="9.7" r="1.8" fill="#FFFFFF" />
+        </svg>
+      );
+    case 'mynexthire':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#FF5000" />
+          <path fill="#FFFFFF" d="M6 6.5h3.2l5.6 7.4V6.5H18v11h-3.2L9.2 10.1v7.4H6z" />
+        </svg>
+      );
+    case 'Naukri':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#2563EB" />
+          <circle cx="8" cy="12" r="3" fill="#FFFFFF" />
+          <path fill="#FFFFFF" d="M12.5 8.8h2.6v6.4h-2.6zm3.8 0H19v6.4h-2.7z" />
+        </svg>
+      );
+    case 'Indeed':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#2164F3" />
+          <path fill="#FFFFFF" d="M12.8 17.5V9.4h-2.2v8.1h2.2zm-1.1-9.3c.8 0 1.4-.6 1.4-1.3 0-.8-.6-1.4-1.4-1.4-.7 0-1.3.6-1.3 1.4 0 .7.6 1.3 1.3 1.3zM15 17.5h2.2c0-3.3-1.6-4.6-3.8-4.6-1.1 0-2.1.4-2.8 1.1v-1h-2.2v4.5h2.2v-2.3c0-1.4.8-1.9 1.7-1.9 1.1 0 1.6.7 1.6 1.9v2.3H15z" />
+        </svg>
+      );
+    default:
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <rect width="24" height="24" rx="5" fill="#0F172A" />
+          <circle cx="12" cy="12" r="6" fill="none" stroke="#38BDF8" strokeWidth="1.8" />
+          <path fill="none" stroke="#38BDF8" strokeWidth="1.6" d="M6.5 12h11M12 6a9 9 0 0 1 0 12 9 9 0 0 1 0-12" />
+        </svg>
+      );
+  }
+}
+
 function Integrations() {
   return (
     <>
       <WaveDivider color="#f7f9ff" />
       <div className="hmz-strip">
         <p className="hmz-logostrip-head">We apply on</p>
-        <div className="hmz-logos"><div>{[...INTEGRATIONS, ...INTEGRATIONS].map((t, i) => <span key={i}>{t}</span>)}</div></div>
+        <div className="hmz-logos">
+          <div>
+            {[...INTEGRATIONS, ...INTEGRATIONS].map((t, i) => (
+              <span className="hmz-platform-cell" key={i} title={t}>
+                <span className="hmz-platform-mark" aria-hidden="true">
+                  <PlatformLogo name={t} />
+                </span>
+                <b className="hmz-platform-txt">{t}</b>
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
       <WaveDivider color="#f7f9ff" flip />
     </>
