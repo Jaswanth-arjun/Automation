@@ -504,7 +504,7 @@ export default function AutoApplyWalkthrough({ onOpen }) {
   }, [isMobile]);
 
   return (
-    <section className="aaw-runway" id="resume" ref={runwayRef} aria-labelledby="aaw-heading">
+    <section className="aaw-runway" id="product" ref={runwayRef} aria-labelledby="aaw-heading">
       <div className="aaw-pinned-stage" ref={stageRef}>
         <div className="aaw-layout">
           {/* Left Column: header + moving steps (bottom → top) */}

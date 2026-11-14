@@ -1676,7 +1676,6 @@ export default function Landing() {
         <LogoMarquee />
         <Integrations />
         <ScrollResume onOpen={(r) => go(isAuthenticated ? r : undefined)} />
-        <Pillars onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <ScrollOutreach onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <ExtensionSpot onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <Compare />
