@@ -939,11 +939,21 @@ function TopBar({ onGetStarted, authed }) {
     const fn = () => setScrolled(window.scrollY > 20);
     fn();
     window.addEventListener('scroll', fn, { passive: true });
-    // On open/refresh: starts shrunk, then visibly expands out to full pill!
-    const timer = setTimeout(() => setMounted(true), 120);
+
+    // Double RAF ensures the initial compact frame is fully painted on GPU before triggering the smooth CSS expansion
+    let timer;
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        timer = setTimeout(() => {
+          setMounted(true);
+        }, 60);
+      });
+    });
+
     return () => {
       window.removeEventListener('scroll', fn);
-      clearTimeout(timer);
+      cancelAnimationFrame(raf1);
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
