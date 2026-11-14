@@ -939,8 +939,8 @@ function TopBar({ onGetStarted, authed }) {
     const fn = () => setScrolled(window.scrollY > 20);
     fn();
     window.addEventListener('scroll', fn, { passive: true });
-    // First paints in wide state, then visibly SHRINKS into the actual capsule position!
-    const timer = setTimeout(() => setMounted(true), 180);
+    // On open/refresh: starts shrunk, then visibly expands out to full pill!
+    const timer = setTimeout(() => setMounted(true), 120);
     return () => {
       window.removeEventListener('scroll', fn);
       clearTimeout(timer);
@@ -948,7 +948,7 @@ function TopBar({ onGetStarted, authed }) {
   }, []);
 
   return (
-    /* Floating Capsule Pill Navbar with dynamic shrink-to-position effect */
+    /* Floating Capsule Pill Navbar with dynamic shrink-to-expand effect */
     <div className={`hmz-topwrap ${scrolled ? 'is-scrolled' : ''} ${mounted ? 'is-mounted' : 'is-entering'}`}>
         <div className="hmz-top">
           <a className="hmz-brand" href="#top"><PawLogo size={28} /><span>HAMZO</span></a>
@@ -1635,7 +1635,6 @@ export default function Landing() {
   return (
     <div className="hmz-page">
       <div className="hmz-ambient" aria-hidden="true"><i className="b1" /><i className="b2" /><i className="b3" /><i className="b4" /></div>
-      <VideoLoader isLoading={loading} />
       <TopBar onGetStarted={() => go()} authed={isAuthenticated} />
       <EmailOtpModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onSuccess={() => { setShowAuthModal(false); navigate('/dashboard'); }} />
       <main>
