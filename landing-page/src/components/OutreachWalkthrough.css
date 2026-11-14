@@ -1,0 +1,1036 @@
+/* ==================================================================
+   OutreachWalkthrough — Autonomous Outreach & Referrals (Email, LinkedIn,
+   Auto apply).
+   Mirrored scrollytelling layout:
+   - Mac browser mockup frame on the LEFT (identical size to AutoApply)
+   - Header + travelling steps (01, 02, 03) on the RIGHT
+   - Warm orange theme matches the landing page
+   ================================================================== */
+
+/* 300vh = one full 100vh scroll slice per stage */
+.ow-runway {
+  position: relative;
+  width: 100%;
+  height: 300vh;
+  background:
+    radial-gradient(120% 55% at 50% 0%, #fffaf0 0%, #fffdf9 46%, #ffffff 100%),
+    #fffdf9;
+  color: #1f1b16;
+}
+
+/* Pinned stage — locked in viewport during scroll */
+.ow-pinned-stage {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 92px 40px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  overflow: hidden;
+  z-index: 10;
+}
+
+/* Warm aura behind pinned stage */
+.ow-pinned-stage::before {
+  content: '';
+  position: absolute;
+  top: -8%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1100px, 92%);
+  height: 62%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(232, 148, 74, 0.15) 0%,
+    rgba(242, 139, 149, 0.11) 38%,
+    rgba(255, 197, 49, 0.07) 66%,
+    transparent 80%
+  );
+  filter: blur(70px);
+  pointer-events: none;
+  z-index: 0;
+  animation: owAuraBreath 8s ease-in-out infinite alternate;
+}
+
+@keyframes owAuraBreath {
+  0% { transform: translateX(-50%) scale(0.94); opacity: 0.6; }
+  100% { transform: translateX(-50%) scale(1.06); opacity: 1; }
+}
+
+.ow-pinned-stage > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- Grid Layout: Left Frame (55%) + Right Copy (45%) ---------- */
+
+.ow-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+  column-gap: clamp(34px, 4vw, 64px);
+  align-items: flex-start;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  margin-top: 10px;
+}
+
+/* ---------- Left Column: Mac Browser Window Frame ---------- */
+
+.ow-stage-col {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+
+.ow-window {
+  width: 100%;
+  height: clamp(480px, calc(100vh - 135px), 580px);
+  max-height: calc(100vh - 135px);
+  background: #ffffff;
+  border-radius: 22px;
+  border: 1px solid #ece2cf;
+  box-shadow: 0 36px 90px -22px rgba(122, 77, 0, 0.3), 0 0 0 1px rgba(236, 226, 207, 0.9);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.ow-chrome {
+  background: #fdf9f2;
+  border-bottom: 1px solid #f1e9da;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+}
+
+.ow-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.ow-chrome .ow-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: block;
+  margin: 0;
+}
+
+.ow-chrome .ow-dot-r { background: #ff5f56; }
+.ow-chrome .ow-dot-y { background: #febc2e; }
+.ow-chrome .ow-dot-g { background: #28c840; }
+
+.ow-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #f1e6d3;
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #6b6459;
+  max-width: 380px;
+  width: 100%;
+  justify-content: center;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.ow-url-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-live-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fdf1e0;
+  border: 1px solid #f3d4ae;
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.ow-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e8944a;
+  box-shadow: 0 0 6px #e8944a;
+}
+
+/* Viewport holding interactive scenes */
+.ow-viewport {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #fffaf3;
+  display: flex;
+  flex-direction: column;
+}
+
+.ow-scene {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateY(24px) scale(0.985);
+  pointer-events: none;
+  transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+}
+
+.ow-scene.is-active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+/* ---------- Right Column: Copy & Animated Steps ---------- */
+
+.ow-copy-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: clamp(24px, 4vh, 44px);
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ow-header {
+  max-width: 580px;
+  margin: 0;
+  flex: none;
+}
+
+.ow-header .hmz-kicker {
+  color: #7a4d00;
+  background: #fde9b4;
+  border: 1px solid #f6dda5;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.ow-header .hmz-kicker::after {
+  background: linear-gradient(90deg, transparent, rgba(232, 148, 74, 0.45), transparent);
+}
+
+.ow-heading {
+  margin: 0 0 6px;
+  font-size: clamp(1.75rem, 2.7vw, 2.5rem);
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+  color: #1f1b16;
+}
+
+.ow-header .ow-heading em {
+  font-style: normal;
+  background: linear-gradient(120deg, #d97706 0%, #e8944a 32%, #ef6f92 64%, #d97706 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: #d97706;
+  -webkit-text-fill-color: transparent;
+  animation: owShineGrad 4.5s linear infinite;
+}
+
+@keyframes owShineGrad {
+  to { background-position: 200% center; }
+}
+
+.ow-lede {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.5;
+  color: #6b6459;
+  max-width: 65ch;
+}
+
+/* Steps Stack */
+.ow-steps-stack {
+  position: relative;
+  height: clamp(250px, 32vh, 330px);
+  width: 100%;
+  max-width: 500px;
+  overflow: visible;
+}
+
+.ow-step-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  opacity: 0;
+  transform: translateY(300px);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.ow-step-item.is-active {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.ow-step-item.is-passed {
+  opacity: 0;
+  transform: translateY(-180px);
+  pointer-events: none;
+}
+
+.ow-step-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ow-step-badge {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d97706 0%, #e8944a 52%, #ef6f92 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 6px 16px rgba(217, 119, 6, 0.35);
+}
+
+.ow-step-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ow-step-kicker {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: #b45309;
+}
+
+.ow-step-title {
+  margin: 0;
+  font-size: clamp(21px, 2.1vw, 26px);
+  font-weight: 700;
+  color: #1f1b16;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+
+.ow-step-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ow-step-bullets li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: #6b6459;
+}
+
+.ow-bullet-dot {
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  border-radius: 50%;
+  background: #e8944a;
+  box-shadow: 0 0 0 3px rgba(232, 148, 74, 0.14);
+  margin-top: 7px;
+  flex-shrink: 0;
+}
+
+/* Micro animations inside the scenes */
+@keyframes owRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes owPop {
+  0%   { opacity: 0; transform: scale(0.88); }
+  70%  { opacity: 1; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.ow-scene.is-active .ow-mail-top { animation: owRise 0.45s both; animation-delay: 60ms; }
+.ow-scene.is-active .ow-mail-subject { animation: owRise 0.45s both; animation-delay: 120ms; }
+.ow-scene.is-active .ow-mail-line { animation: owRise 0.45s both; animation-delay: 180ms; }
+.ow-scene.is-active .ow-mail-attach { animation: owPop 0.5s both; animation-delay: 260ms; }
+.ow-scene.is-active .ow-mail-actions { animation: owRise 0.45s both; animation-delay: 340ms; }
+.ow-scene.is-active .ow-mail-toast { animation: owPop 0.5s both; animation-delay: 460ms; }
+.ow-scene.is-active .ow-mail-sched { animation: owRise 0.45s both; animation-delay: 380ms; }
+
+.ow-scene.is-active .ow-li-head { animation: owRise 0.45s both; animation-delay: 70ms; }
+.ow-scene.is-active .ow-li-stats { animation: owRise 0.45s both; animation-delay: 140ms; }
+.ow-scene.is-active .ow-li-row {
+  animation: owRise 0.45s both;
+  animation-delay: calc(200ms + var(--i, 0) * 80ms);
+}
+.ow-scene.is-active .ow-li-foot { animation: owPop 0.5s both; animation-delay: 520ms; }
+
+.ow-scene.is-active .ow-apply-head { animation: owRise 0.45s both; animation-delay: 70ms; }
+.ow-scene.is-active .ow-field {
+  animation: owRise 0.45s both;
+  animation-delay: calc(140ms + var(--i, 0) * 70ms);
+}
+.ow-scene.is-active .ow-apply-resume { animation: owPop 0.5s both; animation-delay: 460ms; }
+.ow-scene.is-active .ow-apply-confirm { animation: owRise 0.45s both; animation-delay: 560ms; }
+
+/* ---------- Scene 1: Email referral request ---------- */
+
+.ow-mail {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  height: 100%;
+}
+
+.ow-mail-side {
+  border-right: 1px solid #f1e9da;
+  background: #fdf9f2;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ow-mail-logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #1f1b16;
+  margin-bottom: 6px;
+}
+
+.ow-mail-folder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #8a7f6b;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.ow-mail-folder.is-on {
+  background: #fff8ee;
+  border: 1px solid #f6dfc0;
+  color: #b45309;
+  font-weight: 700;
+}
+
+.ow-mail-folder b {
+  font-size: 0.62rem;
+  background: #fde9b4;
+  color: #7a4d00;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.ow-mail-sched {
+  margin-top: auto;
+  background: #fff8ee;
+  border: 1px solid #f6dfc0;
+  border-radius: 8px;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ow-mail-sched small {
+  font-size: 0.56rem;
+  color: #8a7f6b;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ow-mail-sched b {
+  font-size: 0.68rem;
+  color: #b45309;
+}
+
+.ow-mail-main {
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ow-mail-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ow-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d97706, #ef6f92);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.ow-avatar-sm {
+  width: 28px;
+  height: 28px;
+  font-size: 10px;
+}
+
+.ow-mail-to {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ow-mail-to small {
+  font-size: 0.56rem;
+  color: #8a7f6b;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ow-mail-to b {
+  font-size: 0.76rem;
+  color: #1f1b16;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-pill {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  background: #fff8ee;
+  border: 1px solid #f6dfc0;
+  padding: 3px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ow-mail-subject {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #1f1b16;
+  border-bottom: 1px solid #f1e9da;
+  padding-bottom: 8px;
+}
+
+.ow-mail-line {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: #6b6459;
+}
+
+.ow-mail-attach {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff8ee;
+  border: 1px dashed #e8944a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.72rem;
+  color: #4a4136;
+  font-weight: 600;
+}
+
+.ow-mail-attach span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-mail-attach b {
+  margin-left: auto;
+  color: #b45309;
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.ow-mail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+}
+
+.ow-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: linear-gradient(135deg, #d97706 0%, #e8944a 55%, #ef6f92 100%);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 7px;
+  box-shadow: 0 6px 14px rgba(217, 119, 6, 0.28);
+}
+
+.ow-ghost {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #8a7f6b;
+}
+
+.ow-mail-toast {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.68rem;
+  color: #b45309;
+  background: #fdf1e0;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-weight: 700;
+}
+
+/* ---------- Scene 2: LinkedIn campaign ---------- */
+
+.ow-li {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  padding: 20px 24px;
+  box-sizing: border-box;
+}
+
+.ow-li-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #f1e9da;
+  padding-bottom: 10px;
+}
+
+.ow-li-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #0a66c2;
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.ow-li-head > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ow-li-head b {
+  font-size: 0.82rem;
+  color: #1f1b16;
+}
+
+.ow-li-head small {
+  font-size: 0.65rem;
+  color: #8a7f6b;
+}
+
+.ow-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fdf1e0;
+  border: 1px solid #f3d4ae;
+  color: #b45309;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.ow-live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e8944a;
+  box-shadow: 0 0 6px #e8944a;
+  animation: owPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes owPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+.ow-li-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.ow-li-stats > div {
+  background: #ffffff;
+  border: 1px solid #ece2cf;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ow-li-stats small {
+  font-size: 0.58rem;
+  color: #8a7f6b;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ow-li-stats b {
+  font-size: 0.88rem;
+  color: #1f1b16;
+  font-weight: 800;
+}
+
+.ow-li-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ow-li-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid #f1e9da;
+  border-radius: 9px;
+}
+
+.ow-li-person {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ow-li-person b {
+  font-size: 0.74rem;
+  color: #1f1b16;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-li-person small {
+  font-size: 0.62rem;
+  color: #8a7f6b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-li-state {
+  margin-left: auto;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.ow-li-state.is-replied { background: #fdf1e0; color: #b45309; }
+.ow-li-state.is-accepted { background: #f6dfc0; color: #7a4d00; }
+.ow-li-state.is-invited { background: #f3efe6; color: #8a7f6b; }
+
+.ow-li-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  color: #b45309;
+  background: #fdf1e0;
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-top: auto;
+  font-weight: 600;
+}
+
+/* ---------- Scene 3: Auto apply ---------- */
+
+.ow-apply {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+  padding: 20px 24px;
+  box-sizing: border-box;
+}
+
+.ow-apply-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid #f1e9da;
+  padding-bottom: 10px;
+  gap: 10px;
+}
+
+.ow-apply-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ow-apply-head small {
+  font-size: 0.62rem;
+  color: #8a7f6b;
+  font-weight: 700;
+}
+
+.ow-apply-head b {
+  font-size: 0.86rem;
+  color: #1f1b16;
+}
+
+.ow-apply-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ow-field {
+  background: #fffdf9;
+  border: 1px solid #ece2cf;
+  border-radius: 8px;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ow-field small {
+  font-size: 0.56rem;
+  color: #8a7f6b;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ow-field span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: #1f1b16;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-field svg {
+  color: #e8944a;
+  flex-shrink: 0;
+}
+
+.ow-apply-resume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff8ee;
+  border: 1px dashed #e8944a;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.ow-apply-resume > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ow-apply-resume b {
+  font-size: 0.74rem;
+  color: #1f1b16;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ow-apply-resume small {
+  font-size: 0.62rem;
+  color: #8a7f6b;
+}
+
+.ow-apply-resume > svg:last-child {
+  color: #e8944a;
+}
+
+.ow-apply-confirm {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #fdf9f2;
+  border: 1px solid #ece2cf;
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+
+.ow-apply-confirm span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  color: #b45309;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.ow-apply-btn {
+  background: linear-gradient(135deg, #d97706 0%, #e8944a 55%, #ef6f92 100%);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: 6px;
+  box-shadow: 0 6px 14px rgba(217, 119, 6, 0.28);
+  white-space: nowrap;
+}
+
+/* ---------- Mobile: static, paired stages ---------- */
+
+.ow-mobile {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .ow-runway {
+    height: auto;
+  }
+
+  .ow-pinned-stage {
+    position: static;
+    height: auto;
+    padding: 70px 18px 40px;
+  }
+
+  .ow-pinned-stage::before {
+    top: -2%;
+    width: 100%;
+    height: 380px;
+    filter: blur(58px);
+    opacity: 0.7;
+  }
+
+  .ow-layout {
+    display: none;
+  }
+
+  .ow-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    margin-top: 10px;
+  }
+
+  .ow-mobile-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 14px;
+    background: #fffdf9;
+    border: 1px solid #f1e9da;
+    border-radius: 18px;
+    box-shadow: 0 18px 40px -30px rgba(122, 77, 0, 0.45);
+  }
+
+  .ow-mobile-stage .ow-window {
+    height: 360px;
+  }
+
+  .ow-mobile-step {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 4px 6px;
+  }
+
+  .ow-mobile-step .ow-step-bullets {
+    margin-left: 0;
+  }
+
+  .ow-step-title {
+    font-size: 20px;
+  }
+}
