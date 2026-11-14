@@ -1934,32 +1934,11 @@ nav {
 
 .loader-core {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   position: relative;
   user-select: none;
   pointer-events: none;
-}
-
-/* Warm circular ambient glow behind mascot */
-.loader-ambient-glow {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -58%);
-  width: 320px;
-  height: 320px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(232, 148, 74, 0.16) 0%, rgba(242, 139, 149, 0.08) 40%, transparent 70%);
-  pointer-events: none;
-  z-index: 0;
-  animation: pulseAura 2.6s ease-in-out infinite alternate;
-}
-
-@keyframes pulseAura {
-  0% { transform: translate(-50%, -58%) scale(0.92); opacity: 0.7; }
-  100% { transform: translate(-50%, -58%) scale(1.08); opacity: 1; }
 }
 
 /* Mascot frame: square, centered, floating */
@@ -1988,67 +1967,6 @@ nav {
   mask-image: radial-gradient(circle at 50% 50%, #000 44%, rgba(0, 0, 0, 0.82) 58%, transparent 72%);
   -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 44%, rgba(0, 0, 0, 0.82) 58%, transparent 72%);
   pointer-events: none;
-}
-
-/* Micro Loader UI: sleek progress track & subtle typography */
-.loader-indicator {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  margin-top: -6px;
-}
-
-.loader-track {
-  width: 130px;
-  height: 3.5px;
-  background: rgba(0, 0, 0, 0.07);
-  border-radius: 99px;
-  overflow: hidden;
-  position: relative;
-}
-
-.loader-shimmer-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 42%;
-  background: linear-gradient(90deg, #e8944a 0%, #f28b95 50%, #ef6f92 100%);
-  border-radius: 99px;
-  animation: loaderShimmer 1.35s ease-in-out infinite;
-}
-
-@keyframes loaderShimmer {
-  0% { left: -45%; }
-  100% { left: 100%; }
-}
-
-.loader-caption {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #71717a;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.loader-dots::after {
-  content: '...';
-  animation: dotStep 1.5s infinite steps(4, start);
-  display: inline-block;
-  width: 14px;
-  text-align: left;
-}
-
-@keyframes dotStep {
-  0% { content: ''; }
-  25% { content: '.'; }
-  50% { content: '..'; }
-  75% { content: '...'; }
 }
 
 /* Auth page */

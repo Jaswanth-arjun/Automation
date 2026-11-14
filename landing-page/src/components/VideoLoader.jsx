@@ -2,11 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 
 /**
  * Hamzo Native DOM Mascot Loader
- * Fully merges the mascot into the DOM without rectangular video borders.
- * Displays a premium loader with ambient aura and brand progress track
- * strictly for the actual loading time only.
+ * Fully merges the mascot into the DOM without video borders.
+ * Plays the pure mascot animation strictly for the actual loading time only.
  */
-export default function VideoLoader({ isLoading, fadeDurationMs = 260, text = 'Loading workspace' }) {
+export default function VideoLoader({ isLoading, fadeDurationMs = 260 }) {
   const [mounted, setMounted] = useState(Boolean(isLoading));
   const [visible, setVisible] = useState(Boolean(isLoading));
   const videoRef = useRef(null);
@@ -59,10 +58,7 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 260, text = 'L
       }}
     >
       <div className="loader-core">
-        {/* Soft ambient brand aura */}
-        <div className="loader-ambient-glow" aria-hidden="true" />
-
-        {/* Mascot frame with radial feather mask */}
+        {/* Mascot frame with feathered vignette mask */}
         <div className="loader-mascot-frame">
           <video
             ref={videoRef}
@@ -77,17 +73,6 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 260, text = 'L
             <source src="/hamzo-loader.mp4" type="video/mp4" />
             <source src="/hamster-loader.mp4" type="video/mp4" />
           </video>
-        </div>
-
-        {/* Micro Loader UI: Progress shimmer track and status */}
-        <div className="loader-indicator">
-          <div className="loader-track">
-            <div className="loader-shimmer-bar" />
-          </div>
-          <div className="loader-caption">
-            <span>{text}</span>
-            <span className="loader-dots" />
-          </div>
         </div>
       </div>
     </div>
