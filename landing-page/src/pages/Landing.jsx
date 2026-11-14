@@ -1609,9 +1609,7 @@ function Footer() {
         </div>
 
         {/* Card 4: Massive Watermark Brand Typography at bottom */}
-        <div className="hmz-footer-watermark" aria-hidden="true">
-          HAMZO
-        </div>
+        <div className="hmz-footer-watermark" aria-hidden="true">HAMZO</div>
 
       </div>
     </footer>
