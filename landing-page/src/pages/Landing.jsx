@@ -24,7 +24,6 @@ import {
   Puzzle,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import VideoLoader from '../components/VideoLoader';
 import PawLogo from '../components/PawLogo';
 import './Landing.css';
 
@@ -1603,14 +1602,15 @@ function Footer() {
 }
 
 export default function Landing() {
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setLoading(false), 900);
-    return () => window.clearTimeout(t);
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, []);
 
   const go = useCallback((route) => {
