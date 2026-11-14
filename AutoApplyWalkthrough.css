@@ -102,42 +102,44 @@
   min-width: 0;
 }
 
-/* Stage container holding the 4 animated step items */
+/* Stage container holding the 4 animated step items. The steps are NOT clipped
+   here — they travel the full height from the bottom (yellow) up past the top
+   (red) and fade out, exactly like the reference arrows. */
 .aaw-steps-stack {
   position: relative;
-  height: 220px;
+  height: 240px;
   width: 100%;
   max-width: 500px;
+  overflow: visible;
 }
 
-/* Each step smoothly translates up and fades out as user scrolls */
+/* Each step is moved by the scroll engine (bottom → centre → top) */
 .aaw-step-item {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 14px;
   opacity: 0;
-  transform: translateY(64px);
-  transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(300px);
   pointer-events: none;
   will-change: transform, opacity;
 }
 
-/* Active step drifts slightly upward as the user scrolls through its slice */
+/* Fallback states for the first paint / mobile */
 .aaw-step-item.is-active {
   opacity: 1;
-  transform: translateY(calc(var(--aaw-step-fill, 0) * -16px));
+  transform: translateY(0);
   pointer-events: auto;
 }
 
-/* Completed steps exit through the top — the "bottom to top" motion */
 .aaw-step-item.is-passed {
   opacity: 0;
-  transform: translateY(-64px);
+  transform: translateY(-180px);
   pointer-events: none;
 }
 
@@ -980,6 +982,82 @@
   text-align: left;
 }
 
+/* ---------- Bottom Progress Tabs (Matching Uplers) ---------- */
+
+.aaw-bottom-tabs {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 10px;
+  flex: none;
+  position: relative;
+}
+
+.aaw-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  background: transparent;
+}
+
+.aaw-tab-btn {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.aaw-tab-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  transition: color 0.25s ease;
+}
+
+.aaw-tab-num {
+  font-weight: 700;
+  color: #0d9488;
+  margin-right: 2px;
+}
+
+.aaw-tab-btn:hover .aaw-tab-label {
+  color: #0f172a;
+}
+
+.aaw-tab-btn.is-active .aaw-tab-label {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.aaw-tab-track {
+  width: 100%;
+  min-width: 80px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: #e2e8f0;
+  overflow: hidden;
+  display: block;
+}
+
+.aaw-tab-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #10b981;
+  transform-origin: left center;
+  /* Progressive fill: the whole row is driven by the single scroll variable */
+  transform: scaleX(clamp(0, calc(var(--aaw-progress, 0) * 4 - var(--i, 0)), 1));
+  transition: transform 0.12s linear;
+}
+
+.aaw-tab-btn.is-active .aaw-tab-fill {
+  transform: scaleX(max(0.08, clamp(0, calc(var(--aaw-progress, 0) * 4 - var(--i, 0)), 1)));
+}
+
 /* ---------- Responsive for Tablets / Mobile (< 960px) ---------- */
 
 @media (max-width: 960px) {
@@ -998,6 +1076,9 @@
   .aaw-steps-stack {
     height: auto;
     position: static;
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
   .aaw-step-item,
   .aaw-step-item.is-active,
@@ -1005,6 +1086,7 @@
   .aaw-step-item.is-upcoming {
     position: static;
     display: flex;
+    height: auto;
     opacity: 1;
     transform: none;
     margin-bottom: 24px;
@@ -1012,5 +1094,16 @@
   }
   .aaw-window {
     height: 400px;
+  }
+  .aaw-tabs-row {
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .aaw-tab-label {
+    font-size: 11px;
+  }
+  .aaw-tab-track {
+    min-width: 50px;
   }
 }

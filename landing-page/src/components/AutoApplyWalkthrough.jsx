@@ -341,7 +341,10 @@ export default function AutoApplyWalkthrough({ onOpen }) {
   const [activeStep, setActiveStep] = useState(0);
   const runwayRef = useRef(null);
   const stageRef = useRef(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const stepRefs = useRef([]);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 960
+  );
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 960);
@@ -350,9 +353,76 @@ export default function AutoApplyWalkthrough({ onOpen }) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // Each step travels a full bottom → centre → top path inside the pinned
+  // stage. The previous step is completely gone before the next one enters.
+  const applyStepMotion = useCallback((progress) => {
+    const N = STEPS.length;
+    const t = progress * N;
+    // Big travel: steps begin around the yellow area below the copy and exit
+    // near the red area above it before fully fading out. Scales with viewport.
+    const TRAVEL_DOWN = Math.round(window.innerHeight * 0.32);
+    const TRAVEL_UP = Math.round(window.innerHeight * 0.19);
+    const ENTER = 0.3;
+    const EXIT = 0.7;
+
+    stepRefs.current.forEach((el, i) => {
+      if (!el) return;
+
+      const local = t - i; // 0 → 1 while this step's slice is on screen
+      let y = TRAVEL_DOWN;
+      let opacity = 0;
+
+      if (i === 0 && local >= 0 && local < EXIT) {
+        // First step is already on screen as the section arrives; it drifts
+        // up gently, then leaves through the top like the rest.
+        y = -6 * (local / EXIT);
+        opacity = 1;
+      } else if (local >= 0 && local < ENTER) {
+        // Rise from bottom into the centre
+        const k = local / ENTER;
+        const eased = 1 - Math.pow(1 - k, 3);
+        y = TRAVEL_DOWN * (1 - eased);
+        opacity = Math.min(1, k * 2.5);
+      } else if (local >= ENTER && local < EXIT) {
+        // Readable hold with a small upward drift
+        const k = (local - ENTER) / (EXIT - ENTER);
+        y = -6 * k;
+        opacity = 1;
+      } else if (local >= EXIT) {
+        if (i === N - 1) {
+          // Final step stays visible until the section releases
+          y = -6;
+          opacity = 1;
+        } else if (local < 1) {
+          // Accelerate up and out through the top
+          const k = (local - EXIT) / (1 - EXIT);
+          const eased = k * k;
+          y = -6 - (TRAVEL_UP + 6) * eased;
+          // Fade out over the whole upward trip so it disappears only when it
+          // reaches the red/upper end of the path.
+          opacity = Math.max(0, Math.pow(1 - k, 1.3));
+        } else {
+          y = -(TRAVEL_UP + 10);
+          opacity = 0;
+        }
+      }
+
+      el.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
+      el.style.opacity = opacity.toFixed(3);
+    });
+  }, []);
+
   // Sticky Scroll Engine: Pins section for 400vh, smoothly drives bottom-to-top steps
   useEffect(() => {
-    if (isMobile) return undefined;
+    if (isMobile) {
+      // Static mobile list: remove any inline motion left from desktop layout.
+      stepRefs.current.forEach((el) => {
+        if (!el) return;
+        el.style.removeProperty('transform');
+        el.style.removeProperty('opacity');
+      });
+      return undefined;
+    }
     let raf = 0;
 
     const handleScroll = () => {
@@ -367,15 +437,12 @@ export default function AutoApplyWalkthrough({ onOpen }) {
       const scrolled = -rect.top;
       const progress = Math.min(1, Math.max(0, scrolled / totalScroll));
 
-      // Write the continuous progress straight to CSS. This keeps the pinned
-      // stage/tabs animation at 60fps without re-rendering every scroll frame.
+      // Continuous progress straight to CSS keeps tabs / stage smooth without
+      // re-rendering on every scroll frame.
       const stage = stageRef.current;
-      if (stage) {
-        const scaled = progress * STEPS.length;
-        stage.style.setProperty('--aaw-progress', progress.toFixed(4));
-        stage.style.setProperty('--aaw-step-fill', (scaled - Math.floor(scaled)).toFixed(4));
-        stage.style.setProperty('--aaw-step-index', String(Math.min(STEPS.length - 1, Math.floor(scaled))));
-      }
+      if (stage) stage.style.setProperty('--aaw-progress', progress.toFixed(4));
+
+      applyStepMotion(progress);
 
       // Maps seamlessly to 4 steps (0, 1, 2, 3)
       const nextStep = Math.min(STEPS.length - 1, Math.floor(progress * STEPS.length));
@@ -394,7 +461,7 @@ export default function AutoApplyWalkthrough({ onOpen }) {
       window.removeEventListener('resize', onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [isMobile]);
+  }, [isMobile, applyStepMotion]);
 
   // Click handler to smoothly scroll to any step
   const goToStep = useCallback((index) => {
@@ -446,7 +513,11 @@ export default function AutoApplyWalkthrough({ onOpen }) {
                 else if (i < activeStep) state = 'is-passed';
 
                 return (
-                  <div key={step.n} className={`aaw-step-item ${state}`}>
+                  <div
+                    key={step.n}
+                    className={`aaw-step-item ${state}`}
+                    ref={(el) => { stepRefs.current[i] = el; }}
+                  >
                     <div className="aaw-step-badge-row">
                       <span className="aaw-step-badge">{step.n}</span>
                       <h3 className="aaw-step-title">{step.title}</h3>
@@ -468,33 +539,6 @@ export default function AutoApplyWalkthrough({ onOpen }) {
           {/* Right Column: Interactive Mac Window Preview */}
           <div className="aaw-stage-col">
             <BrowserWindow active={activeStep} onOpen={onOpen} />
-          </div>
-        </div>
-
-        {/* Bottom Pinned Tabs (Matching Uplers bottom design) */}
-        <div className="aaw-bottom-tabs">
-          <div className="aaw-tabs-row" role="tablist" aria-label="Walkthrough steps">
-            {STEPS.map((step, i) => {
-              const isTabActive = i === activeStep;
-              return (
-                <button
-                  key={step.n}
-                  type="button"
-                  role="tab"
-                  aria-selected={isTabActive}
-                  className={`aaw-tab-btn ${isTabActive ? 'is-active' : ''}`}
-                  style={{ '--i': i }}
-                  onClick={() => goToStep(i)}
-                >
-                  <span className="aaw-tab-label">
-                    <span className="aaw-tab-num">{step.n}.</span> {step.tab}
-                  </span>
-                  <span className="aaw-tab-track">
-                    <span className="aaw-tab-fill" />
-                  </span>
-                </button>
-              );
-            })}
           </div>
         </div>
       </div>
