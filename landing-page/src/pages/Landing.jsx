@@ -933,16 +933,23 @@ function HowItWorksCard() {
 function TopBar({ onGetStarted, authed }) {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 16);
     fn();
     window.addEventListener('scroll', fn, { passive: true });
-    return () => window.removeEventListener('scroll', fn);
+    // Trigger smooth small-to-big morph effect on mount / refresh
+    const timer = setTimeout(() => setMounted(true), 50);
+    return () => {
+      window.removeEventListener('scroll', fn);
+      clearTimeout(timer);
+    };
   }, []);
 
   return (
-    /* Floating Capsule Pill Navbar Container */
-    <div className={`hmz-topwrap ${scrolled ? 'is-scrolled' : ''}`}>
+    /* Floating Capsule Pill Navbar with dynamic small-to-big expand effect */
+    <div className={`hmz-topwrap ${scrolled ? 'is-scrolled' : ''} ${mounted ? 'is-mounted' : 'is-entering'}`}>
         <div className="hmz-top">
           <a className="hmz-brand" href="#top"><PawLogo size={28} /><span>HAMZO</span></a>
           <div className="hmz-links">
@@ -1058,6 +1065,13 @@ function Hero({ onGetStarted, onOpen }) {
   // Parallax for floating badges
   const heroRef = useRef(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [heroMounted, setHeroMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setHeroMounted(true), 60);
+    return () => clearTimeout(timer);
+  }, []);
+
   const onMouse = useCallback((e) => {
     if (!heroRef.current) return;
     const rect = heroRef.current.getBoundingClientRect();
@@ -1068,34 +1082,51 @@ function Hero({ onGetStarted, onOpen }) {
     setOffset({ x: (mx - cx) / cx, y: (my - cy) / cy });
   }, []);
 
-  // Living agent-activity loop
+  // Living agent-activity loop (like myjobb.ai dynamic live match cards)
   const CYCLE = [
-    { icon: <Search size={14} />, t: 'Reading Agentic AI Intern posting…' },
-    { icon: <Sparkles size={14} />, t: '98% match · resume tailored' },
-    { icon: <Send size={14} />, t: '3 referrals sent with notes' },
-    { icon: <Bell size={14} />, t: 'Follow-up scheduled · autopilot on' },
+    { icon: <Search size={13} />, t: 'Watching Ai2 careers · 3 referrers reachable', tag: 'Live Match' },
+    { icon: <Sparkles size={13} />, t: 'Resume tailored to keywords · 98% ATS score', tag: 'AI Tailored' },
+    { icon: <Send size={13} />, t: 'Referral notes dispatched directly to recruiters', tag: 'Outreach Sent' },
+    { icon: <Bell size={13} />, t: 'Hiring Manager replied · Interview scheduled', tag: 'Opportunity' },
   ];
   const [cyc, setCyc] = useState(0);
   useEffect(() => {
-    const id = window.setInterval(() => setCyc((c) => (c + 1) % CYCLE.length), 2600);
+    const id = window.setInterval(() => setCyc((c) => (c + 1) % CYCLE.length), 2800);
     return () => window.clearInterval(id);
-  }, []);
+  }, [CYCLE.length]);
 
   return (
-    <div className="hmz-hero" id="top" ref={heroRef} onMouseMove={onMouse}>
+    <div className={`hmz-hero ${heroMounted ? 'is-mounted' : 'is-entering'}`} id="top" ref={heroRef} onMouseMove={onMouse}>
+      <div className="hmz-hero-ambient-glow" aria-hidden="true" />
       <SunLight px={offset.x} py={offset.y} />
       <ShimmerCanvas mouseX={offset.x} mouseY={offset.y} />
       <div className="hmz-heroinner">
+        {/* Dynamic Live Activity Ticker (like myjobb.ai dynamic match cards) */}
+        <div className="hmz-live-ticker-wrap">
+          <div className="hmz-live-ticker" key={cyc}>
+            <span className="ticker-pulse-dot" />
+            <span className="ticker-icon">{CYCLE[cyc].icon}</span>
+            <span className="ticker-text">{CYCLE[cyc].t}</span>
+            <span className="ticker-badge">{CYCLE[cyc].tag}</span>
+          </div>
+        </div>
+
         <div className="hmz-chips">
           <span className="hmz-chip black"><Sparkles size={13} /> AI referral agent</span>
           <span className="hmz-chip ghost">Not a job board</span>
           <span className="hmz-chip ghost">60-second setup</span>
         </div>
-        <h1>Get referrals,<br />not <span className="hmz-accent-blue">ghosting.</span></h1>
-        <p className="hmz-sub">HAMZO is your AI referral agent — it finds the right people inside target companies and gets your resume in front of them, so real recruiters reply. Your entire job search in one place.</p>
+        <h1 className="hmz-hero-title">
+          Get referrals,<br />not <span className="hmz-accent-blue animated-gradient">ghosting.</span>
+        </h1>
+        <p className="hmz-sub">
+          HAMZO is your autonomous AI referral agent — it finds the right decision-makers inside target companies, tailors your resume for ATS, and delivers real responses. Your entire job hunt on autopilot.
+        </p>
         <div className="hmz-actions">
           <MagneticWrap strength={0.4}>
-            <button className="hmz-cta big" onClick={onGetStarted}>Get my first referral <ArrowUpRight size={16} /></button>
+            <button className="hmz-cta big hmz-cta-glow" onClick={onGetStarted}>
+              Get my first referral <ArrowUpRight size={16} />
+            </button>
           </MagneticWrap>
           <a className="hmz-textlink" href="#workflow">See how it works <ArrowRight size={15} /></a>
         </div>

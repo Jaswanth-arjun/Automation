@@ -47,8 +47,47 @@ html,body{overflow-x:hidden}
 @keyframes hmzdrift3{from{transform:translate(0,0) scale(.95)}to{transform:translate(60px,-70px) scale(1.1)}}
 .hmz-page main{position:relative;z-index:1}
 @media (prefers-reduced-motion:reduce){.hmz-ambient i{animation:none}}
-.hmz-topwrap{position:fixed;top:18px;left:50%;transform:translateX(-50%);width:min(1240px,calc(100% - 48px));z-index:60;transition:all .3s cubic-bezier(.4,0,.2,1)}
+
+/* ===== NAVBAR DYNAMIC MORPH (SMALL TO BIG ON LOAD / REFRESH) ===== */
+.hmz-topwrap{
+  position:fixed;
+  top:18px;
+  left:50%;
+  transform:translateX(-50%);
+  width:min(1240px,calc(100% - 48px));
+  z-index:60;
+  transition:width .85s cubic-bezier(.16,1,.3,1),
+             transform .8s cubic-bezier(.16,1,.3,1),
+             opacity .6s ease,
+             top .3s ease;
+  will-change:width,transform,opacity;
+}
+.hmz-topwrap.is-entering{
+  width:min(340px,calc(100% - 48px));
+  opacity:.15;
+  transform:translateX(-50%) translateY(-12px) scale(.92);
+}
+.hmz-topwrap.is-mounted{
+  width:min(1240px,calc(100% - 48px));
+  opacity:1;
+  transform:translateX(-50%) translateY(0) scale(1);
+}
 .hmz-topwrap.is-scrolled{top:12px}
+
+/* Navbar inner links reveal gracefully as navbar expands */
+.hmz-topwrap.is-entering .hmz-links,
+.hmz-topwrap.is-entering .hmz-topright{
+  opacity:0;
+  transform:translateY(-4px) scale(.95);
+  pointer-events:none;
+}
+.hmz-topwrap.is-mounted .hmz-links,
+.hmz-topwrap.is-mounted .hmz-topright{
+  opacity:1;
+  transform:translateY(0) scale(1);
+  transition:opacity .5s .25s ease,transform .6s .25s cubic-bezier(.16,1,.3,1);
+}
+
 .hmz-top{background:rgba(255,255,255,.94);backdrop-filter:blur(16px);border-radius:999px;border:1.5px solid rgba(226,232,240,.9);box-shadow:0 10px 30px rgba(15,18,34,.07);padding:8px 12px 8px 24px;display:flex;align-items:center;gap:18px}
 .hmz-brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:.06em;font-size:22px;color:#171817;text-decoration:none;transition:transform .2s ease}
 .hmz-brand span{background:linear-gradient(115deg,#e8944a 0%,#f28b95 55%,#ef6f92 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
@@ -76,33 +115,141 @@ html,body{overflow-x:hidden}
 .hmz-menubtn{display:none;border:1px solid #e4e7f0;background:#fff;border-radius:10px;padding:9px;cursor:pointer}
 .hmz-mobile{display:none}
 
+/* Glowing Pulse on Primary CTA */
+.hmz-cta-glow{
+  box-shadow:0 0 20px rgba(51,92,255,.32),0 4px 14px rgba(15,18,34,.12);
+  animation:ctaBreath 3.2s ease-in-out infinite alternate;
+}
+@keyframes ctaBreath{
+  0%{box-shadow:0 0 16px rgba(51,92,255,.25),0 4px 14px rgba(15,18,34,.12)}
+  100%{box-shadow:0 0 30px rgba(51,92,255,.55),0 6px 20px rgba(51,92,255,.24)}
+}
+
 /* ===== HERO SECTION ===== */
-.hmz-hero{background:rgba(255,255,255,.72);padding:165px 24px 30px;text-align:center;position:relative;overflow:hidden}
+.hmz-hero{
+  background:rgba(255,255,255,.72);
+  padding:165px 24px 30px;
+  text-align:center;
+  position:relative;
+  overflow:hidden;
+}
+
+/* Living ambient radial liquid glow behind hero */
+.hmz-hero-ambient-glow{
+  position:absolute;
+  top:8%;
+  left:50%;
+  transform:translateX(-50%);
+  width:min(940px,94vw);
+  height:560px;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(232,148,74,.18) 0%,rgba(242,139,149,.13) 35%,rgba(51,92,255,.09) 65%,transparent 78%);
+  filter:blur(68px);
+  pointer-events:none;
+  z-index:0;
+  animation:heroAuraBreath 7.5s ease-in-out infinite alternate;
+}
+@keyframes heroAuraBreath{
+  0%{transform:translateX(-50%) scale(.92);opacity:.65}
+  100%{transform:translateX(-50%) scale(1.08);opacity:1}
+}
+
 .hmz-heroinner{max-width:1020px;margin:0 auto;position:relative;z-index:2}
 
-/* ===== HERO TEXT & CHIPS ===== */
+/* ===== DYNAMIC LIVE ACTIVITY TICKER (LIKE MYJOBB.AI MATCH UPDATES) ===== */
+.hmz-live-ticker-wrap{
+  display:flex;
+  justify-content:center;
+  margin-bottom:20px;
+}
+.hmz-live-ticker{
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  background:rgba(255,255,255,.94);
+  backdrop-filter:blur(14px);
+  border:1px solid rgba(226,232,240,.9);
+  padding:6px 14px 6px 10px;
+  border-radius:999px;
+  box-shadow:0 4px 20px rgba(15,23,42,.06);
+  animation:tickerSlideIn .45s cubic-bezier(.16,1,.3,1);
+}
+@keyframes tickerSlideIn{
+  from{opacity:0;transform:translateY(-8px) scale(.96)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+.ticker-pulse-dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#10b981;
+  box-shadow:0 0 0 0 rgba(16,185,129,.7);
+  animation:pulseEmerald 1.8s infinite;
+}
+@keyframes pulseEmerald{
+  0%{transform:scale(.95);box-shadow:0 0 0 0 rgba(16,185,129,.7)}
+  70%{transform:scale(1);box-shadow:0 0 0 8px rgba(16,185,129,0)}
+  100%{transform:scale(.95);box-shadow:0 0 0 0 rgba(16,185,129,0)}
+}
+.ticker-icon{display:flex;align-items:center;color:#3b82f6}
+.ticker-text{font-size:12.5px;font-weight:700;color:#1e293b;letter-spacing:-.01em}
+.ticker-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:6px;background:#f1f5f9;color:#475569}
+
+/* ===== HERO TEXT & CHIPS STAGGER ===== */
+.hmz-hero-title{
+  font-size:clamp(48px,7vw,88px);
+  color:#0f1222;
+  letter-spacing:-.04em;
+  line-height:1.02;
+  font-weight:800;
+}
 .hmz-hero h1{font-size:clamp(48px,7vw,88px);color:#0f1222;letter-spacing:-.04em;line-height:1.02;font-weight:800}
 .hmz-accent-blue{color:#335CFF;font-style:normal}
+.hmz-hero-title .animated-gradient{
+  background:linear-gradient(120deg,#335CFF 0%,#a855f7 35%,#ec4899 70%,#335CFF 100%);
+  background-size:200% auto;
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:shineGrad 4.5s linear infinite;
+}
+@keyframes shineGrad{to{background-position:200% center}}
+
 .hmz-chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:24px}
-.hmz-chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;border-radius:999px;padding:8px 16px;animation:hmzChipIn .6s ease backwards}
+.hmz-chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;border-radius:999px;padding:8px 16px}
 .hmz-chip.black{background:#0f1222;color:#fff}
 .hmz-chip.ghost{background:#EEF2FF;color:#335CFF;font-weight:600}
-.hmz-chip:nth-child(1){animation-delay:.1s}
-.hmz-chip:nth-child(2){animation-delay:.2s}
-.hmz-chip:nth-child(3){animation-delay:.3s}
-@keyframes hmzChipIn{from{opacity:0;transform:translateY(12px) scale(.9)}}
 
+/* Stagger entrance when page mounts / refreshes */
+.hmz-hero.is-entering .hmz-live-ticker-wrap{opacity:0;transform:translateY(14px) scale(.95)}
+.hmz-hero.is-mounted .hmz-live-ticker-wrap{opacity:1;transform:translateY(0) scale(1);transition:all .65s .1s cubic-bezier(.16,1,.3,1)}
 
-.hmz-chip.ghost{background:#eef1ff;color:#335CFF}
-@keyframes hmzChipIn{from{opacity:0;transform:translateY(12px) scale(.9)}}
+.hmz-hero.is-entering .hmz-chips{opacity:0;transform:translateY(16px)}
+.hmz-hero.is-mounted .hmz-chips{opacity:1;transform:translateY(0);transition:all .7s .18s cubic-bezier(.16,1,.3,1)}
 
-.hmz-sub{font-size:clamp(15px,2vw,18px);color:#475069;max-width:660px;margin:20px auto 28px;animation:hmzFadeUp .7s .4s ease backwards}
-.hmz-actions{display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap;animation:hmzFadeUp .7s .5s ease backwards}
-@keyframes hmzFadeUp{from{opacity:0;transform:translateY(20px)}}
+.hmz-hero.is-entering .hmz-hero-title{opacity:0;transform:translateY(28px);filter:blur(6px)}
+.hmz-hero.is-mounted .hmz-hero-title{
+  opacity:1;
+  transform:translateY(0);
+  filter:blur(0);
+  transition:transform .85s .28s cubic-bezier(.16,1,.3,1),opacity .75s .28s ease,filter .75s .28s ease;
+}
+
+.hmz-sub{font-size:clamp(15px,2vw,18px);color:#475069;max-width:660px;margin:20px auto 28px}
+.hmz-hero.is-entering .hmz-sub{opacity:0;transform:translateY(20px)}
+.hmz-hero.is-mounted .hmz-sub{opacity:1;transform:translateY(0);transition:all .75s .4s cubic-bezier(.16,1,.3,1)}
+
+.hmz-actions{display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap}
+.hmz-hero.is-entering .hmz-actions{opacity:0;transform:translateY(18px) scale(.97)}
+.hmz-hero.is-mounted .hmz-actions{opacity:1;transform:translateY(0) scale(1);transition:all .75s .5s cubic-bezier(.16,1,.3,1)}
 
 .hmz-textlink{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:#0f1222;text-decoration:none;transition:.25s}
 .hmz-textlink:hover{color:#335CFF;gap:12px}
-.hmz-proof{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:24px;font-size:13px;color:#5b6478;animation:hmzFadeUp .7s .6s ease backwards}
+
+.hmz-proof{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:24px;font-size:13px;color:#5b6478}
+.hmz-hero.is-entering .hmz-proof{opacity:0;transform:translateY(14px)}
+.hmz-hero.is-mounted .hmz-proof{opacity:1;transform:translateY(0);transition:all .7s .6s cubic-bezier(.16,1,.3,1)}
+
 .hmz-avatars{display:flex}
 .hmz-av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff;border:2px solid #fff;margin-left:-9px;transition:transform .3s}
 .hmz-av:hover{transform:scale(1.2) translateY(-3px);z-index:2}
@@ -110,7 +257,9 @@ html,body{overflow-x:hidden}
 .hmz-av.a0{background:#335CFF}.hmz-av.a1{background:#16a34a}.hmz-av.a2{background:#9333ea}.hmz-av.a3{background:#ea580c}.hmz-av.a4{background:#0f1222}
 
 /* ===== HERO VISUAL — 3D TILT CARD ===== */
-.hmz-herovisual{position:relative;max-width:760px;margin:44px auto 0;perspective:1200px;animation:hmzCardRise 1s .3s ease backwards}
+.hmz-herovisual{position:relative;max-width:760px;margin:44px auto 0;perspective:1200px}
+.hmz-hero.is-entering .hmz-herovisual{opacity:0;transform:translateY(40px) scale(.95)}
+.hmz-hero.is-mounted .hmz-herovisual{opacity:1;transform:translateY(0) scale(1);transition:all .9s .7s cubic-bezier(.16,1,.3,1)}
 @keyframes hmzCardRise{from{opacity:0;transform:translateY(50px) scale(.95)}}
 .hmz-jobcard{background:#fff;border:1px solid #e6e9f4;border-radius:20px;box-shadow:0 30px 70px rgba(51,92,255,.14);padding:22px;text-align:left;transition:transform .15s ease,box-shadow .3s;will-change:transform;transform-style:preserve-3d}
 .hmz-jobcard:hover{box-shadow:0 40px 90px rgba(51,92,255,.22)}
