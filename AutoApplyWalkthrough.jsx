@@ -4,57 +4,49 @@ import PawLogo from './landing-page/src/components/PawLogo';
 import './AutoApplyWalkthrough.css';
 
 /* ------------------------------------------------------------------ */
-/* Step Definitions                                                   */
+/* Step Definitions (Matching Uplers Flow & HAMZO Features)            */
 /* ------------------------------------------------------------------ */
 
 const STEPS = [
   {
     n: '1',
-    tab: 'Extension',
-    kicker: 'STEP 1 · AUTO-DETECT',
+    tab: 'Auto-Detect',
     title: 'Detects on any job board',
     points: [
       'Works on LinkedIn, Naukri, Greenhouse, Lever, Ashby, Workday & company career sites',
       'HAMZO Chrome Extension activates automatically with 1 click',
     ],
     url: 'linkedin.com/jobs • HAMZO Apply Copilot',
-    urlTag: 'Extension Active',
   },
   {
     n: '2',
-    tab: 'Autofill + Resume',
-    kicker: 'STEP 2 · SMART FILL',
+    tab: 'Smart Fill & Resume',
     title: 'Autofills & attaches tailored resume',
     points: [
       '15+ standard and complex fields populated in seconds',
       'Generates and injects a keyword-tailored 1-page ATS PDF directly into the file upload',
     ],
     url: 'greenhouse.io/apple/apply • Auto-Fill',
-    urlTag: 'Greenhouse Form',
   },
   {
     n: '3',
     tab: 'Vault Memory',
-    kicker: 'STEP 3 · VAULT MEMORY',
     title: 'Learns unseen questions (Vault)',
     points: [
       'Never guesses: asks missing employer questions in a swift prompt',
       'Saves answers permanently to your private Vault — never asks again',
     ],
     url: 'Vault • Instant Memory',
-    urlTag: 'Smart Vault',
   },
   {
     n: '4',
-    tab: 'Review & Sync',
-    kicker: 'STEP 4 · ZERO GUESSING',
+    tab: 'Review & Submit',
     title: 'You confirm before submitting',
     points: [
       'Zero silent submissions: full review control on every application',
       'Auto-syncs application status, timestamp, and tailored resume to your Web Tracker',
     ],
     url: 'Review • Ready to Submit',
-    urlTag: 'Review Confirmation',
   },
 ];
 
@@ -344,35 +336,33 @@ const BrowserWindow = memo(function BrowserWindow({ active, onOpen }) {
 export default function AutoApplyWalkthrough({ onOpen }) {
   const [activeStep, setActiveStep] = useState(0);
   const [rawProgress, setRawProgress] = useState(0);
-  const wrapperRef = useRef(null);
+  const runwayRef = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 900);
+    const checkMobile = () => setIsMobile(window.innerWidth < 960);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Sticky Scroll Engine: Pins user in section while scrolling through 380vh
+  // Sticky Scroll Engine: Pins section for 400vh, smoothly drives bottom-to-top steps
   useEffect(() => {
     if (isMobile) return undefined;
     let raf = 0;
 
     const handleScroll = () => {
       raf = 0;
-      const el = wrapperRef.current;
+      const el = runwayRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const totalScroll = rect.height - window.innerHeight;
       if (totalScroll <= 0) return;
 
-      // Scrolled ratio from 0.0 to 1.0
       const scrolled = -rect.top;
       const progress = Math.min(1, Math.max(0, scrolled / totalScroll));
       setRawProgress(progress);
 
-      // Maps smoothly to 4 steps (0, 1, 2, 3)
       const nextStep = Math.min(3, Math.floor(progress * 4));
       setActiveStep((prev) => (prev !== nextStep ? nextStep : prev));
     };
@@ -383,29 +373,29 @@ export default function AutoApplyWalkthrough({ onOpen }) {
 
     handleScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', handleScroll);
+    window.addEventListener('resize', onScroll);
     return () => {
-      window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', handleScroll);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
   }, [isMobile]);
 
-  // Click handler to smoothly scroll to any step
   const goToStep = useCallback((index) => {
     setActiveStep(index);
-    if (!wrapperRef.current) return;
-    const el = wrapperRef.current;
+    if (!runwayRef.current) return;
+    const el = runwayRef.current;
     const rect = el.getBoundingClientRect();
-    const elemTop = window.scrollY + rect.top;
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const runwayTop = scrollTop + rect.top;
     const totalScroll = el.offsetHeight - window.innerHeight;
-    const targetY = elemTop + (index / 3.99) * totalScroll + 2;
+    const targetY = runwayTop + (index / 4 + 0.125) * totalScroll;
     window.scrollTo({ top: targetY, behavior: 'smooth' });
   }, []);
 
   return (
-    <section className="aaw-wrapper" id="resume" ref={wrapperRef} aria-labelledby="aaw-heading">
-      <div className="aaw-sticky-stage">
+    <section className="aaw-runway" id="resume" ref={runwayRef} aria-labelledby="aaw-heading">
+      <div className="aaw-pinned-stage">
         {/* Header with generous top padding to clear floating navbar */}
         <header className="aaw-header">
           <span className="hmz-kicker">AUTO APPLY COPILOT</span>
@@ -417,48 +407,33 @@ export default function AutoApplyWalkthrough({ onOpen }) {
           </p>
         </header>
 
-        {/* 2-Column Split: Left Moving Steps Carousel + Right Sticky Mac Window */}
+        {/* 2-Column Split: Clean Left Step (Bottom to Top Motion) + Right Mac Window Mockup */}
         <div className="aaw-grid">
-          {/* Left Column: Moving Steps Carousel (Bottom to Up Motion) */}
+          {/* Left Column: Moving Steps (Bottom to Top animation, clean typography like Uplers) */}
           <div className="aaw-steps-col">
-            <div className="aaw-steps-window">
-              <div
-                className="aaw-steps-track"
-                style={{ transform: `translateY(-${activeStep * 100}%)` }}
-              >
-                {STEPS.map((step, i) => {
-                  const isCurrent = i === activeStep;
-                  return (
-                    <div
-                      key={step.title}
-                      className={`aaw-step-slide ${isCurrent ? 'is-active' : ''}`}
-                      onClick={() => goToStep(i)}
-                    >
-                      <div className="aaw-step-card">
-                        <div className="aaw-title-row">
-                          <span className="aaw-badge" aria-hidden="true">{step.n}</span>
-                          <div>
-                            <span className="aaw-step-kicker">{step.kicker}</span>
-                            <h3 className="aaw-step-title">{step.title}</h3>
-                          </div>
-                        </div>
-                        <ul className="aaw-points">
-                          {step.points.map((p) => (
-                            <li key={p}>{p}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <div className="aaw-steps-stack">
+              {STEPS.map((step, i) => {
+                let state = 'is-upcoming';
+                if (i === activeStep) state = 'is-active';
+                else if (i < activeStep) state = 'is-passed';
 
-            <div className="aaw-cta-wrap">
-              <button className="hmz-cta" onClick={() => onOpen?.('/dashboard/resume')}>
-                Get Chrome Extension <ArrowRight size={15} />
-              </button>
-              <span className="aaw-cta-note">Free to start · No credit card required</span>
+                return (
+                  <div key={step.n} className={`aaw-step-item ${state}`}>
+                    <div className="aaw-step-badge-row">
+                      <span className="aaw-step-badge">{step.n}</span>
+                      <h3 className="aaw-step-title">{step.title}</h3>
+                    </div>
+                    <ul className="aaw-step-bullets">
+                      {step.points.map((p) => (
+                        <li key={p}>
+                          <span className="aaw-step-dot" />
+                          <span>{p}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -468,32 +443,31 @@ export default function AutoApplyWalkthrough({ onOpen }) {
           </div>
         </div>
 
-        {/* Bottom Pinned Progress Tabs */}
-        <nav className="aaw-progress" aria-label="Walkthrough steps">
-          <div className="aaw-tabs" role="tablist">
+        {/* Bottom Pinned Tabs (Matching Uplers bottom design) */}
+        <nav className="aaw-bottom-tabs" aria-label="Walkthrough steps">
+          <div className="aaw-tabs-row" role="tablist">
             {STEPS.map((step, i) => {
               const isTabActive = i === activeStep;
-              // Fill progress for this segment (0.0 to 1.0)
               const segProgress = Math.min(1, Math.max(0, (rawProgress * 4) - i));
               return (
                 <button
-                  key={step.tab}
+                  key={step.n}
                   type="button"
                   role="tab"
                   aria-selected={isTabActive}
-                  className={`aaw-tab ${isTabActive ? 'is-active' : ''}`}
+                  className={`aaw-tab-btn ${isTabActive ? 'is-active' : ''}`}
                   onClick={() => goToStep(i)}
                 >
-                  <span className="aaw-track">
+                  <span className="aaw-tab-label">
+                    <span className="aaw-tab-num">{step.n}.</span> {step.tab}
+                  </span>
+                  <span className="aaw-tab-track">
                     <span
-                      className="aaw-fill"
+                      className="aaw-tab-fill"
                       style={{
-                        transform: `scaleX(${isTabActive ? Math.max(0.15, segProgress) : i < activeStep ? 1 : 0})`,
+                        transform: `scaleX(${isTabActive ? Math.max(0.2, segProgress) : i < activeStep ? 1 : 0})`,
                       }}
                     />
-                  </span>
-                  <span className="aaw-tab-label">
-                    <b className="tab-n">{step.n}.</b> {step.tab}
                   </span>
                 </button>
               );
