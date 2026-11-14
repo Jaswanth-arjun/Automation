@@ -1278,7 +1278,7 @@ function Integrations() {
       <div className="hmz-strip">
         <p className="hmz-logostrip-head">We apply on</p>
         <div className="hmz-logomq">
-          <div className="hmz-logomq-track">
+          <div className="hmz-logomq-track rev">
             {[...INTEGRATIONS, ...INTEGRATIONS].map((t, i) => (
               <span className="hmz-logocell" key={i} title={t}>
                 <span className="hmz-companymark" aria-hidden="true">

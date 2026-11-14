@@ -378,6 +378,8 @@ html,body{overflow-x:hidden}
 .hmz-logotxt{font-size:16px;font-weight:700;color:#3a3f5c;letter-spacing:-.01em;white-space:nowrap;transition:color .35s ease}
 .hmz-logocell:hover .hmz-logotxt{color:#335CFF}
 @keyframes hmzLogoSlide{to{transform:translateX(-50%)}}
+.hmz-logomq-track.rev{animation-name:hmzLogoSlideRev}
+@keyframes hmzLogoSlideRev{from{transform:translateX(-50%)}to{transform:translateX(0)}}
 @media (prefers-reduced-motion:reduce){.hmz-logomq-track{animation:none}}
 
 /* ===== WAVE DIVIDERS ===== */
