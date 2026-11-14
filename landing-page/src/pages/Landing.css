@@ -361,8 +361,7 @@ html,body{overflow-x:hidden}
 .hmz-strip{background:linear-gradient(110deg,#f7f9ff 0%,#ffffff 50%,#f8f6ff 100%);color:#0f1222;text-align:center;padding:56px 24px;overflow:hidden;position:relative}
 .hmz-strip::before{content:'';position:absolute;inset:0;background:radial-gradient(600px 200px at 50% 100%,rgba(98,123,255,.12),transparent);animation:hmzStripPulse 4s ease infinite;pointer-events:none}
 @keyframes hmzStripPulse{0%,100%{opacity:.5}50%{opacity:1}}
-.hmz-strip p{max-width:720px;margin:0 auto 20px;font-size:16px;font-weight:700;color:#202743;letter-spacing:-.01em;position:relative;z-index:1}
-.hmz-strip p b{color:#202743}
+.hmz-strip .hmz-logostrip-head{margin-bottom:22px}
 .hmz-logos{overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);position:relative;z-index:1}
 .hmz-logos>div{display:flex;gap:12px;width:max-content;animation:hmzslide 22s linear infinite;will-change:transform}
 .hmz-logos:hover>div{animation-play-state:paused}
@@ -373,7 +372,7 @@ html,body{overflow-x:hidden}
 /* ===== COMPANY LOGO MARQUEE (Nyeras-style trust band) ===== */
 .hmz-logostrip{position:relative;z-index:1;padding:40px 24px 48px;text-align:center;opacity:0;transform:translateY(18px);transition:opacity .8s cubic-bezier(.4,0,.2,1),transform .8s cubic-bezier(.4,0,.2,1)}
 .hmz-logostrip.in-view{opacity:1;transform:none}
-.hmz-logostrip-head{font-size:12.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#7a8098;margin:0 0 24px}
+.hmz-logostrip-head{font-size:12.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#7a8098;margin:0 auto 24px;text-align:center;display:block;position:relative;z-index:1}
 .hmz-logomq{overflow:hidden;position:relative;-webkit-mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent);mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent)}
 .hmz-logomq-track{display:flex;align-items:center;width:max-content;animation:hmzLogoSlide 40s linear infinite}
 .hmz-logomq:hover .hmz-logomq-track{animation-play-state:paused}
