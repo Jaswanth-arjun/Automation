@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Globe, ArrowRight, FileText, CheckCircle2, Check, Sparkles } from 'lucide-react';
-import PawLogo from './landing-page/src/components/PawLogo';
+import PawLogo from './PawLogo';
 import './AutoApplyWalkthrough.css';
 
 /* ------------------------------------------------------------------ */
@@ -77,7 +77,7 @@ function JobBoardScene({ onOpen }) {
         <p className="aaw-list-title">Jobs for you</p>
         <p className="aaw-list-sub">Software engineer · India</p>
         {JOBS.map((j, i) => (
-          <div key={j.co} className={`aaw-job-row${i === 0 ? ' is-sel' : ''}`}>
+          <div key={j.co} className={`aaw-job-row${i === 0 ? ' is-sel' : ''}`} style={{ '--i': i }}>
             <span className="aaw-co-tile" style={{ background: j.c }}>
               {j.co === 'Apple' ? '' : j.co[0]}
             </span>
@@ -223,17 +223,17 @@ function VaultScene() {
           “What is your current notice period and expected compensation?”
         </p>
         <div className="aaw-vault-answers">
-          <div className="aaw-va-row">
+          <div className="aaw-va-row" style={{ '--i': 0 }}>
             <span className="lbl">Notice Period</span>
             <span className="val">15 days</span>
             <span className="src">From Vault</span>
           </div>
-          <div className="aaw-va-row">
+          <div className="aaw-va-row" style={{ '--i': 1 }}>
             <span className="lbl">Expected CTC</span>
             <span className="val">₹24–30 LPA</span>
             <span className="src">From Profile</span>
           </div>
-          <div className="aaw-va-row">
+          <div className="aaw-va-row" style={{ '--i': 2 }}>
             <span className="lbl">Relocation</span>
             <span className="val">Yes, open to Bangalore</span>
             <span className="src">From Vault</span>
@@ -319,7 +319,11 @@ const BrowserWindow = memo(function BrowserWindow({ active, onOpen }) {
       </div>
       <div className="aaw-viewport">
         {SCENES.map((Scene, i) => (
-          <div key={i} className={`aaw-scene${i === active ? ' is-active' : ''}`} aria-hidden={i !== active}>
+          <div
+            key={i}
+            className={`aaw-scene${i === active ? ' is-active' : i < active ? ' is-prev' : ' is-next'}`}
+            aria-hidden={i !== active}
+          >
             <Scene onOpen={onOpen} />
           </div>
         ))}
@@ -335,8 +339,8 @@ const BrowserWindow = memo(function BrowserWindow({ active, onOpen }) {
 
 export default function AutoApplyWalkthrough({ onOpen }) {
   const [activeStep, setActiveStep] = useState(0);
-  const [rawProgress, setRawProgress] = useState(0);
   const runwayRef = useRef(null);
+  const stageRef = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -359,11 +363,22 @@ export default function AutoApplyWalkthrough({ onOpen }) {
       const totalScroll = rect.height - window.innerHeight;
       if (totalScroll <= 0) return;
 
+      // Scrolled ratio from 0.0 to 1.0
       const scrolled = -rect.top;
       const progress = Math.min(1, Math.max(0, scrolled / totalScroll));
-      setRawProgress(progress);
 
-      const nextStep = Math.min(3, Math.floor(progress * 4));
+      // Write the continuous progress straight to CSS. This keeps the pinned
+      // stage/tabs animation at 60fps without re-rendering every scroll frame.
+      const stage = stageRef.current;
+      if (stage) {
+        const scaled = progress * STEPS.length;
+        stage.style.setProperty('--aaw-progress', progress.toFixed(4));
+        stage.style.setProperty('--aaw-step-fill', (scaled - Math.floor(scaled)).toFixed(4));
+        stage.style.setProperty('--aaw-step-index', String(Math.min(STEPS.length - 1, Math.floor(scaled))));
+      }
+
+      // Maps seamlessly to 4 steps (0, 1, 2, 3)
+      const nextStep = Math.min(STEPS.length - 1, Math.floor(progress * STEPS.length));
       setActiveStep((prev) => (prev !== nextStep ? nextStep : prev));
     };
 
@@ -381,21 +396,34 @@ export default function AutoApplyWalkthrough({ onOpen }) {
     };
   }, [isMobile]);
 
+  // Click handler to smoothly scroll to any step
   const goToStep = useCallback((index) => {
     setActiveStep(index);
     if (!runwayRef.current) return;
+
+    // On small screens the section is not pinned — just reveal the preview.
+    if (isMobile) {
+      stageRef.current
+        ?.querySelector('.aaw-stage-col')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
     const el = runwayRef.current;
     const rect = el.getBoundingClientRect();
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     const runwayTop = scrollTop + rect.top;
     const totalScroll = el.offsetHeight - window.innerHeight;
-    const targetY = runwayTop + (index / 4 + 0.125) * totalScroll;
+    if (totalScroll <= 0) return;
+
+    // Land in the middle of the requested step's scroll slice.
+    const targetY = runwayTop + ((index + 0.5) / STEPS.length) * totalScroll;
     window.scrollTo({ top: targetY, behavior: 'smooth' });
-  }, []);
+  }, [isMobile]);
 
   return (
     <section className="aaw-runway" id="resume" ref={runwayRef} aria-labelledby="aaw-heading">
-      <div className="aaw-pinned-stage">
+      <div className="aaw-pinned-stage" ref={stageRef}>
         {/* Header with generous top padding to clear floating navbar */}
         <header className="aaw-header">
           <span className="hmz-kicker">AUTO APPLY COPILOT</span>
@@ -444,11 +472,10 @@ export default function AutoApplyWalkthrough({ onOpen }) {
         </div>
 
         {/* Bottom Pinned Tabs (Matching Uplers bottom design) */}
-        <nav className="aaw-bottom-tabs" aria-label="Walkthrough steps">
-          <div className="aaw-tabs-row" role="tablist">
+        <div className="aaw-bottom-tabs">
+          <div className="aaw-tabs-row" role="tablist" aria-label="Walkthrough steps">
             {STEPS.map((step, i) => {
               const isTabActive = i === activeStep;
-              const segProgress = Math.min(1, Math.max(0, (rawProgress * 4) - i));
               return (
                 <button
                   key={step.n}
@@ -456,24 +483,20 @@ export default function AutoApplyWalkthrough({ onOpen }) {
                   role="tab"
                   aria-selected={isTabActive}
                   className={`aaw-tab-btn ${isTabActive ? 'is-active' : ''}`}
+                  style={{ '--i': i }}
                   onClick={() => goToStep(i)}
                 >
                   <span className="aaw-tab-label">
                     <span className="aaw-tab-num">{step.n}.</span> {step.tab}
                   </span>
                   <span className="aaw-tab-track">
-                    <span
-                      className="aaw-tab-fill"
-                      style={{
-                        transform: `scaleX(${isTabActive ? Math.max(0.2, segProgress) : i < activeStep ? 1 : 0})`,
-                      }}
-                    />
+                    <span className="aaw-tab-fill" />
                   </span>
                 </button>
               );
             })}
           </div>
-        </nav>
+        </div>
       </div>
     </section>
   );

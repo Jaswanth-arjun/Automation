@@ -120,21 +120,24 @@
   flex-direction: column;
   gap: 14px;
   opacity: 0;
-  transform: translateY(50px);
-  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-              transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(64px);
+  transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
+  will-change: transform, opacity;
 }
 
+/* Active step drifts slightly upward as the user scrolls through its slice */
 .aaw-step-item.is-active {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(calc(var(--aaw-step-fill, 0) * -16px));
   pointer-events: auto;
 }
 
+/* Completed steps exit through the top — the "bottom to top" motion */
 .aaw-step-item.is-passed {
   opacity: 0;
-  transform: translateY(-50px);
+  transform: translateY(-64px);
   pointer-events: none;
 }
 
@@ -303,14 +306,20 @@
   position: absolute;
   inset: 0;
   opacity: 0;
-  transform: scale(0.98) translateY(10px);
+  /* Next scene waits below, previous scene leaves through the top — mirrored
+     with the left-hand step motion so both columns move together. */
+  transform: translateY(26px) scale(0.985);
   pointer-events: none;
-  transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.aaw-scene.is-prev {
+  transform: translateY(-26px) scale(0.985);
 }
 
 .aaw-scene.is-active {
   opacity: 1;
-  transform: scale(1) translateY(0);
+  transform: translateY(0) scale(1);
   pointer-events: auto;
 }
 
@@ -321,6 +330,68 @@
   overflow: hidden;
   position: relative;
 }
+
+/* ---------- Scroll-triggered micro-animations inside the mock browser ---------- */
+
+@keyframes aawRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes aawPop {
+  0%   { opacity: 0; transform: scale(0.86); }
+  70%  { opacity: 1; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes aawSlideIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Scene 1 — job board */
+.aaw-scene.is-active .aaw-job-row {
+  animation: aawRise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(60ms + var(--i, 0) * 70ms);
+}
+.aaw-scene.is-active .aaw-co-line { animation: aawRise 0.45s both; animation-delay: 90ms; }
+.aaw-scene.is-active .aaw-job-title { animation: aawRise 0.45s both; animation-delay: 140ms; }
+.aaw-scene.is-active .aaw-job-meta { animation: aawRise 0.45s both; animation-delay: 180ms; }
+.aaw-scene.is-active .aaw-pills { animation: aawRise 0.45s both; animation-delay: 220ms; }
+.aaw-scene.is-active .aaw-job-actions { animation: aawRise 0.45s both; animation-delay: 260ms; }
+.aaw-scene.is-active .aaw-lines { animation: aawRise 0.45s both; animation-delay: 300ms; }
+.aaw-scene.is-active .aaw-widget-run { animation: aawPop 0.6s both; animation-delay: 380ms; }
+
+/* Scene 2 — autofilled form */
+.aaw-scene.is-active .aaw-form-top { animation: aawRise 0.45s both; animation-delay: 80ms; }
+.aaw-scene.is-active .aaw-form .aaw-field {
+  animation: aawRise 0.45s both;
+  animation-delay: calc(150ms + var(--i, 0) * 60ms);
+}
+.aaw-scene.is-active .aaw-form .aaw-field-check {
+  animation: aawPop 0.35s both;
+  animation-delay: calc(330ms + var(--i, 0) * 60ms);
+}
+.aaw-scene.is-active .aaw-attach { animation: aawPop 0.55s both; animation-delay: 620ms; }
+.aaw-scene.is-active .aaw-attach-note { animation: aawRise 0.45s both; animation-delay: 720ms; }
+
+/* Scene 3 — Vault prompt */
+.aaw-scene.is-active .aaw-widget-ask { animation: aawPop 0.55s both; animation-delay: 120ms; }
+.aaw-scene.is-active .aaw-va-row {
+  animation: aawSlideIn 0.45s both;
+  animation-delay: calc(260ms + var(--i, 0) * 90ms);
+}
+.aaw-scene.is-active .aaw-chips { animation: aawRise 0.45s both; animation-delay: 620ms; }
+.aaw-scene.is-active .aaw-toggle-row { animation: aawRise 0.45s both; animation-delay: 700ms; }
+
+/* Scene 4 — review & submit */
+.aaw-scene.is-active .aaw-done-badge { animation: aawPop 0.55s both; animation-delay: 100ms; }
+.aaw-scene.is-active .aaw-done-title { animation: aawRise 0.45s both; animation-delay: 220ms; }
+.aaw-scene.is-active .aaw-widget-done .aaw-widget-sub { animation: aawRise 0.45s both; animation-delay: 270ms; }
+.aaw-scene.is-active .aaw-confirm-summary { animation: aawRise 0.45s both; animation-delay: 340ms; }
+.aaw-scene.is-active .aaw-widget-done .aaw-btn-mint { animation: aawRise 0.45s both; animation-delay: 440ms; }
+.aaw-scene.is-active .aaw-done-row { animation: aawRise 0.45s both; animation-delay: 500ms; }
+.aaw-scene.is-active .aaw-sync { animation: aawRise 0.45s both; animation-delay: 580ms; }
 
 /* ---------- Scene 1: Job Board & Floating Extension Widget ---------- */
 
@@ -909,75 +980,6 @@
   text-align: left;
 }
 
-/* ---------- Bottom Progress Tabs (Matching Uplers) ---------- */
-
-.aaw-bottom-tabs {
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  margin-top: 10px;
-  flex: none;
-}
-
-.aaw-tabs-row {
-  display: flex;
-  align-items: center;
-  gap: 32px;
-  background: transparent;
-}
-
-.aaw-tab-btn {
-  all: unset;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-}
-
-.aaw-tab-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #64748b;
-  transition: color 0.25s ease;
-}
-
-.aaw-tab-num {
-  font-weight: 700;
-  color: #0d9488;
-  margin-right: 2px;
-}
-
-.aaw-tab-btn:hover .aaw-tab-label {
-  color: #0f172a;
-}
-
-.aaw-tab-btn.is-active .aaw-tab-label {
-  color: #0f172a;
-  font-weight: 700;
-}
-
-.aaw-tab-track {
-  width: 100%;
-  min-width: 80px;
-  height: 2.5px;
-  border-radius: 2px;
-  background: #e2e8f0;
-  overflow: hidden;
-  display: block;
-}
-
-.aaw-tab-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: #10b981;
-  transform-origin: left center;
-  transform: scaleX(0);
-  transition: transform 0.15s ease-out;
-}
-
 /* ---------- Responsive for Tablets / Mobile (< 960px) ---------- */
 
 @media (max-width: 960px) {
@@ -997,27 +999,18 @@
     height: auto;
     position: static;
   }
-  .aaw-step-item {
+  .aaw-step-item,
+  .aaw-step-item.is-active,
+  .aaw-step-item.is-passed,
+  .aaw-step-item.is-upcoming {
     position: static;
+    display: flex;
     opacity: 1;
     transform: none;
     margin-bottom: 24px;
     pointer-events: auto;
   }
-  .aaw-step-item.is-passed,
-  .aaw-step-item.is-upcoming {
-    display: none;
-  }
   .aaw-window {
     height: 400px;
-  }
-  .aaw-tabs-row {
-    gap: 12px;
-  }
-  .aaw-tab-label {
-    font-size: 11px;
-  }
-  .aaw-tab-track {
-    min-width: 50px;
   }
 }
