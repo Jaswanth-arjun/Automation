@@ -358,57 +358,10 @@ html,body{overflow-x:hidden}
 .hmz-stat span{font-size:12.5px;color:#5b6478;font-weight:600}
 
 /* ===== INTEGRATIONS STRIP — LIGHT TRUST BAND ===== */
-.hmz-strip{background:linear-gradient(110deg,#f7f9ff 0%,#ffffff 50%,#f8f6ff 100%);color:#0f1222;text-align:center;padding:56px 24px;overflow:hidden;position:relative}
+.hmz-strip{background:linear-gradient(110deg,#f7f9ff 0%,#ffffff 50%,#f8f6ff 100%);color:#0f1222;text-align:center;padding:40px 24px 44px;overflow:hidden;position:relative}
 .hmz-strip::before{content:'';position:absolute;inset:0;background:radial-gradient(600px 200px at 50% 100%,rgba(98,123,255,.12),transparent);animation:hmzStripPulse 4s ease infinite;pointer-events:none}
 @keyframes hmzStripPulse{0%,100%{opacity:.5}50%{opacity:1}}
 .hmz-strip .hmz-logostrip-head{margin-bottom:22px}
-.hmz-logos{overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);position:relative;z-index:1}
-.hmz-logos>div{display:flex;gap:12px;width:max-content;animation:hmzslide 22s linear infinite;will-change:transform}
-.hmz-logos:hover>div{animation-play-state:paused}
-.hmz-platform-cell{
-  display:inline-flex;
-  align-items:center;
-  gap:10px;
-  white-space:nowrap;
-  border:1px solid #dce3f5;
-  background:rgba(255,255,255,.88);
-  backdrop-filter:blur(8px);
-  border-radius:12px;
-  padding:7px 16px 7px 9px;
-  box-shadow:0 4px 14px rgba(50,70,120,.05);
-  transition:all .28s cubic-bezier(.16,1,.3,1);
-  cursor:default;
-}
-.hmz-platform-cell:hover{
-  border-color:#9eafff;
-  box-shadow:0 8px 24px rgba(51,92,255,.16);
-  transform:scale(1.05) translateY(-2px);
-  background:#ffffff;
-}
-.hmz-platform-mark{
-  display:grid;
-  place-items:center;
-  width:26px;
-  height:26px;
-  border-radius:6px;
-  overflow:hidden;
-  flex-shrink:0;
-  transition:transform .2s ease;
-}
-.hmz-platform-cell:hover .hmz-platform-mark{
-  transform:scale(1.1);
-}
-.hmz-platform-txt{
-  font-size:13.5px;
-  font-weight:700;
-  color:#3a3f5c;
-  letter-spacing:-.01em;
-  transition:color .25s ease;
-}
-.hmz-platform-cell:hover .hmz-platform-txt{
-  color:#335CFF;
-}
-@keyframes hmzslide{from{transform:translateX(-50%)}to{transform:translateX(0)}}
 
 /* ===== COMPANY LOGO MARQUEE (Nyeras-style trust band) ===== */
 .hmz-logostrip{position:relative;z-index:1;padding:40px 24px 48px;text-align:center;opacity:0;transform:translateY(18px);transition:opacity .8s cubic-bezier(.4,0,.2,1),transform .8s cubic-bezier(.4,0,.2,1)}
@@ -418,8 +371,9 @@ html,body{overflow-x:hidden}
 .hmz-logomq-track{display:flex;align-items:center;width:max-content;animation:hmzLogoSlide 40s linear infinite}
 .hmz-logomq:hover .hmz-logomq-track{animation-play-state:paused}
 .hmz-logocell{display:inline-flex;align-items:center;gap:10px;height:46px;margin-right:52px;flex:0 0 auto}
-.hmz-companymark{width:38px;height:38px;border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,.42);overflow:hidden;opacity:.82;transition:opacity .35s ease,transform .35s ease,box-shadow .35s ease}
+.hmz-companymark{width:38px;height:38px;border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,.42);overflow:hidden;opacity:.88;transition:opacity .35s ease,transform .35s ease,box-shadow .35s ease}
 .hmz-companymark img{display:block;width:100%;height:100%;object-fit:contain}
+.hmz-companymark svg{display:block;width:100%;height:100%;border-radius:8px}
 .hmz-logocell:hover .hmz-companymark{opacity:1;transform:scale(1.07);box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 5px 14px rgba(15,18,34,.18)}
 .hmz-logotxt{font-size:16px;font-weight:700;color:#3a3f5c;letter-spacing:-.01em;white-space:nowrap;transition:color .35s ease}
 .hmz-logocell:hover .hmz-logotxt{color:#335CFF}
