@@ -22,6 +22,9 @@ import {
   Star,
   AtSign,
   Puzzle,
+  ShieldCheck,
+  Eye,
+  CheckCircle,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import PawLogo from '../components/PawLogo';
@@ -1295,69 +1298,444 @@ function Integrations() {
   );
 }
 
-/* Scroll-driven resume optimizer */
-const SR_STEPS = [
-  { n: '01', title: 'Tell HAMZO who you are', desc: 'Profile, skills, resume and target roles — one 60-second setup.' },
-  { n: '02', title: 'Match + tailor per job', desc: 'Each posting gets a match score and a one-page tailored resume.' },
-  { n: '03', title: 'Outreach on autopilot', desc: 'Referrals, invites and follow-ups run while you track everything.' },
+/* Scroll-driven Auto Apply Walkthrough */
+const AA_STEPS = [
+  {
+    n: '1',
+    tab: '1. Extension',
+    kicker: 'STEP 1 · AUTO-DETECT',
+    title: 'One click on any job board',
+    points: [
+      'Works on LinkedIn, Naukri, Greenhouse, Lever, Ashby, Workday & company career sites',
+      'HAMZO Chrome Extension activates automatically when an application page opens',
+    ],
+    url: 'linkedin.com/jobs • HAMZO Apply Copilot',
+  },
+  {
+    n: '2',
+    tab: '2. Autofill & Resume',
+    kicker: 'STEP 2 · SMART FILL',
+    title: 'Autofills & attaches tailored resume',
+    points: [
+      '15+ fields filled in 2 seconds without tedious copy-pasting',
+      'Generates & injects a keyword-tailored 1-page ATS PDF directly into the file upload',
+    ],
+    url: 'greenhouse.io/apple/apply • Auto-Fill',
+  },
+  {
+    n: '3',
+    tab: '3. Vault Memory',
+    kicker: 'STEP 3 · VAULT MEMORY',
+    title: 'Learns custom questions once',
+    points: [
+      'Never guesses: pops up a swift prompt for employer-specific questions',
+      'Saves answers permanently to your private Vault — never asks again',
+    ],
+    url: 'Vault • Instant Memory',
+  },
+  {
+    n: '4',
+    tab: '4. Review & Sync',
+    kicker: 'STEP 4 · ZERO GUESSING',
+    title: 'You confirm before submitting',
+    points: [
+      'Zero silent submissions — full review control on every job application',
+      'Auto-syncs application status, timestamp, and tailored resume to your Web Tracker',
+    ],
+    url: 'Review • Ready to Submit',
+  },
 ];
+
 function ScrollResume({ onOpen }) {
   const secRef = useRef(null);
-  const [prog, setProg] = useState(0);
+  const [activeStep, setActiveStep] = useState(0);
+
   useEffect(() => {
     const onScroll = () => {
       const el = secRef.current;
       if (!el) return;
-      const r = el.getBoundingClientRect();
-      const total = Math.max(1, r.height - window.innerHeight);
-      const p = Math.min(1, Math.max(0, -r.top / total));
-      setProg((prev) => (Math.abs(prev - p) > 0.002 ? p : prev));
+      const rect = el.getBoundingClientRect();
+      const totalScrollable = Math.max(1, rect.height - window.innerHeight);
+      const scrolledRatio = Math.min(1, Math.max(0, -rect.top / totalScrollable));
+      const nextStep = Math.min(3, Math.floor(scrolledRatio * 4));
+      setActiveStep((prev) => (prev !== nextStep ? nextStep : prev));
     };
-    onScroll();
+
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
-    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   }, []);
-  const step = prog < 0.34 ? 0 : prog < 0.67 ? 1 : 2;
-  const hl = (i) => prog > 0.12 + i * 0.1;
+
+  const handleSelectStep = (idx) => {
+    setActiveStep(idx);
+    if (!secRef.current) return;
+    const rect = secRef.current.getBoundingClientRect();
+    const elemTop = window.scrollY + rect.top;
+    const totalScrollable = Math.max(1, secRef.current.offsetHeight - window.innerHeight);
+    const targetY = elemTop + (idx / 4) * totalScrollable + 20;
+    window.scrollTo({ top: targetY, behavior: 'smooth' });
+  };
+
+  const curr = AA_STEPS[activeStep];
+
   return (
-    <div className="hmz-sr" id="resume" ref={secRef}>
-      <div className="hmz-sr-sticky">
-        <div className="hmz-sr-copy">
-          <span className="hmz-kicker">RESUME OPTIMIZER</span>
-          <h2>Optimizing your resume<br />as you <em>scroll.</em></h2>
-          <div className="hmz-sr-steps">
-            {SR_STEPS.map((s, i) => (
-              <div key={s.n} className={`hmz-sr-step ${i === step ? 'on' : ''}`}>
-                <span>{s.n}</span>
-                <div><b>{s.title}</b><p>{s.desc}</p></div>
-              </div>
-            ))}
+    <div className="hmz-sr hmz-aaw-section" id="resume" ref={secRef}>
+      <div className="hmz-sr-sticky hmz-aaw-sticky">
+        {/* Left Column: Narrative Steps */}
+        <div className="hmz-sr-copy hmz-aaw-copy">
+          <span className="hmz-kicker">AUTO APPLY COPILOT</span>
+          <h2>
+            How Auto Apply works on<br />
+            <em>autopilot.</em>
+          </h2>
+
+          <div className="hmz-aaw-steps-list">
+            {AA_STEPS.map((s, i) => {
+              const isCurrent = i === activeStep;
+              return (
+                <div
+                  key={s.n}
+                  onClick={() => handleSelectStep(i)}
+                  className={`hmz-aaw-step-card ${isCurrent ? 'is-active' : ''}`}
+                >
+                  <div className="hmz-aaw-badge">{s.n}</div>
+                  <div className="hmz-aaw-step-body">
+                    <span className="hmz-aaw-step-kicker">{s.kicker}</span>
+                    <h3 className="hmz-aaw-step-title">{s.title}</h3>
+                    {isCurrent && (
+                      <ul className="hmz-aaw-points">
+                        {s.points.map((pt, pIdx) => (
+                          <li key={pIdx}>
+                            <span className="hmz-aaw-bullet" />
+                            <span>{pt}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <MagneticWrap>
-            <button className="hmz-cta" onClick={() => onOpen('/dashboard/resume')}>Tailor my resume <ArrowRight size={15} /></button>
-          </MagneticWrap>
+
+          <div className="hmz-aaw-actions-cta">
+            <MagneticWrap>
+              <button className="hmz-cta" onClick={() => onOpen('/dashboard/resume')}>
+                Get Chrome Extension <ArrowRight size={15} />
+              </button>
+            </MagneticWrap>
+            <span className="hmz-aaw-cta-note">Free to start · No credit card required</span>
+          </div>
         </div>
-        <div className="hmz-sr-visual">
-          <span className="hmz-sr-blob" style={{ transform: `translateX(${prog * 90 - 45}px)` }} />
-          <TiltCard className="hmz-sr-card" maxTilt={4} style={{ transform: `translateY(${(1 - prog) * 36}px) rotate(${(1 - prog) * 1.5}deg)` }}>
-            <div className="hmz-sr-job"><span className="hmz-cmark sm">A</span><div><small>Angel One · 2 mins ago</small><b>Agentic AI Intern</b></div><span className="hmz-match sm">98%</span></div>
-            <div className="hmz-sr-doc">
-              <b className="hmz-sr-name">Arjun Kumar</b>
-              <small className="hmz-sr-contact">Bengaluru · arjun@mail.com · github.com/arjun</small>
-              <p className="hmz-sr-sec">SUMMARY</p>
-              <p className="hmz-sr-text">
-                Product-focused engineer building <span className={hl(0) ? 'hl on' : 'hl'}>AI-powered</span> apps with <span className={hl(1) ? 'hl on' : 'hl'}>LLM integrations</span> and <span className={hl(4) ? 'hl on' : 'hl'}>production-ready</span> APIs. Strong in <span className={hl(2) ? 'hl on' : 'hl'}>Python</span>, <span className={hl(3) ? 'hl on' : 'hl'}>FastAPI</span> and <span className={hl(5) ? 'hl on' : 'hl'}>SQL</span> with measurable product impact.
-              </p>
-              <p className="hmz-sr-sec">CORE SKILLS</p>
-              <p className="hmz-sr-text small">
-                Languages: <span className={hl(2) ? 'hl on' : 'hl'}>Python</span>, JavaScript, <span className={hl(5) ? 'hl on' : 'hl'}>SQL</span> ·
-                Backend: <span className={hl(3) ? 'hl on' : 'hl'}>FastAPI</span>, <span className={hl(4) ? 'hl on' : 'hl'}>REST APIs</span> ·
-                AI: <span className={hl(1) ? 'hl on' : 'hl'}>LLM integrations</span>, agents
-              </p>
-              <div className="hmz-sr-bar"><i style={{ width: `${Math.round(prog * 100)}%` }} /><b>{Math.round(72 + prog * 26)}% ATS</b></div>
+
+        {/* Right Column: Sticky Mac Window Mockup */}
+        <div className="hmz-aaw-visual-wrap">
+          <div className="hmz-aaw-window">
+            {/* Window Title Bar */}
+            <div className="hmz-aaw-header">
+              <div className="hmz-aaw-dots">
+                <span className="dot red" />
+                <span className="dot yellow" />
+                <span className="dot green" />
+              </div>
+              <div className="hmz-aaw-url">
+                <Globe size={13} />
+                <span>{curr.url}</span>
+              </div>
+              <div className="hmz-aaw-live-pill">
+                <span className="hmz-aaw-live-dot" />
+                <span>COPILOT</span>
+              </div>
             </div>
-          </TiltCard>
+
+            {/* Window Content Scenes */}
+            <div className="hmz-aaw-body">
+              {/* Scene 0: Job Board & Floating Copilot */}
+              {activeStep === 0 && (
+                <div className="hmz-aaw-scene s0">
+                  <div className="hmz-aaw-split">
+                    <div className="hmz-aaw-s0-list">
+                      <div className="hmz-aaw-s0-head">
+                        <b>Jobs for you</b>
+                        <small>Software engineer · India</small>
+                      </div>
+                      <div className="hmz-aaw-s0-item active">
+                        <div className="hmz-aaw-s0-logo apple"></div>
+                        <div>
+                          <b>Senior Software Engineer, Find My</b>
+                          <span>Apple · Bangalore (Hybrid)</span>
+                        </div>
+                      </div>
+                      <div className="hmz-aaw-s0-item">
+                        <div className="hmz-aaw-s0-logo amazon">a</div>
+                        <div>
+                          <b>Software Dev Engineer II</b>
+                          <span>Amazon · Bangalore</span>
+                        </div>
+                      </div>
+                      <div className="hmz-aaw-s0-item">
+                        <div className="hmz-aaw-s0-logo zomato">Z</div>
+                        <div>
+                          <b>SDE III, Backend</b>
+                          <span>Zomato · On-site</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="hmz-aaw-s0-detail">
+                      <div className="hmz-aaw-s0-dheader">
+                        <span className="apple-brand"> Apple</span>
+                        <h4>Senior Software Engineer, Find My</h4>
+                        <p>Bangalore, Karnataka, India · 3 days ago</p>
+                        <div className="hmz-aaw-chips-row">
+                          <span className="tag">Hybrid</span>
+                          <span className="tag">Full-time</span>
+                        </div>
+                      </div>
+
+                      <div className="hmz-aaw-s0-apply-btns">
+                        <button className="btn-apple-apply">Apply ↗</button>
+                        <button className="btn-apple-save">Save</button>
+                      </div>
+
+                      <div className="hmz-aaw-s0-snippet">
+                        <b>About the job</b>
+                        <p>
+                          The Find My team builds secure, privacy-first distributed location
+                          services powering hundreds of millions of Apple devices...
+                        </p>
+                      </div>
+
+                      {/* Floating Copilot Widget */}
+                      <div className="hmz-aaw-float-widget">
+                        <div className="hmz-aaw-fw-top">
+                          <div className="hmz-aaw-fw-brand">
+                            <PawLogo size={18} />
+                            <b>HAMZO</b>
+                          </div>
+                          <span className="hmz-aaw-fw-pill">Active</span>
+                        </div>
+
+                        <button className="hmz-aaw-fw-run-btn" onClick={() => onOpen('/dashboard/resume')}>
+                          Run HAMZO on this job <ArrowRight size={14} />
+                        </button>
+
+                        <div className="hmz-aaw-fw-meta">
+                          <div className="hmz-aaw-fw-progress">
+                            <span className="bar" style={{ width: '40%' }} />
+                          </div>
+                          <span className="txt">Today: 1 of 10 daily applications</span>
+                        </div>
+
+                        <div className="hmz-aaw-fw-ats-pills">
+                          <span>LinkedIn</span>
+                          <span>Greenhouse</span>
+                          <span>Lever</span>
+                          <span>Ashby</span>
+                          <span>Workday</span>
+                          <span>Any ATS</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 1: Autofill Form & Tailored Resume */}
+              {activeStep === 1 && (
+                <div className="hmz-aaw-scene s1">
+                  <div className="hmz-aaw-s1-form">
+                    <div className="hmz-aaw-s1-fhead">
+                      <span className="host">greenhouse.io · Apple Inc</span>
+                      <h4>Application for Senior Software Engineer</h4>
+                    </div>
+
+                    <div className="hmz-aaw-s1-grid">
+                      <div className="hmz-aaw-fcol">
+                        <label>First Name</label>
+                        <div className="hmz-aaw-inp filled">
+                          <span>Arjun</span>
+                          <Check size={14} className="chk" />
+                        </div>
+                      </div>
+                      <div className="hmz-aaw-fcol">
+                        <label>Last Name</label>
+                        <div className="hmz-aaw-inp filled">
+                          <span>Kumar</span>
+                          <Check size={14} className="chk" />
+                        </div>
+                      </div>
+                      <div className="hmz-aaw-fcol">
+                        <label>Email Address</label>
+                        <div className="hmz-aaw-inp filled">
+                          <span>arjun.kumar@gmail.com</span>
+                          <Check size={14} className="chk" />
+                        </div>
+                      </div>
+                      <div className="hmz-aaw-fcol">
+                        <label>Phone Number</label>
+                        <div className="hmz-aaw-inp filled">
+                          <span>+91 94405 52825</span>
+                          <Check size={14} className="chk" />
+                        </div>
+                      </div>
+                      <div className="hmz-aaw-fcol full">
+                        <label>LinkedIn Profile</label>
+                        <div className="hmz-aaw-inp filled">
+                          <span>linkedin.com/in/arjun-dev</span>
+                          <Check size={14} className="chk" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tailored Resume Attachment Card */}
+                    <div className="hmz-aaw-s1-resume">
+                      <label>Resume / CV *</label>
+                      <div className="hmz-aaw-resume-pill">
+                        <div className="pdf-icon">
+                          <FileText size={18} />
+                        </div>
+                        <div className="pdf-desc">
+                          <b>Arjun_Kumar_Apple_Tailored.pdf</b>
+                          <span>1-page Tailored PDF · 48 KB</span>
+                        </div>
+                        <span className="ats-badge">
+                          <CheckCircle2 size={13} /> 98% ATS Score
+                        </span>
+                      </div>
+                      <div className="hmz-aaw-resume-attached-info">
+                        ✓ Attached via DataTransfer by Hamzo AI Copilot
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 2: Smart Vault Memory Prompt */}
+              {activeStep === 2 && (
+                <div className="hmz-aaw-scene s2">
+                  <div className="hmz-aaw-s2-vault-card">
+                    <div className="hmz-aaw-vhead">
+                      <div className="hmz-aaw-vicon">🤖</div>
+                      <div>
+                        <b>HAMZO needs one detail</b>
+                        <small>Saved to Vault — never asks again</small>
+                      </div>
+                      <span className="hmz-aaw-vtag">1 of 2 missing fields</span>
+                    </div>
+
+                    <div className="hmz-aaw-vbody">
+                      <div className="hmz-aaw-vq">
+                        “What is your current notice period and expected CTC?”
+                      </div>
+
+                      <div className="hmz-aaw-vrows">
+                        <div className="hmz-aaw-vrow">
+                          <span className="lbl">Notice Period</span>
+                          <span className="val">15 days</span>
+                          <span className="src">From Vault</span>
+                        </div>
+                        <div className="hmz-aaw-vrow">
+                          <span className="lbl">Expected CTC</span>
+                          <span className="val">₹24–30 LPA</span>
+                          <span className="src">From Profile</span>
+                        </div>
+                        <div className="hmz-aaw-vrow">
+                          <span className="lbl">Relocation</span>
+                          <span className="val">Yes, open to Bangalore</span>
+                          <span className="src">From Vault</span>
+                        </div>
+                      </div>
+
+                      <div className="hmz-aaw-chips-select">
+                        <button type="button" className="chip active">Immediate</button>
+                        <button type="button" className="chip">15 Days</button>
+                        <button type="button" className="chip">30 Days</button>
+                      </div>
+
+                      <label className="hmz-aaw-vcheck">
+                        <input type="checkbox" checked readOnly />
+                        <span>💾 Save to Vault (never ask again)</span>
+                      </label>
+                    </div>
+
+                    <div className="hmz-aaw-vfoot">
+                      <button className="btn-skip">Skip</button>
+                      <button className="btn-save">Save & Continue →</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Scene 3: Pre-Submit Confirmation */}
+              {activeStep === 3 && (
+                <div className="hmz-aaw-scene s3">
+                  <div className="hmz-aaw-s3-confirm-card">
+                    <div className="hmz-aaw-chead">
+                      <div className="hmz-aaw-cicon">✅</div>
+                      <div>
+                        <b>Application Ready!</b>
+                        <small>14 fields filled successfully · 0 errors</small>
+                      </div>
+                    </div>
+
+                    <div className="hmz-aaw-cbody">
+                      <p>
+                        The application has been completely filled. Do you want HAMZO to submit it?
+                      </p>
+
+                      <div className="hmz-aaw-csummary">
+                        <div className="sum-item">
+                          <span>Target Role:</span>
+                          <b>Senior Software Engineer, Find My (Apple)</b>
+                        </div>
+                        <div className="sum-item">
+                          <span>Attached Resume:</span>
+                          <b>Arjun_Kumar_Apple_Tailored.pdf (98% ATS)</b>
+                        </div>
+                        <div className="sum-item">
+                          <span>Vault Verification:</span>
+                          <b>Notice period & CTC confirmed</b>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="hmz-aaw-cfoot">
+                      <button className="btn-submit">✓ Submit Application</button>
+                      <button className="btn-review">👁 Review</button>
+                      <button className="btn-cancel">✗ Cancel</button>
+                    </div>
+
+                    <div className="hmz-aaw-sync-timeline">
+                      <CheckCircle2 size={14} className="sync-chk" />
+                      <span>Auto-syncing to your HAMZO Application Tracker timeline</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Synced Navigation Tabs */}
+            <div className="hmz-aaw-tabs-bar">
+              {AA_STEPS.map((s, i) => {
+                const isActive = i === activeStep;
+                return (
+                  <button
+                    key={s.n}
+                    type="button"
+                    onClick={() => handleSelectStep(i)}
+                    className={`hmz-aaw-nav-btn ${isActive ? 'is-active' : ''}`}
+                  >
+                    <span className="tab-title">{s.tab}</span>
+                    {isActive && <span className="tab-indicator" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
     </div>
