@@ -30,6 +30,8 @@ import { useAuth } from '../lib/auth';
 import PawLogo from '../components/PawLogo';
 import AutoApplyWalkthrough from '../components/AutoApplyWalkthrough';
 import OutreachWalkthrough from '../components/OutreachWalkthrough';
+import FrameLift from '../components/FrameLift';
+import ResumeTailoringDemo from '../components/ResumeTailoringDemo';
 import './Landing.css';
 
 /* ================= helpers ================= */
@@ -969,7 +971,7 @@ function TopBar({ onGetStarted, authed }) {
           <div className="hmz-links">
             <a href="#product">Product</a>
             <a href="#demo">Demo</a>
-            <a href="#extension">Extension</a>
+            <a href="#resume-engine">Resume engine</a>
             <a href="#workflow">How it works</a>
             <a href="#reviews">Reviews</a>
             <a href="#faq">FAQ</a>
@@ -987,7 +989,7 @@ function TopBar({ onGetStarted, authed }) {
           <div className="hmz-mobile">
             <a href="#product" onClick={() => setOpen(false)}>Product</a>
             <a href="#demo" onClick={() => setOpen(false)}>Demo</a>
-            <a href="#extension" onClick={() => setOpen(false)}>Extension</a>
+            <a href="#resume-engine" onClick={() => setOpen(false)}>Resume engine</a>
             <a href="#workflow" onClick={() => setOpen(false)}>How it works</a>
             <a href="#reviews" onClick={() => setOpen(false)}>Reviews</a>
             <a href="#faq" onClick={() => setOpen(false)}>FAQ</a>
@@ -1336,38 +1338,6 @@ function Pillars({ onOpen }) {
   );
 }
 
-function ExtensionSpot({ onOpen }) {
-  const [ref, visible] = useReveal();
-  return (
-    <div className="hmz-ext" id="extension" ref={ref}>
-      <div className={`hmz-extinner ${visible ? 'show' : ''}`}>
-        <div>
-          <span className="hmz-kicker">COPILOT EXTENSION</span>
-          <h2>Meet your AI copilot for the job search.</h2>
-          <p>Hamzo Apply autofills applications, attaches your tailored resume, asks about unknown fields — and remembers the answers in your vault for next time.</p>
-          <ul className="hmz-checks">
-            <li><CheckCircle2 size={16} /> Description page? It clicks Apply itself and continues</li>
-            <li><CheckCircle2 size={16} /> Login walls, CAPTCHAs? It pauses and tells you exactly what to do</li>
-            <li><CheckCircle2 size={16} /> Confirms with you before anything is submitted</li>
-          </ul>
-          <div className="hmz-actions">
-            <MagneticWrap>
-              <button className="hmz-cta big" onClick={() => onOpen('/dashboard/resume')}><Globe size={16} /> Get the extension — it's free</button>
-            </MagneticWrap>
-          </div>
-          <small className="hmz-note">Load unpacked via chrome://extensions · 60-second setup</small>
-        </div>
-        <TiltCard className="hmz-extmock" maxTilt={5}>
-          <div className="hmz-mockbar"><span /><span /><span /></div>
-          <div className="hmz-mockrow"><FileText size={16} /><div><b>Arjun_AngelOne.pdf</b><span>Tailored · 98% match</span></div><Check size={15} /></div>
-          <div className="hmz-mockrow"><AtSign size={15} /><div><b>Project link filled</b><span>From your vault — no asking twice</span></div><Check size={15} /></div>
-          <div className="hmz-mockrow"><Send size={14} /><div><b>Ready to submit</b><span>Waiting for your confirmation</span></div></div>
-          <div className="hmz-mockbtns"><span className="yes">✓ Submit</span><span>👁 Review</span></div>
-        </TiltCard>
-      </div>
-    </div>
-  );
-}
 
 function Compare() {
   const [ref, visible] = useReveal();
@@ -1676,8 +1646,9 @@ export default function Landing() {
         <LogoMarquee />
         <Integrations />
         <ScrollResume onOpen={(r) => go(isAuthenticated ? r : undefined)} />
+        <FrameLift />
         <ScrollOutreach onOpen={(r) => go(isAuthenticated ? r : undefined)} />
-        <ExtensionSpot onOpen={(r) => go(isAuthenticated ? r : undefined)} />
+        <ResumeTailoringDemo />
         <Compare />
         <Setup onOpen={(r) => go(isAuthenticated ? r : undefined)} />
         <WaveDivider color="#0B1533" />

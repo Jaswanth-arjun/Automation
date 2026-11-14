@@ -268,7 +268,7 @@ function VaultScene() {
   );
 }
 
-function ConfirmScene() {
+export function ConfirmScene() {
   return (
     <div className="aaw-pad aaw-confirm">
       <div className="aaw-widget aaw-widget-done">

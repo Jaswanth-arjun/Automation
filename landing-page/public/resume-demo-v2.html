@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HAMZO – AI Resume Tailoring Demo v2</title>
+<script src="/vendor/gsap.min.js"></script>
+<style>
+:root{--bg:#fffaf5;--ink:#1b1511;--mute:#6b5f57;--ac:#e8832a;--ac2:#ee6a5a;--line:#f0d9c4;--ok:#1f9d57;--warn:#d98a00;--bad:#d94a3a;
+ box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17120e;--ink:#f6ece3;--mute:#b3a499;--line:#3a2e24}}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:transparent;color:var(--ink);font-family:Inter,system-ui,sans-serif;overflow:hidden}
+.pre{height:12vh;display:grid;place-items:center;color:var(--mute)}
+section{padding:42px 4vw 48px;text-align:center;background:radial-gradient(ellipse at 50% 0,rgba(238,106,90,.12),transparent 60%)}
+.pill{display:inline-block;background:#fcefc9;color:#8a5a00;font-size:11.5px;font-weight:700;letter-spacing:.08em;padding:5px 13px;border-radius:20px;border:1px solid var(--line)}
+h2{font-size:clamp(26px,3.4vw,44px);letter-spacing:-.03em;margin:12px 0 6px}h2 em{font-family:Georgia,serif;font-weight:400;color:var(--ac2)}
+.sub{color:var(--mute);font-size:clamp(14px,1.4vw,17px);margin:0 0 24px}
+#wrap{position:relative;width:min(940px,94%);aspect-ratio:16/9;margin:0 auto;border-radius:22px;overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 80px -25px rgba(190,110,40,.38);background:#fff8f0}
+#stage{position:absolute;left:0;top:0;width:1280px;height:720px;transform-origin:0 0;text-align:left;color:#1b1511;background:linear-gradient(135deg,#fffaf5,#fdeedd);font-size:16px}
+.sc{position:absolute;inset:0;opacity:0;visibility:hidden;padding:36px 48px}
+.cap{position:absolute;left:48px;top:22px;font-size:13px;font-weight:700;letter-spacing:.12em;color:#b8681c}
+.glass{background:rgba(255,255,255,.72);backdrop-filter:blur(10px);border:1px solid #f0d9c4;border-radius:18px;box-shadow:0 20px 50px -25px rgba(190,110,40,.4)}
+.paper{background:#fff;border:1px solid #eadccf;border-radius:8px;box-shadow:0 20px 50px -20px rgba(0,0,0,.25);padding:26px 30px;font-size:14px;line-height:1.55;color:#333;position:relative;overflow:hidden}
+.paper h4{margin:0 0 2px;font-size:20px;color:#111}.paper h5{margin:12px 0 4px;font-size:11px;letter-spacing:.12em;color:#b8681c;border-bottom:1px solid #eee}
+.paper li{margin:3px 0}.paper ul{margin:0;padding-left:18px}
+mark{background:transparent;color:inherit;border-radius:3px;padding:0 2px}
+.ex{background:rgba(31,157,87,.22)}.pt{background:rgba(217,138,0,.25)}.hl{background:rgba(238,106,90,.25);font-weight:600}
+.scan{position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,transparent,#ee6a5a,transparent);box-shadow:0 0 22px 8px rgba(238,106,90,.45);opacity:0}
+.tag{display:inline-block;background:#fff;border:1px solid #f0d9c4;color:#a8570f;font-weight:600;font-size:15px;padding:7px 14px;border-radius:20px;margin:5px;box-shadow:0 6px 16px -8px rgba(190,110,40,.5)}
+.stat{font-size:20px;font-weight:600;color:#1b1511;height:30px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#ee6a5a;margin-right:10px;animation:pu 1s infinite}
+@keyframes pu{50%{opacity:.25}}
+.row{display:flex;justify-content:space-between;padding:12px 4px;border-bottom:1px solid #f3e6d8;font-size:17px}.row b{font-size:22px}
+.ring{--p:0;width:220px;height:220px;border-radius:50%;background:conic-gradient(var(--c,#e8832a) calc(var(--p)*1%),#f1e3d3 0);display:grid;place-items:center;margin:0 auto}
+.ring i{font-style:normal;width:172px;height:172px;border-radius:50%;background:#fff8f0;display:grid;place-items:center;font-size:50px;font-weight:800}
+.chip{display:inline-block;background:#fff;border:1px solid #f0d9c4;border-radius:20px;padding:8px 16px;font-size:15px;font-weight:600;color:#a8570f}
+.step{display:flex;align-items:center;gap:16px;padding:14px 18px;margin:10px 0;font-size:17px}
+.step code{font-weight:700;font-size:17px;color:#1b1511}.step small{display:block;color:#6b5f57;font-size:13.5px}
+.ck{margin-left:auto;width:28px;height:28px;border-radius:50%;border:2px solid #e3d2c0;display:grid;place-items:center;color:#fff;font-size:15px;flex:none}
+.ck.on{background:#1f9d57;border-color:#1f9d57}
+.cur{position:absolute;left:0;top:0;width:22px;height:22px;z-index:30;opacity:0;pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35))}
+.demo{position:absolute;right:20px;bottom:12px;font-size:12px;color:#8b7a6c;z-index:20}
+#bar{position:absolute;left:0;bottom:0;height:4px;width:0;background:linear-gradient(90deg,#e8832a,#ee6a5a);z-index:25}
+#ctl{position:absolute;left:18px;bottom:12px;z-index:25;display:flex;gap:10px;align-items:center}
+#replay{background:#fff;border:1px solid #f0d9c4;color:#a8570f;font:600 13px Inter,system-ui,sans-serif;padding:6px 14px;border-radius:20px;cursor:pointer}
+#replay:focus-visible{outline:2px solid #e8832a}
+.big{font-size:54px;font-weight:800;letter-spacing:-.03em;line-height:1.05}.big em{font-family:Georgia,serif;font-weight:400;color:#ee6a5a}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:17px;margin-top:20px}.kv span:before{content:"✓ ";color:#1f9d57;font-weight:800}
+#chrome{position:absolute;left:0;top:0;right:0;height:44px;z-index:15;background:rgba(255,250,245,.96);border-bottom:1px solid #f0d9c4;display:flex;align-items:center;gap:8px;padding:0 20px}
+#chrome i{width:12px;height:12px;border-radius:50%;background:#ff5f57}#chrome i:nth-child(2){background:#febc2e}#chrome i:nth-child(3){background:#28c840}
+#chrome .cap{position:static;flex:1;max-width:620px;margin:0 auto;height:28px;border:1px solid #f0d9c4;border-radius:14px;background:#fff;display:grid;place-items:center;font-size:12px;letter-spacing:.06em;font-weight:600;color:#6b5f57;transform:translateX(-30px)}
+#chrome .cap:before{content:"🔒 hamzo.app / ";opacity:.7;margin-right:4px}
+#chrome .brand{color:#e8832a;font-weight:800;letter-spacing:.14em;font-size:13px}
+#cam{position:absolute;inset:0;transform-origin:0 0;will-change:transform}
+.btn{display:inline-block;background:linear-gradient(90deg,#e8832a,#ee6a5a);color:#fff;font-weight:700;font-size:16px;padding:11px 22px;border-radius:12px;box-shadow:0 10px 24px -10px rgba(238,106,90,.8)}
+.rip{position:absolute;left:0;top:0;width:44px;height:44px;margin:-22px 0 0 -22px;border:3px solid #ee6a5a;border-radius:50%;opacity:0;z-index:29;pointer-events:none}
+.sc{padding-top:56px}
+.glogo b{font-size:28px;font-weight:700;letter-spacing:-.03em}.gbtn{background:#1a5cf0;color:#fff;font-weight:600;padding:8px 18px;border-radius:20px;font-size:12px;white-space:nowrap}.jh{font-size:17px;font-weight:800;color:#111;margin:14px 0 3px}#jd ul{padding-left:20px}#jd li::marker{color:#1a5cf0}
+.rz{font-family:'Times New Roman',Georgia,serif;color:#111;line-height:1.3;padding:16px 22px}.rz .nm{font-size:2.3em;font-weight:700;text-align:center;line-height:1.1}.rz .st{text-align:center;font-weight:700;font-size:1.25em}.rz .ct{text-align:center;font-size:.95em;padding-bottom:5px;border-bottom:1.5px solid #111}.rz .sh{font-size:1.28em;font-weight:700;border-bottom:1.2px solid #111;margin:.55em 0 .2em}.rz ul{margin:0;padding-left:1.5em}.rz li{margin:0}.rz mark.hl{font-weight:inherit}
+.rt{padding:12px 20px;line-height:1.25}.rt .nm{color:#0e1a4a;font-size:2.8em;letter-spacing:-.01em}.rt .st{font-size:1.55em;border-bottom:1px solid #8a96c8;padding-bottom:3px;margin-bottom:4px}.rt .ct{border:0;line-height:1.7;padding-bottom:3px}.rt .sec{border-top:1.3px solid #111;margin-top:.45em;padding-top:.3em}.rt .sh{font-size:1.55em;border:0;margin:0 0 .15em}.rt .sk{display:grid;grid-template-columns:13em 1fr}.rt .er{display:flex;justify-content:space-between}.rt .ed{font-style:italic;margin-bottom:.3em}.rt ul{margin:0;padding-left:1.8em}
+</style>
+</head>
+<body>
+<section>
+ <span class="pill">AI RESUME TAILORING ENGINE</span>
+ <h2>AI-Powered <em>Resume Tailoring</em></h2>
+ <p class="sub">From job description to an ATS-optimized resume, automatically.</p>
+ <div id="wrap" role="img" aria-label="Animated product demo: HAMZO analyzes a job description, scores the original resume, tailors it with AI, validates ATS keywords, generates a one-page PDF and shows the before and after match score. Illustrative demo values.">
+ <div id="stage">
+  <div id="chrome"><i></i><i></i><i></i><div class="cap" id="cap">1 · JOB DESCRIPTION ANALYSIS</div><span class="brand">HAMZO</span></div><div id="cam">
+
+  <!-- Scene 1 -->
+  <div class="sc" id="s1"><div style="display:flex;gap:40px;margin-top:34px">
+   <div class="paper" id="jd" style="width:640px;height:580px;padding:0"><div class="scan"></div><div id="jdin" style="padding:22px 30px;font-size:13px;line-height:1.5">
+<div style="display:flex;justify-content:space-between;align-items:center"><span class="glogo"><b style="color:#4285f4">G</b><b style="color:#ea4335">o</b><b style="color:#fbbc05">o</b><b style="color:#4285f4">g</b><b style="color:#34a853">l</b><b style="color:#ea4335">e</b></span><span class="gbtn">Apply Now →</span></div>
+<div style="font-size:30px;font-weight:800;color:#111;margin-top:6px;letter-spacing:-.02em">Senior Software Engineer</div>
+<div style="color:#5f6368;font-size:14px;margin:2px 0 10px">Build scalable solutions and shape the future with Google.</div>
+<div style="display:flex;gap:16px;color:#444;font-size:12px;padding-bottom:10px;border-bottom:1px solid #ddd"><span>💼 Full-time</span><span>📍 Bangalore, India</span><span>👤 3 – 6 Years</span><span>🎓 B.E / B.Tech</span></div>
+<div class="jh">About the Role</div>We are looking for a talented Senior Software Engineer to join our growing engineering team. You will design, develop, and maintain scalable applications, build reliable backend services, and collaborate with cross-functional teams to deliver high-quality software products.
+<div class="jh">Key Responsibilities</div><ul><li>Design and develop scalable backend applications.</li><li>Build RESTful <mark class="k">APIs</mark> using <mark class="k">Java</mark> and <mark class="k">Spring Boot</mark>.</li><li>Develop and maintain <mark class="k">microservices</mark> architecture.</li><li>Optimize application performance and reliability.</li><li>Work with databases, <mark class="k">cloud</mark> platforms, and <mark class="k">CI/CD</mark> pipelines.</li><li>Participate in code reviews and mentor junior developers.</li><li>Collaborate with product managers and frontend engineers.</li></ul>
+<div class="jh">Required Skills</div><ul><li><mark class="k">Java</mark>, <mark class="k">Python</mark> or C++</li><li><mark class="k">Spring Boot</mark> and <mark class="k">REST APIs</mark></li><li><mark class="k">Microservices</mark> Architecture</li><li><mark class="k">SQL</mark> and Database Management</li><li><mark class="k">React.js</mark></li><li><mark class="k">Docker</mark> and <mark class="k">Kubernetes</mark></li><li><mark class="k">AWS</mark> or Azure</li><li><mark class="k">Data Structures</mark> and Algorithms</li><li><mark class="k">System Design</mark></li><li>Problem-solving and communication skills</li></ul>
+<div class="jh">Preferred Qualifications</div><ul><li>Experience building enterprise-scale applications.</li><li>Knowledge of distributed systems.</li><li>Experience with cloud-native technologies.</li><li>Familiarity with Agile development practices.</li></ul>
+<div class="jh">What We Offer</div><ul><li>Competitive compensation</li><li>Flexible working environment</li><li>Professional development opportunities</li><li>Collaborative engineering culture</li></ul>
+<div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ddd;margin-top:14px;padding-top:12px"><span><b style="color:#111">Ready to make an impact?</b><br><span style="color:#5f6368;font-size:12px">Click the Apply Now button and submit your application.</span></span><span class="gbtn">Apply Now →</span></div>
+</div></div>
+   <div style="flex:1;padding-top:10px"><span class="btn" id="b1">✦ Apply with HAMZO</span><div class="stat" id="st1" style="margin-top:14px"></div><div id="tags" style="margin-top:14px;min-height:220px"></div>
+    <div class="glass" style="padding:16px 20px;margin-top:18px;font-size:15px;color:#6b5f57">Canonical keyword matching + alias dictionary<br><b style="color:#1b1511">k8s → Kubernetes · Postgres → SQL · ReactJS → React</b></div></div>
+  </div></div>
+
+  <!-- Scene 2 -->
+  <div class="sc" id="s2"><div style="display:flex;gap:40px;margin-top:34px">
+   <div class="paper rz" id="rs" style="width:560px;height:590px;font-size:9.6px;"><div class=scan></div><div class="nm">Nelluru Jaswanth</div><div class="st">Computer Science Undergraduate</div><div class="ct">Email: jaswanth.nelluru@gmail.com | Phone: +91 98765 43210<br>LinkedIn: linkedin.com/in/nelluru-jaswanth | GitHub: github.com/Jafvss</div><div class="sh">Professional Summary</div>Computer Science undergraduate with knowledge of programming, problem-solving, and web development. Eager to contribute technical skills and learn new technologies in a professional environment.<div class="sh">Education</div><b>B.Tech – Computer Science and Engineering</b> <span style="float:right">2023 – 2027</span><br>NBKR Institute of Science and Technology, Vidyanagar<br>CGPA: 8.5 / 10<div class="sh">Technical Skills</div><ul><li><b>Programming Languages:</b> <mark data-m="ex">Java</mark>, <mark data-m="ex">Python</mark>, C, C++</li><li><b>Web Technologies:</b> HTML, CSS, JavaScript, <mark data-m="ex">React.js</mark></li><li><b>Backend Technologies:</b> <mark data-m="pt">Node.js</mark>, Express.js</li><li><b>Database:</b> <mark data-m="pt">MySQL</mark>, MongoDB</li><li><b>Tools:</b> Git, GitHub, VS Code</li><li><b>Core Concepts:</b> <mark data-m="ex">Data Structures and Algorithms</mark>, OOP, DBMS</li></ul><div class="sh">Internship Experience</div><ul><li><b><mark data-m="ex">Java</mark> Full Stack Developer Intern</b> – Dec 2025 to Mar 2026</li><li><b>Full Stack Web Development Intern</b> – Feb 2025 to May 2025</li><li><b><mark data-m="ex">AWS</mark> Summer Intern</b> – APSSDC, 8 Weeks</li></ul><div class="sh">Projects</div><ul><li><b>Student Management System</b> – A web application to manage student records.</li><li><b>Technologies:</b> <mark data-m="pt">MERN Stack</mark> | GitHub: github.com/Jafvss</li></ul><div class="sh">Certifications</div><ul><li><b>Java Programming</b> – HackerRank</li><li><b><mark data-m="pt">AWS Cloud</mark> Practitioner</b> – Amazon Web Services</li></ul><div class="sh">Achievements</div><ul><li>Solved 500+ problems on LeetCode and GeeksforGeeks.</li><li>Participated in Smart India Hackathon (SIH) 2025.</li></ul><div class="sh">Additional Information</div><ul><li><b>Languages:</b> English, Telugu</li><li><b>Interests:</b> Problem Solving, Web Development, Artificial Intelligence</li></ul></div>
+   <div style="flex:1"><div class="stat" id="st2"></div>
+    <div class="glass" style="padding:14px 26px;margin-top:10px"><div class="row"><span>🟢 Exact Matches</span><b>6</b></div><div class="row"><span>🟠 Partial Matches</span><b>4</b></div><div class="row"><span>🔴 Missing Keywords</span><b>14</b></div><div class="row" style="border:0"><span>Total Job Keywords</span><b>24</b></div></div>
+    <div style="margin-top:22px;text-align:center"><div style="font-size:13px;font-weight:700;letter-spacing:.12em;color:#b8681c;margin-bottom:8px">ORIGINAL ATS MATCH · BASELINE</div><div class="ring" id="r2" style="--c:#d94a3a;width:170px;height:170px"><i id="n2" style="width:132px;height:132px;font-size:40px">0%</i></div></div></div>
+  </div></div>
+
+  <!-- Scene 3 -->
+  <div class="sc" id="s3"><div style="text-align:center;margin-top:30px;height:36px"><span class="chip" id="st3">Matching Job Requirements</span></div>
+   <div style="display:flex;gap:36px;margin-top:14px;align-items:flex-start">
+   <div style="flex:1"><div style="font-weight:700;margin:0 0 8px;color:#888">ORIGINAL</div><div class="paper rz" id="op" style="width:574px;height:556px;font-size:9.1px;opacity:.85"><div class="nm">Nelluru Jaswanth</div><div class="st">Computer Science Undergraduate</div><div class="ct">Email: jaswanth.nelluru@gmail.com | Phone: +91 98765 43210<br>LinkedIn: linkedin.com/in/nelluru-jaswanth | GitHub: github.com/Jafvss</div><div class="sh">Professional Summary</div>Computer Science undergraduate with knowledge of programming, problem-solving, and web development. Eager to contribute technical skills and learn new technologies in a professional environment.<div class="sh">Education</div><b>B.Tech – Computer Science and Engineering</b> <span style="float:right">2023 – 2027</span><br>NBKR Institute of Science and Technology, Vidyanagar<br>CGPA: 8.5 / 10<div class="sh">Technical Skills</div><ul><li><b>Programming Languages:</b> Java, Python, C, C++</li><li><b>Web Technologies:</b> HTML, CSS, JavaScript, React.js</li><li><b>Backend Technologies:</b> Node.js, Express.js</li><li><b>Database:</b> MySQL, MongoDB</li><li><b>Tools:</b> Git, GitHub, VS Code</li><li><b>Core Concepts:</b> Data Structures and Algorithms, OOP, DBMS</li></ul><div class="sh">Internship Experience</div><ul><li><b>Java Full Stack Developer Intern</b> – Dec 2025 to Mar 2026</li><li><b>Full Stack Web Development Intern</b> – Feb 2025 to May 2025</li><li><b>AWS Summer Intern</b> – APSSDC, 8 Weeks</li></ul><div class="sh">Projects</div><ul><li><b>Student Management System</b> – A web application to manage student records.</li><li><b>Technologies:</b> MERN Stack | GitHub: github.com/Jafvss</li></ul><div class="sh">Certifications</div><ul><li><b>Java Programming</b> – HackerRank</li><li><b>AWS Cloud Practitioner</b> – Amazon Web Services</li></ul><div class="sh">Achievements</div><ul><li>Solved 500+ problems on LeetCode and GeeksforGeeks.</li><li>Participated in Smart India Hackathon (SIH) 2025.</li></ul><div class="sh">Additional Information</div><ul><li><b>Languages:</b> English, Telugu</li><li><b>Interests:</b> Problem Solving, Web Development, Artificial Intelligence</li></ul></div></div>
+   <div style="flex:1"><div style="font-weight:700;margin:0 0 8px;color:#e8832a">TAILORED FOR: SENIOR SOFTWARE ENGINEER · GOOGLE</div><div class="paper rz rt" id="tp" style="width:574px;height:556px;font-size:8px;border-color:#ee6a5a"><div class=scan></div><div class="nm">Nelluru Jaswanth</div><div class="st">Software Engineer</div><div class="ct">✉ jaswanth.nelluru@gmail.com &nbsp;|&nbsp; ☎ +91 98765 43210 &nbsp;|&nbsp; ⌖ Andhra Pradesh, India<br><b>in</b> linkedin.com/in/nelluru-jaswanth &nbsp;|&nbsp; ⌥ github.com/Jafvss</div><div class="t"><div class="sec"><div class="sh">Professional Summary</div>Passionate and results-driven <b>Software Engineer</b> with a strong foundation in <mark class="hl">Java</mark>, <mark class="hl">Python</mark>, and web technologies. Eager to design, develop, and maintain scalable applications, build reliable backend services, and collaborate with cross-functional teams to deliver high-quality software products.</div></div><div class="t"><div class="sec"><div class="sh">Technical Skills</div><div class="sk"><b>Programming Languages</b><span>: <mark class="hl">Java</mark>, <mark class="hl">Python</mark>, C, C++</span></div><div class="sk"><b>Web Technologies</b><span>: HTML, CSS, JavaScript, <mark class="hl">React.js</mark></span></div><div class="sk"><b>Backend Technologies</b><span>: <mark class="hl">Java</mark>, <mark class="hl">Spring Boot</mark>, <mark class="hl">Node.js</mark>, Express.js</span></div><div class="sk"><b>Databases</b><span>: <mark class="hl">MySQL</mark>, MongoDB</span></div><div class="sk"><b>Tools</b><span>: Git, GitHub, VS Code, <mark class="hl">Docker</mark>, <mark class="hl">Kubernetes</mark></span></div><div class="sk"><b>Core Concepts</b><span>: <mark class="hl">Data Structures and Algorithms</mark>, OOP, DBMS, <mark class="hl">System Design</mark></span></div></div></div><div class="t"><div class="sec"><div class="sh">Professional Experience</div><div class="er"><b><mark class="hl">Java</mark> Full Stack Developer Intern</b><i>Dec 2025 – Mar 2026</i></div><div class="ed">Worked on full-stack web applications using <mark class="hl">Java</mark> and <mark class="hl">Spring Boot</mark>. Gained hands-on experience in backend development and problem-solving.</div><div class="er"><b>Full Stack Web Development Intern</b><i>Feb 2025 – May 2025</i></div><div class="ed">Developed responsive web applications using <mark class="hl">React.js</mark> and <mark class="hl">Node.js</mark>. Collaborated with team to implement new features and improve performance.</div><div class="er"><b><mark class="hl">AWS</mark> Summer Intern – APSSDC</b><i>8 Weeks</i></div><div class="ed">Gained practical exposure to Amazon Web Services. Learned cloud computing fundamentals and <mark class="hl">AWS</mark> services.</div></div></div><div class="t"><div class="sec"><div class="sh">Projects</div><b>Job Application Tracker Web App</b><ul><li>Built a web application to track job applications and manage interview schedules.</li><li>Technologies: <mark class="hl">React.js</mark>, <mark class="hl">Node.js</mark>, MongoDB</li><li>GitHub: https://github.com/Jafvss/job-tracker</li></ul><b>Personal Portfolio Website</b><ul><li>Developed a responsive portfolio website to showcase skills and projects.</li><li>Technologies: HTML, CSS, JavaScript, <mark class="hl">React.js</mark></li><li>GitHub: https://github.com/Jafvss/portfolio</li></ul></div><div class="sec"><div class="sh">Education</div><div class="er"><b>B.Tech – Computer Science and Engineering</b><span>2023 – 2027</span></div><i>NBKR Institute of Science and Technology, Vidyanagar</i><br><b>CGPA:</b> 8.5 / 10</div><div class="sec"><div class="sh">Certifications</div><ul><li>Java Programming – HackerRank</li><li>AWS Cloud Practitioner – Amazon Web Services</li></ul></div><div style="margin-top:6px;font:600 10.5px Inter,system-ui,sans-serif;color:#1f9d57">✓ Tailored from your profile · you review every change</div></div></div></div>
+  </div></div>
+
+  <!-- Scene 4 -->
+  <div class="sc" id="s4"><div style="display:flex;gap:40px;margin-top:30px">
+   <div style="flex:1.25" id="steps">
+    <div class="glass step"><div><code>preserveExistingAtsKeywords</code><small>Restore genuine skills omitted during AI rewriting</small></div><span class="ck">✓</span></div>
+    <div class="glass step"><div><code>addTargetedJobKeywords</code><small>Blend missing job keywords into the right skill categories</small></div><span class="ck">✓</span></div>
+    <div class="glass step"><div><code>restoreOriginalProjects</code><small>Keep authentic projects and their details</small></div><span class="ck">✓</span></div>
+    <div class="glass step"><div><code>restoreResumeLinks</code><small>Preserve GitHub, live demos and certificate credentials</small></div><span class="ck">✓</span></div>
+    <div class="glass step"><div><code>Anti-Regression Safeguard</code><small>Tailored score must not fall below the original baseline</small></div><span class="ck">✓</span></div></div>
+   <div style="flex:.75"><div class="glass" style="padding:26px"><div style="font-size:13px;font-weight:700;letter-spacing:.12em;color:#b8681c">SKILLS · BEFORE → AFTER</div>
+    <p style="font-size:16px;line-height:1.9;margin:12px 0">Java, Python, Node.js, MySQL, AWS<br><span id="add" style="opacity:0">+ <mark class="hl">Spring Boot</mark> · <mark class="hl">Docker</mark> · <mark class="hl">Kubernetes</mark> · <mark class="hl">System Design</mark><br><small style="font-size:12px;color:#6b5f57;font-weight:500">Targeted JD keywords blended into skill categories</small></span></p>
+    <div id="guard" style="opacity:0;background:#e8f6ee;color:#1f7a45;border-radius:10px;padding:12px 14px;font-weight:600;font-size:15px">Score check passed · no regression</div></div></div>
+  </div></div>
+
+  <!-- Scene 5 -->
+  <div class="sc" id="s5"><div style="display:flex;gap:50px;margin-top:30px;align-items:center">
+   <div style="flex:1"><div class="stat" id="st5"></div><div id="l5" style="margin-top:20px;font-size:17px;line-height:2.3;color:#6b5f57"><div>▸ Single-column layout</div><div>▸ Typography &amp; spacing tuned</div><div>▸ Fitted to one page</div><div>▸ Bullet spacing optimized</div><div>▸ Text extracted with unpdf and verified</div></div>
+    <div id="ok5" class="chip" style="margin-top:18px;opacity:0;background:#e8f6ee;color:#1f7a45;border-color:#bfe5cf;font-size:18px">✓ One-Page Resume Successfully Generated</div></div>
+   <div class="paper rz rt" id="pdf" style="width:390px;height:548px;font-size:7px;"><div class="nm">Nelluru Jaswanth</div><div class="st">Software Engineer</div><div class="ct">✉ jaswanth.nelluru@gmail.com &nbsp;|&nbsp; ☎ +91 98765 43210 &nbsp;|&nbsp; ⌖ Andhra Pradesh, India<br><b>in</b> linkedin.com/in/nelluru-jaswanth &nbsp;|&nbsp; ⌥ github.com/Jafvss</div><div class="t"><div class="sec"><div class="sh">Professional Summary</div>Passionate and results-driven <b>Software Engineer</b> with a strong foundation in Java, Python, and web technologies. Eager to design, develop, and maintain scalable applications, build reliable backend services, and collaborate with cross-functional teams to deliver high-quality software products.</div></div><div class="t"><div class="sec"><div class="sh">Technical Skills</div><div class="sk"><b>Programming Languages</b><span>: Java, Python, C, C++</span></div><div class="sk"><b>Web Technologies</b><span>: HTML, CSS, JavaScript, React.js</span></div><div class="sk"><b>Backend Technologies</b><span>: Java, Spring Boot, Node.js, Express.js</span></div><div class="sk"><b>Databases</b><span>: MySQL, MongoDB</span></div><div class="sk"><b>Tools</b><span>: Git, GitHub, VS Code, Docker, Kubernetes</span></div><div class="sk"><b>Core Concepts</b><span>: Data Structures and Algorithms, OOP, DBMS, System Design</span></div></div></div><div class="t"><div class="sec"><div class="sh">Professional Experience</div><div class="er"><b>Java Full Stack Developer Intern</b><i>Dec 2025 – Mar 2026</i></div><div class="ed">Worked on full-stack web applications using Java and Spring Boot. Gained hands-on experience in backend development and problem-solving.</div><div class="er"><b>Full Stack Web Development Intern</b><i>Feb 2025 – May 2025</i></div><div class="ed">Developed responsive web applications using React.js and Node.js. Collaborated with team to implement new features and improve performance.</div><div class="er"><b>AWS Summer Intern – APSSDC</b><i>8 Weeks</i></div><div class="ed">Gained practical exposure to Amazon Web Services. Learned cloud computing fundamentals and AWS services.</div></div></div><div class="t"><div class="sec"><div class="sh">Projects</div><b>Job Application Tracker Web App</b><ul><li>Built a web application to track job applications and manage interview schedules.</li><li>Technologies: React.js, Node.js, MongoDB</li><li>GitHub: https://github.com/Jafvss/job-tracker</li></ul><b>Personal Portfolio Website</b><ul><li>Developed a responsive portfolio website to showcase skills and projects.</li><li>Technologies: HTML, CSS, JavaScript, React.js</li><li>GitHub: https://github.com/Jafvss/portfolio</li></ul></div><div class="sec"><div class="sh">Education</div><div class="er"><b>B.Tech – Computer Science and Engineering</b><span>2023 – 2027</span></div><i>NBKR Institute of Science and Technology, Vidyanagar</i><br><b>CGPA:</b> 8.5 / 10</div><div class="sec"><div class="sh">Certifications</div><ul><li>Java Programming – HackerRank</li><li>AWS Cloud Practitioner – Amazon Web Services</li></ul></div></div><div class="t" style="position:absolute;right:12px;top:10px;background:#d94a3a;color:#fff;font:700 11px Inter,system-ui,sans-serif;padding:2px 8px;border-radius:4px">PDF</div></div>
+  </div></div>
+
+  <!-- Scene 6 -->
+  <div class="sc" id="s6"><div style="display:flex;gap:50px;margin-top:20px;align-items:center">
+   <div style="flex:1.15"><div style="display:flex;gap:30px;text-align:center">
+     <div style="flex:1"><div class="ring" id="ra" style="--c:#d94a3a;width:190px;height:190px"><i id="na" style="width:148px;height:148px;font-size:44px">0%</i></div><b>Original Resume</b></div>
+     <div style="flex:1"><div class="ring" id="rb" style="--c:#1f9d57;width:190px;height:190px"><i id="nb" style="width:148px;height:148px;font-size:44px">0%</i></div><b>Tailored Resume</b></div></div>
+    <div class="kv" id="kv"><span>Relevant keywords matched</span><span>Missing keywords addressed</span><span>Existing skills preserved</span><span>Projects and links verified</span><span style="grid-column:span 2">ATS-friendly PDF generated</span></div>
+    <div class="big" id="fin" style="margin-top:26px">Your Resume.<br><em>Optimized for the Opportunity.</em></div></div>
+   <div class="paper rz rt" id="fpdf" style="width:350px;height:510px;font-size:6.3px;"><div class="nm">Nelluru Jaswanth</div><div class="st">Software Engineer</div><div class="ct">✉ jaswanth.nelluru@gmail.com &nbsp;|&nbsp; ☎ +91 98765 43210 &nbsp;|&nbsp; ⌖ Andhra Pradesh, India<br><b>in</b> linkedin.com/in/nelluru-jaswanth &nbsp;|&nbsp; ⌥ github.com/Jafvss</div><div class="sec"><div class="sh">Professional Summary</div>Passionate and results-driven <b>Software Engineer</b> with a strong foundation in Java, Python, and web technologies. Eager to design, develop, and maintain scalable applications, build reliable backend services, and collaborate with cross-functional teams to deliver high-quality software products.</div><div class="sec"><div class="sh">Technical Skills</div><div class="sk"><b>Programming Languages</b><span>: Java, Python, C, C++</span></div><div class="sk"><b>Web Technologies</b><span>: HTML, CSS, JavaScript, React.js</span></div><div class="sk"><b>Backend Technologies</b><span>: Java, Spring Boot, Node.js, Express.js</span></div><div class="sk"><b>Databases</b><span>: MySQL, MongoDB</span></div><div class="sk"><b>Tools</b><span>: Git, GitHub, VS Code, Docker, Kubernetes</span></div><div class="sk"><b>Core Concepts</b><span>: Data Structures and Algorithms, OOP, DBMS, System Design</span></div></div><div class="sec"><div class="sh">Professional Experience</div><div class="er"><b>Java Full Stack Developer Intern</b><i>Dec 2025 – Mar 2026</i></div><div class="ed">Worked on full-stack web applications using Java and Spring Boot. Gained hands-on experience in backend development and problem-solving.</div><div class="er"><b>Full Stack Web Development Intern</b><i>Feb 2025 – May 2025</i></div><div class="ed">Developed responsive web applications using React.js and Node.js. Collaborated with team to implement new features and improve performance.</div><div class="er"><b>AWS Summer Intern – APSSDC</b><i>8 Weeks</i></div><div class="ed">Gained practical exposure to Amazon Web Services. Learned cloud computing fundamentals and AWS services.</div></div><div class="sec"><div class="sh">Projects</div><b>Job Application Tracker Web App</b><ul><li>Built a web application to track job applications and manage interview schedules.</li><li>Technologies: React.js, Node.js, MongoDB</li><li>GitHub: https://github.com/Jafvss/job-tracker</li></ul><b>Personal Portfolio Website</b><ul><li>Developed a responsive portfolio website to showcase skills and projects.</li><li>Technologies: HTML, CSS, JavaScript, React.js</li><li>GitHub: https://github.com/Jafvss/portfolio</li></ul></div><div class="sec"><div class="sh">Education</div><div class="er"><b>B.Tech – Computer Science and Engineering</b><span>2023 – 2027</span></div><i>NBKR Institute of Science and Technology, Vidyanagar</i><br><b>CGPA:</b> 8.5 / 10</div><div class="sec"><div class="sh">Certifications</div><ul><li>Java Programming – HackerRank</li><li>AWS Cloud Practitioner – Amazon Web Services</li></ul></div><div id="badge" style="position:absolute;right:16px;bottom:16px;width:64px;height:64px;border-radius:50%;background:#1f9d57;color:#fff;display:grid;place-items:center;font-size:34px">✓</div></div>
+  </div></div>
+
+  <div class="rip" id="rip"></div><svg class="cur" id="cur" viewBox="0 0 24 24"><path d="M4 2l16 9-7 2 4 8-3 1-4-8-6 5z" fill="#1b1511" stroke="#fff" stroke-width="1.5"/></svg>
+  </div><div class="demo">Illustrative demo data · not a live candidate result</div>
+ </div>
+ <div id="bar"></div><div id="ctl"><button id="replay" type="button" aria-label="Replay demo">↻ Replay</button></div>
+ </div>
+</section>
+
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const wrap=$('#wrap'),stage=$('#stage'),cap=$('#cap');
+const fit=()=>stage.style.transform=`scale(${wrap.clientWidth/1280})`;
+new ResizeObserver(fit).observe(wrap);fit();
+
+const tl=gsap.timeline({paused:true,defaults:{ease:'power2.out'},onUpdate(){$('#bar').style.width=tl.progress()*100+'%'}});
+const say=(el,t,txt)=>tl.call(()=>{el.innerHTML=`<span class="dot"></span>${txt}`},null,t);
+const num=(id,ringId,to,t,d)=>{const o={v:0},n=$(id),r=$(ringId);tl.to(o,{v:to,duration:d,ease:'power1.inOut',onUpdate(){n.textContent=Math.round(o.v)+'%';r.style.setProperty('--p',o.v)}},t)};
+const scene=(id,t,len,title,last)=>{tl.call(()=>{cap.textContent=title},null,t).set(id,{autoAlpha:1},t).fromTo(id,{opacity:0,y:18,scale:1.04},{opacity:1,y:0,scale:1,duration:.9,ease:'power3.out'},t);if(!last)tl.to(id,{autoAlpha:0,y:-14,scale:.97,duration:.6,ease:'power2.in'},t+len-.6)};
+const scan=(el,t,d)=>tl.fromTo(el+' .scan',{top:0,opacity:1},{top:'100%',duration:d,ease:'none'},t).set(el+' .scan',{opacity:0},t+d);
+const cur=(x,y,t,d=1)=>tl.to('#cur',{x,y,opacity:1,duration:d,ease:'power2.inOut'},t);
+
+// S1 0–9
+scene('#s1',0,9,'1 · JOB DESCRIPTION ANALYSIS');
+say($('#st1'),1.6,'Analyzing Job Description…');scan('#jd',1.7,3.4);
+tl.to('#jd mark',{backgroundColor:'rgba(238,106,90,.28)',stagger:.38,duration:.4},2.2);
+say($('#st1'),3.2,'Extracting Required Skills…');
+['Java','Python','Spring Boot','REST APIs','Microservices','SQL','React.js','Docker','Kubernetes','AWS','CI/CD','System Design'].forEach((k,i)=>{
+ tl.call(()=>{const s=document.createElement('span');s.className='tag';s.textContent=k;$('#tags').append(s);gsap.from(s,{scale:.5,y:14,opacity:0,duration:.5,ease:'back.out(1.6)'})},null,2.4+i*.32)});
+say($('#st1'),6,'Identifying 24 Relevant Keywords…');
+tl.call(()=>{$('#tags').innerHTML=''},null,.05);
+// S2 9–18
+scene('#s2',9,9,'2 · ORIGINAL RESUME ANALYSIS');
+say($('#st2'),9.7,'Scanning original resume…');scan('#rs',9.9,3.4);
+tl.to('#rs mark[data-m=ex]',{backgroundColor:'rgba(31,157,87,.3)',stagger:.25,duration:.4},10.4)
+  .to('#rs mark[data-m=pt]',{backgroundColor:'rgba(217,138,0,.32)',stagger:.25,duration:.4},11.2);
+say($('#st2'),13.6,'Baseline ATS score');num('#n2','#r2',42,13.8,1.8);
+
+// S3 18–30
+scene('#s3',18,12,'3 · AI-POWERED CONTEXTUAL TAILORING');
+tl.set('#tp .t',{opacity:0,y:12},18);
+[['Optimizing Professional Summary',19],['Refining Experience & Projects',21.4],['Prioritizing Technical Skills',24.2],['Matching Job Requirements',26.8]].forEach(([x,t])=>tl.call(()=>{$('#st3').textContent=x},null,t));
+scan('#tp',19,8.2);
+$$('#tp .t').forEach((e,i)=>tl.to(e,{opacity:1,y:0,duration:.8},[19.6,21.8,24.4,27.4][i]));
+tl.from('#tp mark',{backgroundColor:'transparent',stagger:.1,duration:.5},20);
+// S4 30–39
+scene('#s4',30,9,'4 · ATS OPTIMIZATION & VALIDATION');
+tl.set('#steps .ck',{},30);
+$$('#steps .step').forEach((s,i)=>{const t=31+i*1.4;tl.from(s,{x:-30,opacity:0,duration:.5},t-.3).call(()=>s.querySelector('.ck').classList.add('on'),null,t+.7)});
+tl.call(()=>$$('#steps .ck').forEach(c=>c.classList.remove('on')),null,29.9);
+tl.to('#add',{opacity:1,duration:.6},33.2).to('#guard',{opacity:1,duration:.6},37.4);
+// S5 39–48
+scene('#s5',39,9,'5 · ATS-FRIENDLY PDF GENERATION');
+say($('#st5'),39.6,'Generating ATS-Friendly PDF…');
+tl.from('#pdf',{scaleY:.6,opacity:0,transformOrigin:'50% 0',duration:1},39.6).from('#pdf .t',{opacity:0,y:10,stagger:.45,duration:.5},40.6)
+  .from('#l5 div',{opacity:0,x:-14,stagger:.8,duration:.5},40.2);
+say($('#st5'),42.6,'Checking Document Structure…');say($('#st5'),44.4,'Verifying Extracted Text…');
+tl.to('#ok5',{opacity:1,duration:.6},46.4);
+// S6 48–60
+scene('#s6',48,12,'6 · RESULTS · BEFORE VS AFTER',true);
+num('#na','#ra',42,48.8,1.6);num('#nb','#rb',94,50,2.4);
+tl.from('#kv span',{opacity:0,x:-12,stagger:.3,duration:.4},52.4).from('#fin',{opacity:0,y:20,duration:.9},54.6)
+  .from('#fpdf',{x:40,opacity:0,duration:.9},49).from('#badge',{scale:0,duration:.6,ease:'back.out(2)'},55.5);
+
+/* ---- camera + cursor choreography (coordinates are stage px, 1280x720) ---- */
+const camTo=(fx,fy,k,t,d=1.8)=>tl.to('#cam',{scale:k,x:640-fx*k,y:360-fy*k,duration:d,ease:'power3.inOut'},t);
+const camReset=(t,d=1.6)=>tl.to('#cam',{scale:1,x:0,y:0,duration:d,ease:'power3.inOut'},t);
+const hide=t=>tl.to('#cur',{opacity:0,duration:.4},t);
+const click=(x,y,t)=>{tl.set('#rip',{x,y,scale:.2,opacity:.9},t).to('#rip',{scale:1.7,opacity:0,duration:.6,ease:'power2.out'},t)
+  .to('#cur',{scale:.82,duration:.09,yoyo:true,repeat:1,transformOrigin:'3px 2px'},t)};
+const mv=(x,y,t,d=1)=>tl.to('#cur',{x,y,opacity:1,duration:d,ease:'sine.inOut'},t);
+tl.set('#cam',{scale:1,x:0,y:0},0).set('#cur',{x:1150,y:640,opacity:0},0);
+// Scene 1: click Analyze, follow the scan, then look at the extracted tags
+mv(850,104,.2,1.2);click(850,104,1.5);tl.to('#b1',{scale:.93,duration:.1,yoyo:true,repeat:1},1.5);
+camTo(340,300,1.28,2,1.8);mv(430,200,2,.6);mv(380,470,2.6,2.6);
+camTo(930,270,1.35,5.2,1.8);mv(1000,300,5.4,1.4);camReset(7.4,1.4);hide(7.6);
+tl.fromTo('#jdin',{y:0},{y:()=>Math.min(0,-($('#jdin').scrollHeight-570)),duration:5.2,ease:'sine.inOut'},1.9); // page scrolls under the scan
+// Scene 2: follow the scan down the resume, then the score panel
+mv(300,170,9.6,.8);camTo(310,300,1.3,9.8,1.6);mv(300,480,10.2,3);
+camTo(900,390,1.32,13.2,1.7);mv(860,330,13.2,1.3);camReset(16.2,1.4);hide(16.4);
+// Scene 3: zoom on the tailored resume, hover rewritten lines
+mv(900,230,18.6,1);camTo(940,310,1.26,19,2);mv(860,470,20.8,3.2);mv(960,300,24.4,2.2);camReset(26.8,1.8);hide(28.4);
+// Scene 4: click each safeguard as it completes
+camTo(430,300,1.18,30.4,1.8);
+for(let i=0;i<5;i++){const y=112+i*80;mv(735,y,31+i*1.4-.5,.7);click(735,y,31+i*1.4+.65)}
+camTo(960,300,1.3,36.8,1.6);mv(960,250,36.6,1.2);camReset(38.2,1.2);hide(38.4);
+// Scene 5: zoom into the PDF forming, then the confirmation
+mv(900,200,39.7,1);camTo(900,300,1.28,40.1,1.8);mv(940,430,41.6,3);camReset(45.4,1.6);mv(520,560,45.4,1.2);hide(47.4);
+// Scene 6: scores, then pull back to the final message
+camTo(380,230,1.3,49,1.8);camTo(380,520,1.25,52.2,1.8);camReset(56.4,2);
+tl.to('#s6',{autoAlpha:0,duration:.6,ease:'power2.in'},59.3); // fade out so the loop restarts cleanly
+tl.call(()=>{},null,60);
+
+let played=false;tl.time(1.6); // poster frame so the box is never empty
+const SPEED=1.6; // 1 = original pace; raise to go faster
+tl.timeScale(SPEED);
+tl.repeat(-1).repeatDelay(1);
+const play=()=>{played=true;tl.restart()};
+$('#replay').onclick=play;
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+if(reduced){tl.time(58.8);played=true;cap.textContent='6 · RESULTS · BEFORE VS AFTER'}
+// Playback is driven by the host page: it starts when the section scrolls into view.
+window.HAMZO_DEMO={play,suspend:()=>tl.pause(),resume:()=>{played?tl.resume():play()},replay:play,reduced,ready:true,paused:()=>tl.paused(),progress:()=>tl.progress()};
+</script>
+</body>
+</html>

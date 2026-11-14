@@ -31,7 +31,7 @@ const APPLY_FIELDS = [
 /* Scene 1 — Email referral request                                    */
 /* ------------------------------------------------------------------ */
 
-function EmailScene() {
+export function EmailScene() {
   return (
     <div className="ow-mail">
       <aside className="ow-mail-side">
@@ -223,7 +223,7 @@ const STAGES = [
 /* Browser window mockup (identical frame to AutoApplyWalkthrough)    */
 /* ------------------------------------------------------------------ */
 
-const BrowserWindow = memo(function BrowserWindow({ active }) {
+const BrowserWindow = memo(function BrowserWindow({ active, trackRef, framesRef }) {
   const stage = STAGES[active] || STAGES[0];
   return (
     <div className="ow-window">
@@ -237,24 +237,36 @@ const BrowserWindow = memo(function BrowserWindow({ active }) {
           <Globe size={13} />
           <span className="ow-url-text">{stage.url}</span>
         </div>
-        <div className="ow-live-pill">
-          <span className="ow-live-dot" />
-          <span>COPILOT</span>
+        <div className="ow-chrome-right">
+          <div className="ow-frame-dots" aria-hidden="true">
+            {STAGES.map((s, i) => (
+              <i key={s.n} className={i === active ? 'is-on' : ''} />
+            ))}
+          </div>
+          <div className="ow-live-pill">
+            <span className="ow-live-dot" />
+            <span>COPILOT</span>
+          </div>
         </div>
       </div>
       <div className="ow-viewport">
-        {STAGES.map((s, i) => {
-          const SceneComponent = s.Scene;
-          return (
-            <div
-              key={s.n}
-              className={`ow-scene ${i === active ? 'is-active' : ''}`}
-              aria-hidden={i !== active}
-            >
-              <SceneComponent />
-            </div>
-          );
-        })}
+        {/* Scroll-driven chain of frames: each frame slides bottom → top,
+            one after the other, with a visible gap between them. */}
+        <div className="ow-track" ref={trackRef}>
+          {STAGES.map((s, i) => {
+            const SceneComponent = s.Scene;
+            return (
+              <div
+                key={s.n}
+                className={`ow-scene ow-frame ${i === active ? 'is-active' : ''}`}
+                aria-hidden={i !== active}
+                ref={(el) => { framesRef.current[i] = el; }}
+              >
+                <SceneComponent />
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -268,6 +280,8 @@ export default function OutreachWalkthrough({ onOpen }) {
   const [activeStage, setActiveStage] = useState(0);
   const runwayRef = useRef(null);
   const stageRef = useRef(null);
+  const trackRef = useRef(null);
+  const framesRef = useRef([]);
   const stepRefs = useRef([]);
   const [isMobile, setIsMobile] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 960
@@ -337,6 +351,25 @@ export default function OutreachWalkthrough({ onOpen }) {
       return undefined;
     }
     let raf = 0;
+    let rail = 0; // distance between two frames (frame height + the gap)
+
+    const measureRail = () => {
+      const track = trackRef.current;
+      const frames = framesRef.current;
+      const viewport = track && track.parentElement;
+      if (!track || !viewport || !frames[0] || !frames[1]) {
+        rail = 0;
+        return;
+      }
+      // offsetTop ignores transforms, so this is always the real spacing.
+      const spacing = frames[1].offsetTop - frames[0].offsetTop;
+      if (spacing > 1) {
+        rail = spacing;
+        return;
+      }
+      const gap = parseFloat(getComputedStyle(track).rowGap) || 0;
+      rail = viewport.clientHeight + gap;
+    };
 
     const handleScroll = () => {
       raf = 0;
@@ -352,6 +385,58 @@ export default function OutreachWalkthrough({ onOpen }) {
       const stage = stageRef.current;
       if (stage) stage.style.setProperty('--ow-progress', progress.toFixed(4));
 
+      const track = trackRef.current;
+      if (track && rail <= 1) measureRail();
+      if (track && rail) {
+        const N = STAGES.length;
+        const SLIDE = 0.38; // share of one stage's scroll spent travelling
+        const t = progress * N;
+        const idx = Math.min(N - 1, Math.floor(t));
+        const frac = t - idx;
+        let slide = 0;
+        if (frac > 1 - SLIDE) {
+          const k = Math.min(1, (frac - (1 - SLIDE)) / SLIDE);
+          slide = k * k * (3 - 2 * k); // smooth step
+        }
+        // pos = fractional index of the frame that owns the viewport right now
+        const pos = Math.min(N - 1, idx + slide);
+        // while a frame holds, let it breathe slightly so the section never
+        // feels frozen between two transitions
+        const hold = Math.min(1, frac / (1 - SLIDE));
+
+        // Every frame already sits i * rail below the window in normal flow,
+        // so they all share one translation: slide the whole chain by -pos.
+        const chainY = -pos * rail;
+
+        framesRef.current.forEach((el, i) => {
+          if (!el) return;
+          const dist = i - pos; // negative = leaving upward, positive = arriving from below
+          const p = Math.min(1, Math.abs(dist));
+          let scale = 1;
+          let tilt = 0;
+          let opacity = 1;
+
+          if (dist < 0) {
+            // leaving: lifts up, shrinks away, fades into the distance
+            scale = 1 - 0.07 * p;
+            tilt = -3.5 * p;
+            opacity = 1 - 0.55 * p;
+          } else if (dist > 0) {
+            // arriving: rises from below with a gentle tilt until it locks flat
+            scale = 1 - 0.035 * p;
+            tilt = 4.5 * p;
+            opacity = 1 - 0.28 * p;
+          } else if (i === idx) {
+            scale = 1 - 0.015 * hold;
+          }
+
+          el.style.transform =
+            `translate3d(0, ${chainY.toFixed(2)}px, 0) ` +
+            `scale(${scale.toFixed(4)}) rotateX(${tilt.toFixed(2)}deg)`;
+          el.style.opacity = opacity.toFixed(3);
+        });
+      }
+
       applyStepMotion(progress);
 
       const nextStage = Math.min(STAGES.length - 1, Math.floor(progress * STAGES.length));
@@ -362,12 +447,34 @@ export default function OutreachWalkthrough({ onOpen }) {
       if (!raf) raf = requestAnimationFrame(handleScroll);
     };
 
+    const onResize = () => {
+      rail = 0;
+      measureRail();
+      onScroll();
+    };
+
+    measureRail();
     handleScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
+    window.addEventListener('resize', onResize);
+
+    // The pinned stage changes height/width with layout (fonts, images, zoom),
+    // so re-measure whenever its box actually changes.
+    let ro = null;
+    const viewportEl = trackRef.current && trackRef.current.parentElement;
+    if (viewportEl && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        measureRail();
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(handleScroll);
+        else handleScroll();
+      });
+      ro.observe(viewportEl);
+    }
+
     return () => {
       window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('resize', onResize);
+      if (ro) ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
   }, [isMobile, applyStepMotion]);
@@ -399,7 +506,12 @@ export default function OutreachWalkthrough({ onOpen }) {
         <div className="ow-layout">
           {/* Left Column: tall interactive Mac Window (matches previous section frame size exactly!) */}
           <div className="ow-stage-col">
-            <BrowserWindow active={activeStage} onOpen={onOpen} />
+            <BrowserWindow
+              active={activeStage}
+              onOpen={onOpen}
+              trackRef={trackRef}
+              framesRef={framesRef}
+            />
           </div>
 
           {/* Right Column: Heading & Information (Header + Moving Steps) */}

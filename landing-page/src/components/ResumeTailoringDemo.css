@@ -1,0 +1,38 @@
+/* ======================================================================
+   ResumeTailoringDemo — hosts hamzo-resume-demo-v2.html in a same-origin
+   iframe. The document owns its own 16:9 stage, palette and GSAP timeline;
+   this file only sizes the embed inside the landing page.
+   ====================================================================== */
+
+.rd-section {
+  position: relative;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 12px 16px 0;
+}
+
+.rd-embed {
+  position: relative;
+  width: 100%;
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+.rd-embed-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: light;
+}
+
+@media (max-width: 760px) {
+  .rd-section {
+    padding: 12px 10px 0;
+  }
+
+  .rd-embed {
+    border-radius: 18px;
+  }
+}
