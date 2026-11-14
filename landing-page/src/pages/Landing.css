@@ -361,7 +361,7 @@ html,body{overflow-x:hidden}
 .hmz-strip{background:linear-gradient(110deg,#f7f9ff 0%,#ffffff 50%,#f8f6ff 100%);color:#0f1222;text-align:center;padding:56px 24px;overflow:hidden;position:relative}
 .hmz-strip::before{content:'';position:absolute;inset:0;background:radial-gradient(600px 200px at 50% 100%,rgba(98,123,255,.12),transparent);animation:hmzStripPulse 4s ease infinite;pointer-events:none}
 @keyframes hmzStripPulse{0%,100%{opacity:.5}50%{opacity:1}}
-.hmz-strip p{max-width:720px;margin:0 auto 26px;font-size:15px;color:#69728b;position:relative;z-index:1}
+.hmz-strip p{max-width:720px;margin:0 auto 20px;font-size:16px;font-weight:700;color:#202743;letter-spacing:-.01em;position:relative;z-index:1}
 .hmz-strip p b{color:#202743}
 .hmz-logos{overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent);position:relative;z-index:1}
 .hmz-logos>div{display:flex;gap:12px;width:max-content;animation:hmzslide 22s linear infinite;will-change:transform}

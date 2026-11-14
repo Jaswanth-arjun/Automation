@@ -1192,7 +1192,7 @@ function Integrations() {
     <>
       <WaveDivider color="#f7f9ff" />
       <div className="hmz-strip">
-        <p><b>We are not a job board — we plug into all of them.</b> Works wherever you already apply. Same one-click flow.</p>
+        <p><b>We apply on</b></p>
         <div className="hmz-logos"><div>{[...INTEGRATIONS, ...INTEGRATIONS].map((t, i) => <span key={i}>{t}</span>)}</div></div>
       </div>
       <WaveDivider color="#f7f9ff" flip />
