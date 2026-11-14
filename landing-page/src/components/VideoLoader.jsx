@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 /**
- * Hamzo Loop Video Loader
- * Displays the mascot typing animation in a continuous loop during actual loading time only.
- * Dismisses immediately when isLoading becomes false without any artificial delays.
+ * Hamzo Native DOM Mascot Loader
+ * Fully merges the mascot into the DOM without rectangular video borders.
+ * Displays a premium loader with ambient aura and brand progress track
+ * strictly for the actual loading time only.
  */
-export default function VideoLoader({ isLoading, fadeDurationMs = 260 }) {
+export default function VideoLoader({ isLoading, fadeDurationMs = 260, text = 'Loading workspace' }) {
   const [mounted, setMounted] = useState(Boolean(isLoading));
   const [visible, setVisible] = useState(Boolean(isLoading));
   const videoRef = useRef(null);
@@ -19,7 +20,6 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 260 }) {
       requestAnimationFrame(() => setVisible(true));
       video?.play().catch(() => {});
     } else {
-      // Dismiss immediately according to actual loader time (no waiting for video loop)
       setVisible(false);
       const timer = window.setTimeout(() => {
         setMounted(false);
@@ -58,19 +58,38 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 260 }) {
         visibility: mounted ? 'visible' : 'hidden',
       }}
     >
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="auto"
-        disablePictureInPicture
-        controlsList="nodownload nofullscreen noremoteplayback"
-      >
-        <source src="/hamzo-loader.mp4" type="video/mp4" />
-        <source src="/hamster-loader.mp4" type="video/mp4" />
-      </video>
+      <div className="loader-core">
+        {/* Soft ambient brand aura */}
+        <div className="loader-ambient-glow" aria-hidden="true" />
+
+        {/* Mascot frame with radial feather mask */}
+        <div className="loader-mascot-frame">
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            disablePictureInPicture
+            controlsList="nodownload nofullscreen noremoteplayback"
+          >
+            <source src="/hamzo-loader.mp4" type="video/mp4" />
+            <source src="/hamster-loader.mp4" type="video/mp4" />
+          </video>
+        </div>
+
+        {/* Micro Loader UI: Progress shimmer track and status */}
+        <div className="loader-indicator">
+          <div className="loader-track">
+            <div className="loader-shimmer-bar" />
+          </div>
+          <div className="loader-caption">
+            <span>{text}</span>
+            <span className="loader-dots" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
