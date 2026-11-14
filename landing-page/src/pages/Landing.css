@@ -222,45 +222,6 @@ html,body{overflow-x:hidden}
 
 .hmz-heroinner{max-width:1020px;margin:0 auto;position:relative;z-index:2}
 
-/* ===== DYNAMIC LIVE ACTIVITY TICKER (LIKE MYJOBB.AI MATCH UPDATES) ===== */
-.hmz-live-ticker-wrap{
-  display:flex;
-  justify-content:center;
-  margin-bottom:20px;
-}
-.hmz-live-ticker{
-  display:inline-flex;
-  align-items:center;
-  gap:9px;
-  background:rgba(255,255,255,.94);
-  backdrop-filter:blur(14px);
-  border:1px solid rgba(226,232,240,.9);
-  padding:6px 14px 6px 10px;
-  border-radius:999px;
-  box-shadow:0 4px 20px rgba(15,23,42,.06);
-  animation:tickerSlideIn .45s cubic-bezier(.16,1,.3,1);
-}
-@keyframes tickerSlideIn{
-  from{opacity:0;transform:translateY(-8px) scale(.96)}
-  to{opacity:1;transform:translateY(0) scale(1)}
-}
-.ticker-pulse-dot{
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  background:#10b981;
-  box-shadow:0 0 0 0 rgba(16,185,129,.7);
-  animation:pulseEmerald 1.8s infinite;
-}
-@keyframes pulseEmerald{
-  0%{transform:scale(.95);box-shadow:0 0 0 0 rgba(16,185,129,.7)}
-  70%{transform:scale(1);box-shadow:0 0 0 8px rgba(16,185,129,0)}
-  100%{transform:scale(.95);box-shadow:0 0 0 0 rgba(16,185,129,0)}
-}
-.ticker-icon{display:flex;align-items:center;color:#3b82f6}
-.ticker-text{font-size:12.5px;font-weight:700;color:#1e293b;letter-spacing:-.01em}
-.ticker-badge{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:6px;background:#f1f5f9;color:#475569}
-
 /* ===== HERO TEXT & CHIPS STAGGER ===== */
 .hmz-hero-title{
   font-size:clamp(48px,7vw,88px);
@@ -287,9 +248,6 @@ html,body{overflow-x:hidden}
 .hmz-chip.ghost{background:#EEF2FF;color:#335CFF;font-weight:600}
 
 /* Stagger entrance when page mounts / refreshes */
-.hmz-hero.is-entering .hmz-live-ticker-wrap{opacity:0;transform:translateY(14px) scale(.95)}
-.hmz-hero.is-mounted .hmz-live-ticker-wrap{opacity:1;transform:translateY(0) scale(1);transition:all .65s .1s cubic-bezier(.16,1,.3,1)}
-
 .hmz-hero.is-entering .hmz-chips{opacity:0;transform:translateY(16px)}
 .hmz-hero.is-mounted .hmz-chips{opacity:1;transform:translateY(0);transition:all .7s .18s cubic-bezier(.16,1,.3,1)}
 

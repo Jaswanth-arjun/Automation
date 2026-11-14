@@ -1092,35 +1092,12 @@ function Hero({ onGetStarted, onOpen }) {
     setOffset({ x: (mx - cx) / cx, y: (my - cy) / cy });
   }, []);
 
-  // Living agent-activity loop (like myjobb.ai dynamic live match cards)
-  const CYCLE = [
-    { icon: <Search size={13} />, t: 'Watching Ai2 careers · 3 referrers reachable', tag: 'Live Match' },
-    { icon: <Sparkles size={13} />, t: 'Resume tailored to keywords · 98% ATS score', tag: 'AI Tailored' },
-    { icon: <Send size={13} />, t: 'Referral notes dispatched directly to recruiters', tag: 'Outreach Sent' },
-    { icon: <Bell size={13} />, t: 'Hiring Manager replied · Interview scheduled', tag: 'Opportunity' },
-  ];
-  const [cyc, setCyc] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setCyc((c) => (c + 1) % CYCLE.length), 2800);
-    return () => window.clearInterval(id);
-  }, [CYCLE.length]);
-
   return (
     <div className={`hmz-hero ${heroMounted ? 'is-mounted' : 'is-entering'}`} id="top" ref={heroRef} onMouseMove={onMouse}>
       <div className="hmz-hero-ambient-glow" aria-hidden="true" />
       <SunLight px={offset.x} py={offset.y} />
       <ShimmerCanvas mouseX={offset.x} mouseY={offset.y} />
       <div className="hmz-heroinner">
-        {/* Dynamic Live Activity Ticker (like myjobb.ai dynamic match cards) */}
-        <div className="hmz-live-ticker-wrap">
-          <div className="hmz-live-ticker" key={cyc}>
-            <span className="ticker-pulse-dot" />
-            <span className="ticker-icon">{CYCLE[cyc].icon}</span>
-            <span className="ticker-text">{CYCLE[cyc].t}</span>
-            <span className="ticker-badge">{CYCLE[cyc].tag}</span>
-          </div>
-        </div>
-
         <div className="hmz-chips">
           <span className="hmz-chip black"><Sparkles size={13} /> AI referral agent</span>
           <span className="hmz-chip ghost">Not a job board</span>
