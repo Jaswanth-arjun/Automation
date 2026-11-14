@@ -856,6 +856,42 @@ async function gmailApi(pathAndQuery) {
   return data;
 }
 
+// Dispatches emails over standard HTTPS via the official Gmail REST API
+// Avoids fragile SMTP socket connection drops ("Connection closed unexpectedly")
+async function sendEmailViaGmailRestApi(accessToken, { from, to, subject, text, html, attachments = [] }) {
+  const transport = nodemailer.createTransport({
+    streamTransport: true,
+    buffer: true,
+  });
+
+  const mailOptions = {
+    from,
+    to,
+    subject,
+    text,
+    html,
+    attachments,
+  };
+
+  const compiled = await transport.sendMail(mailOptions);
+  const raw = compiled.message.toString('base64url');
+
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ raw }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Gmail API send failed (${res.status})`);
+  }
+  return data;
+}
+
 async function listMailbox(mailbox, size = 20) {
   const query = mailbox === 'SENT' ? 'in:sent' : 'in:inbox';
   const list = await gmailApi(`messages?maxResults=${Math.min(size, 30)}&q=${encodeURIComponent(query)}`);
@@ -952,24 +988,14 @@ app.post('/api/ai/mail/followup/send', async (req, res) => {
     if (!fromEmail || !accessToken) {
       return res.status(401).json({ error: 'Connect Gmail on the Mail page before sending a follow-up.' });
     }
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        type: 'OAuth2',
-        user: fromEmail,
-        clientId: GOOGLE_CLIENT_ID,
-        clientSecret: GOOGLE_CLIENT_SECRET,
-        refreshToken: tokens.refresh_token,
-        accessToken,
-      },
-    });
-    const info = await transporter.sendMail({
+    const sendResult = await sendEmailViaGmailRestApi(accessToken, {
       from: `"${fromEmail.split('@')[0]}" <${fromEmail}>`,
       to,
       subject: subject || 'Following up',
       text: body,
+      html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">${String(body || '').replace(/\n/g, '<br/>')}</div>`,
     });
-    res.json({ ok: true, id: info.messageId });
+    res.json({ ok: true, id: sendResult.id });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not send the follow-up.' });
   }
@@ -1860,6 +1886,7 @@ app.get('/api/config/gmail', (req, res) => {
   if (hasOAuth) {
     return res.json({
       configured: true,
+      connected: true,
       method: 'oauth',
       email: tokens.email || '',
     });
@@ -1869,6 +1896,7 @@ app.get('/api/config/gmail', (req, res) => {
   if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASS) {
     return res.json({
       configured: true,
+      connected: true,
       method: 'app_password',
       email: process.env.GMAIL_USER,
     });
@@ -1876,6 +1904,7 @@ app.get('/api/config/gmail', (req, res) => {
 
   res.json({
     configured: false,
+    connected: false,
     method: 'none',
     email: '',
   });
@@ -1912,7 +1941,7 @@ app.get('/api/sent-emails', (req, res) => {
 });
 
 app.post('/api/send-email', async (req, res) => {
-  const { recipients, subject, bodyText, senderEmail, jobTitle, company, appPassword } = req.body || {};
+  const { recipients, subject, bodyText, senderEmail, jobTitle, company, appPassword, resumeBase64, resumeFileName } = req.body || {};
   
   if (appPassword) {
     process.env.GMAIL_APP_PASS = appPassword.replace(/\s+/g, '');
@@ -1928,41 +1957,26 @@ app.post('/api/send-email', async (req, res) => {
   }
 
   try {
-    let transporter = null;
     let targetEmail = '';
+    let useOAuthRest = false;
+    let validAccessToken = null;
+    let passTransporter = null;
 
     // Priority 1: User's connected Google account via OAuth2 (nlr.jaswanth2004@gmail.com)
+    // Uses official Google Gmail REST API (over HTTPS port 443) to avoid SMTP socket drops / ISP blocks
     if (hasOAuth) {
-      const accessToken = await getValidAccessToken();
-      if (accessToken) {
+      validAccessToken = await getValidAccessToken();
+      if (validAccessToken && tokens.email) {
         targetEmail = tokens.email;
-        const oauthTransporter = nodemailer.createTransport({
-          service: 'gmail',
-          auth: {
-            type: 'OAuth2',
-            user: tokens.email,
-            clientId: GOOGLE_CLIENT_ID,
-            clientSecret: GOOGLE_CLIENT_SECRET,
-            refreshToken: tokens.refresh_token,
-            accessToken,
-          }
-        });
-        try {
-          await oauthTransporter.verify();
-          transporter = oauthTransporter;
-          console.log(`[Send Email] Authenticated via User Connected Google Account: ${targetEmail}`);
-        } catch (oauthErr) {
-          console.warn('[Send Email] OAuth verify warning:', oauthErr.message);
-          // If verify had a transient issue, still assign oauthTransporter
-          transporter = oauthTransporter;
-        }
+        useOAuthRest = true;
+        console.log(`[Send Email] Authenticated via User Connected Google Account (Gmail REST API): ${targetEmail}`);
       }
     }
 
     // Priority 2: Fallback to system App Password if user hasn't connected Google OAuth
-    if (!transporter && gmailPass && gmailUser) {
+    if (!useOAuthRest && gmailPass && gmailUser) {
       targetEmail = gmailUser;
-      const passTransporter = nodemailer.createTransport({
+      passTransporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
         port: 465,
         secure: true,
@@ -1973,17 +1987,27 @@ app.post('/api/send-email', async (req, res) => {
       });
       try {
         await passTransporter.verify();
-        transporter = passTransporter;
       } catch (verifyErr) {
         console.warn('[Send Email] App Password SMTP verification failed:', verifyErr.message);
       }
     }
 
-    if (!transporter) {
+    if (!useOAuthRest && !passTransporter) {
       return res.status(401).json({
         requireGmailAuth: true,
         error: 'Google Mail Connection required',
         message: 'Please connect your Google account in Mail Automation first.'
+      });
+    }
+
+    // Prepare attachments (e.g. tailored PDF resume)
+    const attachments = [];
+    if (resumeBase64) {
+      const cleanBase64 = String(resumeBase64).replace(/^data:application\/pdf;base64,/, '');
+      attachments.push({
+        filename: resumeFileName || `${(targetEmail || 'Candidate').split('@')[0]}_Resume.pdf`,
+        content: Buffer.from(cleanBase64, 'base64'),
+        contentType: 'application/pdf',
       });
     }
 
@@ -2006,24 +2030,44 @@ app.post('/api/send-email', async (req, res) => {
       const personalizedBody = fill(bodyText);
       const personalizedSubject = fill(subject) || `Application Referral Request for ${jobTitle || 'Role'} at ${company || 'Company'}`;
 
-      const mailOptions = {
-        from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
-        to: recipientEmail,
-        subject: personalizedSubject,
-        text: personalizedBody,
-        html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
-          ${personalizedBody.replace(/\n/g, '<br/>')}
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-          <p style="font-size: 12px; color: #777;">
-            📎 <em>Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf</em>
-          </p>
-        </div>`,
-      };
-
-      const info = await transporter.sendMail(mailOptions);
+      let messageId = '';
+      if (useOAuthRest) {
+        const sendResult = await sendEmailViaGmailRestApi(validAccessToken, {
+          from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
+          to: recipientEmail,
+          subject: personalizedSubject,
+          text: personalizedBody,
+          html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
+            ${personalizedBody.replace(/\n/g, '<br/>')}
+            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+            <p style="font-size: 12px; color: #777;">
+              📎 <em>${attachments.length ? `Attached Resume: ${attachments[0].filename}` : `Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf`}</em>
+            </p>
+          </div>`,
+          attachments,
+        });
+        messageId = sendResult.id;
+      } else {
+        const mailOptions = {
+          from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
+          to: recipientEmail,
+          subject: personalizedSubject,
+          text: personalizedBody,
+          html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
+            ${personalizedBody.replace(/\n/g, '<br/>')}
+            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+            <p style="font-size: 12px; color: #777;">
+              📎 <em>${attachments.length ? `Attached Resume: ${attachments[0].filename}` : `Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf`}</em>
+            </p>
+          </div>`,
+          attachments,
+        };
+        const info = await passTransporter.sendMail(mailOptions);
+        messageId = info.messageId;
+      }
 
       const sentRecord = {
-        id: info.messageId,
+        id: messageId,
         recipient: recipientEmail,
         recipientName,
         sender: targetEmail,
@@ -2436,6 +2480,132 @@ app.post('/api/vault/answers/match', (req, res) => {
     res.json({ match: match || null });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not search vault answers.' });
+  }
+});
+
+// AI-powered intelligent question inference from candidate profile, resume, and options
+app.post('/api/vault/infer-answer', async (req, res) => {
+  try {
+    const { question, options, profile, resumeText, jobTitle, company } = req.body || {};
+    if (!question) {
+      return res.status(400).json({ error: 'question is required.' });
+    }
+
+    // 1. Check existing vault answers first
+    const vaultMatch = findSimilarAnswer(question, 0.45);
+    if (vaultMatch && vaultMatch.answer) {
+      return res.json({ answer: vaultMatch.answer, source: 'vault', confidence: 0.95 });
+    }
+
+    // 2. High-precision heuristic pattern matching
+    const qLower = String(question).toLowerCase();
+
+    // Work Authorization / Sponsorship
+    if (/require.*sponsorship|need.*sponsorship|visa.*sponsorship|immigration.*sponsorship/i.test(qLower)) {
+      const ans = profile?.requireSponsorship ? 'Yes' : (profile?.visaStatus ? 'Yes' : 'No');
+      return res.json({ answer: ans, source: 'profile-heuristic', confidence: 0.95 });
+    }
+    if (/legally.*authorized|authorized to work|eligible to work/i.test(qLower)) {
+      return res.json({ answer: 'Yes', source: 'profile-heuristic', confidence: 0.95 });
+    }
+    if (/18.*years|age.*18|over.*18|at least 18/i.test(qLower)) {
+      return res.json({ answer: 'Yes', source: 'profile-heuristic', confidence: 0.99 });
+    }
+    if (/notice.*period|how soon can you start|earliest start date|available to start/i.test(qLower)) {
+      if (Array.isArray(options) && options.length > 0) {
+        const found = options.find((o) => /immediate|15 days|1 month|asap|2 weeks/i.test(String(o)));
+        if (found) return res.json({ answer: found, source: 'profile-heuristic', confidence: 0.9 });
+      }
+      return res.json({ answer: 'Immediately', source: 'profile-heuristic', confidence: 0.9 });
+    }
+    if (/willing to relocate|open to relocation|comfortable working (hybrid|remote|on-site)/i.test(qLower)) {
+      return res.json({ answer: 'Yes', source: 'profile-heuristic', confidence: 0.9 });
+    }
+    if (/how did you hear|referral source|source of application/i.test(qLower)) {
+      if (Array.isArray(options) && options.length > 0) {
+        const found = options.find((o) => /linkedin|job board|company website|careers site|online/i.test(String(o)));
+        if (found) return res.json({ answer: found, source: 'source-heuristic', confidence: 0.95 });
+      }
+      return res.json({ answer: 'LinkedIn', source: 'source-heuristic', confidence: 0.95 });
+    }
+    if (/gender|race|ethnicity|veteran|disability|sexual orientation/i.test(qLower)) {
+      if (Array.isArray(options) && options.length > 0) {
+        const found = options.find((o) => /decline|prefer not|choose not|don't wish|not wish/i.test(String(o)));
+        if (found) return res.json({ answer: found, source: 'eeo-default', confidence: 0.95 });
+      }
+      return res.json({ answer: 'Decline to state', source: 'eeo-default', confidence: 0.95 });
+    }
+
+    // 3. AI Reasoning using Radox / Nara
+    const prompt = `You are an automated job application assistant filling out a job form for a candidate.
+Question from application: "${question}"
+${Array.isArray(options) && options.length > 0 ? `Available options: ${JSON.stringify(options)}` : ''}
+Target Job: ${jobTitle || 'Role'} at ${company || 'Company'}
+
+Candidate Profile:
+- Full Name: ${profile?.fullName || ''}
+- Headline: ${profile?.headline || ''}
+- Location: ${profile?.location || ''}
+- Experience: ${JSON.stringify(profile?.experience || []).slice(0, 500)}
+- Education: ${JSON.stringify(profile?.education || []).slice(0, 300)}
+- Skills: ${(profile?.skills || []).join(', ')}
+
+Resume text excerpt:
+${String(resumeText || '').slice(0, 1500)}
+
+Rules:
+1. If options are provided, select the EXACT text of the most appropriate option from the list.
+2. If it is a Yes/No question, answer "Yes" or "No".
+3. If it asks for years of experience, estimate accurately from experience dates or skills.
+4. If it is personal and completely unknown (e.g. government ID, SSN, personal secret), return {"answer": null, "canInfer": false}.
+5. Otherwise provide the best concise answer.
+
+Return ONLY JSON:
+{
+  "answer": "...",
+  "canInfer": true,
+  "confidence": 0.9
+}`;
+
+    let raw = '';
+    try {
+      raw = await askRadox([{ role: 'user', content: prompt }], { maxTokens: 250, temperature: 0.1 });
+    } catch {
+      try {
+        raw = await askNara([{ role: 'user', content: prompt }], { maxTokens: 250, temperature: 0.1 });
+      } catch {
+        if (process.env.GEMINI_API_KEY) {
+          raw = await askGemini(prompt).catch(() => '');
+        }
+      }
+    }
+
+    if (raw) {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) {
+        const parsed = JSON.parse(m[0]);
+        if (parsed?.canInfer && parsed?.answer) {
+          let finalAns = String(parsed.answer).trim();
+          if (Array.isArray(options) && options.length > 0) {
+            const exactOpt = options.find((o) => String(o).toLowerCase() === finalAns.toLowerCase());
+            if (exactOpt) finalAns = exactOpt;
+            else {
+              const partial = options.find((o) => String(o).toLowerCase().includes(finalAns.toLowerCase()) || finalAns.toLowerCase().includes(String(o).toLowerCase()));
+              if (partial) finalAns = partial;
+            }
+          }
+          // Automatically remember high-confidence answers in the vault
+          if ((parsed.confidence || 0.85) >= 0.8) {
+            saveVaultAnswer(question, finalAns, true);
+          }
+          return res.json({ answer: finalAns, source: 'ai-reasoning', confidence: parsed.confidence || 0.85 });
+        }
+      }
+    }
+
+    return res.json({ answer: null, canInfer: false });
+  } catch (err) {
+    res.json({ answer: null, canInfer: false, error: err.message });
   }
 });
 

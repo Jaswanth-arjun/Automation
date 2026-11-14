@@ -524,14 +524,37 @@ function injectHamzoStyles() {
 
 /**
  * Ask the user for missing information via a branded Hamzo overlay.
+ * Supports text input, clickable chips, or select dropdowns for options.
  * Returns { answer, remember } or null if skipped.
  */
-function askHamzoQuestion(question, fieldIndex, totalFields) {
+function askHamzoQuestion(question, fieldIndex, totalFields, options = []) {
   return new Promise((resolve) => {
     injectHamzoStyles();
     removeHamzoOverlays();
 
     const container = createOverlayContainer();
+    const hasOptions = Array.isArray(options) && options.length > 0;
+
+    let inputHtml = '';
+    if (hasOptions && options.length <= 6) {
+      inputHtml = `
+        <div class="hamzo-options-grid" style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;">
+          ${options.map((opt) => `<button type="button" class="hamzo-chip-btn" data-val="${CSS.escape(opt)}" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;color:#1e293b;font-weight:500;text-align:left;">${opt}</button>`).join('')}
+        </div>
+        <input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Or type your custom answer…" style="display:none;margin-top:6px;" />
+      `;
+    } else if (hasOptions) {
+      inputHtml = `
+        <select class="hamzo-input" id="hamzo-answer-select" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:10px 0;font-size:14px;background:#fff;">
+          <option value="">-- Select option --</option>
+          ${options.map((opt) => `<option value="${CSS.escape(opt)}">${opt}</option>`).join('')}
+        </select>
+        <input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Or type your custom answer…" style="display:none;margin-top:6px;" />
+      `;
+    } else {
+      inputHtml = `<input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Your answer…" autofocus />`;
+    }
+
     container.innerHTML = `
       <div class="hamzo-card" style="animation:hamzoPulse 2s ease-in-out infinite">
         <div class="hamzo-progress">${fieldIndex + 1} of ${totalFields} missing fields</div>
@@ -539,15 +562,15 @@ function askHamzoQuestion(question, fieldIndex, totalFields) {
           <div class="hamzo-logo">🤖</div>
           <div>
             <div class="hamzo-title">Hamzo needs one detail</div>
-            <div class="hamzo-subtitle">This info is required by the application</div>
+            <div class="hamzo-subtitle">Saved to Vault — never asks again</div>
           </div>
         </div>
         <div class="hamzo-body">
-          <div class="hamzo-question">"${question.length > 120 ? question.slice(0, 117) + '...' : question}"</div>
-          <input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Your answer…" autofocus />
-          <label class="hamzo-remember">
+          <div class="hamzo-question">"${question.length > 130 ? question.slice(0, 127) + '...' : question}"</div>
+          ${inputHtml}
+          <label class="hamzo-remember" style="margin-top:10px;display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;">
             <input type="checkbox" id="hamzo-remember-check" checked />
-            <span>💾 Remember this answer for future applications</span>
+            <span>💾 Save to Vault (never ask again)</span>
           </label>
         </div>
         <div class="hamzo-footer">
@@ -560,16 +583,43 @@ function askHamzoQuestion(question, fieldIndex, totalFields) {
     document.body.appendChild(container);
 
     const input = container.querySelector('#hamzo-answer-input');
+    const select = container.querySelector('#hamzo-answer-select');
     const saveBtn = container.querySelector('#hamzo-save-btn');
     const skipBtn = container.querySelector('#hamzo-skip-btn');
     const rememberCheck = container.querySelector('#hamzo-remember-check');
 
-    // Focus the input after a small delay
-    setTimeout(() => input?.focus(), 100);
+    // Handle option chip clicks
+    container.querySelectorAll('.hamzo-chip-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const val = btn.getAttribute('data-val');
+        const remember = rememberCheck.checked;
+        container.remove();
+        resolve({ answer: val, remember });
+      });
+    });
+
+    // Handle select dropdown change
+    if (select) {
+      select.addEventListener('change', () => {
+        if (select.value) {
+          const remember = rememberCheck.checked;
+          container.remove();
+          resolve({ answer: select.value, remember });
+        }
+      });
+    }
+
+    setTimeout(() => {
+      if (input && input.style.display !== 'none') input.focus();
+      else if (select) select.focus();
+    }, 100);
 
     saveBtn.addEventListener('click', () => {
-      const answer = input.value.trim();
-      if (!answer) { input.focus(); return; }
+      const answer = (select?.value || input?.value || '').trim();
+      if (!answer) {
+        if (input) { input.style.display = 'block'; input.focus(); }
+        return;
+      }
       const remember = rememberCheck.checked;
       container.remove();
       resolve({ answer, remember });
@@ -580,12 +630,14 @@ function askHamzoQuestion(question, fieldIndex, totalFields) {
       resolve(null);
     });
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        saveBtn.click();
-      }
-    });
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveBtn.click();
+        }
+      });
+    }
   });
 }
 
@@ -693,6 +745,39 @@ async function syncAnswerToServer(question, answer, approved) {
       body: JSON.stringify({ question, answer, approved }),
     });
   } catch {}
+}
+
+async function queryServerVaultMatch(question) {
+  try {
+    const res = await fetch('http://localhost:3000/api/vault/answers/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.match?.answer || null;
+  } catch {
+    return null;
+  }
+}
+
+async function inferAnswerWithAI(question, options, profile, jobTitle, company, resumeText) {
+  try {
+    const res = await fetch('http://localhost:3000/api/vault/infer-answer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, options, profile, jobTitle, company, resumeText }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.canInfer && data?.answer) {
+      return { answer: data.answer, source: data.source || 'ai-inference' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Main Form Fill Pipeline ───
@@ -930,11 +1015,10 @@ async function fillFormPhase(profile, answers, pending) {
   // Step 4: Fill choice fields (dropdowns, radios, checkboxes)
   fillChoices(profile, answers);
 
-  // Step 5: Detect unknown required fields
+  // Step 5: Detect unknown required fields (including empty/unselected <select> dropdowns)
   const unknown = collectInputs().filter((input) => {
     const type = (input.getAttribute('type') || '').toLowerCase();
     if (type === 'file') return false;
-    if (input.tagName === 'SELECT') return false;
     if (!isPlaceholderValue(input)) return false;
     const label = labelFor(input);
 
@@ -950,34 +1034,64 @@ async function fillFormPhase(profile, answers, pending) {
     }
 
     // Check if field is required
-    if (!input.required && input.getAttribute('aria-required') !== 'true' && !/\*/.test(label)) return false;
+    const isRequired = input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(label) || input.hasAttribute('required');
+    if (!isRequired && input.tagName !== 'SELECT') return false;
     return Boolean(label);
   });
 
-  // Step 6: For each unknown field, try saved answers or ask user
+  // Step 6: For each unknown field, try saved answers -> server vault -> AI inference -> ask user
   if (unknown.length > 0) {
-    sendProgress('unknown_fields', `🔎 Found ${unknown.length} required fields that need your input.`);
+    sendProgress('unknown_fields', `🔎 Checking ${unknown.length} fields with Vault & AI...`);
   }
 
-  for (let i = 0; i < unknown.length && i < 10; i++) {
+  for (let i = 0; i < unknown.length && i < 15; i++) {
     const input = unknown[i];
     const question = labelFor(input);
+    if (!question) continue;
 
-    // Try semantic match from saved answers
-    const savedAnswer = findBestAnswer(question, answers);
+    // Get options if dropdown
+    const options = input.tagName === 'SELECT'
+      ? optionList(input).map((o) => o.text.trim()).filter(Boolean)
+      : [];
+
+    // 1. Try semantic match from local saved answers
+    let savedAnswer = findBestAnswer(question, answers);
+
+    // 2. Try match from server vault
+    if (!savedAnswer) {
+      savedAnswer = await queryServerVaultMatch(question);
+    }
+
     if (savedAnswer) {
       setNativeValue(input, savedAnswer);
       filledCount++;
-      sendProgress('auto_filled_saved', `✅ Auto-filled "${question.slice(0, 50)}" from saved answers.`);
+      sendProgress('auto_filled_saved', `✅ Auto-filled "${question.slice(0, 45)}" from Vault memory.`);
       continue;
     }
 
-    // Ask user via Hamzo overlay
-    sendProgress('asking_user', `🔑 Asking for: "${question.slice(0, 60)}"...`);
+    // 3. Try AI Inference from candidate profile & resume
+    sendProgress('ai_inferring', `🧠 AI analyzing: "${question.slice(0, 50)}"...`);
+    const aiResult = await inferAnswerWithAI(question, options, profile, jobTitle, company, pending.resumeText);
+    if (aiResult && aiResult.answer) {
+      setNativeValue(input, aiResult.answer);
+      filledCount++;
+      answers[question.toLowerCase()] = aiResult.answer;
+      const normKey = normalizeQuestion(question);
+      if (normKey) answers[normKey] = aiResult.answer;
+      try {
+        if (extensionAlive()) await chrome.storage.local.set({ answers });
+      } catch {}
+      await syncAnswerToServer(question, aiResult.answer, true);
+      sendProgress('auto_filled_ai', `✨ AI answered & saved: "${question.slice(0, 40)}" → "${aiResult.answer.slice(0, 30)}"`);
+      continue;
+    }
+
+    // 4. Only ask user if neither Vault nor AI can infer
+    sendProgress('asking_user', `🔑 Need your input: "${question.slice(0, 60)}"...`);
 
     // Scroll the field into view
     input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 400));
 
     // Highlight the field
     const origBorder = input.style.border;
@@ -985,7 +1099,7 @@ async function fillFormPhase(profile, answers, pending) {
     input.style.border = '2px solid #009688';
     input.style.boxShadow = '0 0 12px rgba(0,150,136,0.3)';
 
-    const result = await askHamzoQuestion(question, i, unknown.length);
+    const result = await askHamzoQuestion(question, i, unknown.length, options);
 
     // Restore field styling
     input.style.border = origBorder;
@@ -995,22 +1109,18 @@ async function fillFormPhase(profile, answers, pending) {
       setNativeValue(input, result.answer);
       filledCount++;
 
-      // Save answer if user approved
+      // Save answer permanently so user is never asked again
       if (result.remember) {
         answers[question.toLowerCase()] = result.answer;
-        // Also save normalized version for semantic matching
         const normKey = normalizeQuestion(question);
         if (normKey) answers[normKey] = result.answer;
 
-        // Sync to extension storage
         try {
           if (extensionAlive()) await chrome.storage.local.set({ answers });
         } catch {}
 
-        // Sync to server vault
         await syncAnswerToServer(question, result.answer, true);
-
-        sendProgress('answer_saved', `💾 Answer saved: "${question.slice(0, 40)}" → will auto-fill next time.`);
+        sendProgress('answer_saved', `💾 Answer saved to Vault: "${question.slice(0, 40)}" → will auto-fill next time!`);
       }
     }
   }

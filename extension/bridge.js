@@ -119,6 +119,7 @@
         answers: data.answers || {},
         resumeBase64: data.resumeBase64 || '',
         resumeName: data.resumeName || 'hamzo-resume.pdf',
+        resumeText: data.resumeText || '',
         jobTitle: data.jobTitle || '',
         company: data.company || '',
         autoSubmit: data.autoSubmit || false,

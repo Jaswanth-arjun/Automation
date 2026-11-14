@@ -4,7 +4,14 @@
  * injects filler.js, and relays progress/results back to the dashboard.
  */
 
-const LOCAL_TABS = ['http://localhost:5173/*', 'http://127.0.0.1:5173/*'];
+const LOCAL_TABS = [
+  'http://localhost:5173/*',
+  'http://127.0.0.1:5173/*',
+  'http://localhost:5174/*',
+  'http://127.0.0.1:5174/*',
+  'http://localhost:3000/*',
+  'http://127.0.0.1:3000/*'
+];
 const APPLY_HOSTS = /greenhouse\.io$|lever\.co$|myworkdayjobs\.com$|ashbyhq\.com$|smartrecruiters\.com$|icims\.com$|workable\.com$|jobvite\.com$|taleo\.net$|successfactors\.com$|oraclecloud\.com$|linkedin\.com$|indeed\.com$/i;
 
 // Track which tab is the Hamzo dashboard
@@ -181,6 +188,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         url,
         resumeBase64: message.resumeBase64 || '',
         resumeName: message.resumeName || 'hamzo-resume.pdf',
+        resumeText: message.resumeText || '',
         jobTitle: message.jobTitle || '',
         company: message.company || '',
         autoSubmit: message.autoSubmit || false,

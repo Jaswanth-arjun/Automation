@@ -72,6 +72,28 @@ export default function Apply() {
   const [showGmailModal, setShowGmailModal] = useState(false);
   const [gmailAppPassInput, setGmailAppPassInput] = useState('');
   const [gmailAuthError, setGmailAuthError] = useState('');
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [connectedGmailEmail, setConnectedGmailEmail] = useState('');
+
+  // Fetch connected Gmail status on mount
+  useEffect(() => {
+    let alive = true;
+    api.getGmailConfig()
+      .then((cfg) => {
+        if (!alive || !cfg) return;
+        if (cfg.connected || cfg.configured) {
+          setGmailConnected(true);
+          setConnectedGmailEmail(cfg.email || '');
+          if (cfg.email) {
+            localStorage.setItem('mailmind_gmail_email', cfg.email);
+          }
+        }
+      })
+      .catch((e) => {
+        console.warn('Could not load Gmail config:', e);
+      });
+    return () => { alive = false; };
+  }, []);
 
   // Auto-reply checkbox state
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
@@ -375,9 +397,11 @@ ${firstName}`;
         recipients: selectedEmployees.map(e => ({ name: e.name, email: e.email, role: e.role })),
         subject: emailSubject,
         bodyText: emailBody,
-        senderEmail: profile.email || '',
+        senderEmail: connectedGmailEmail || profile.email || '',
         jobTitle: job?.title,
-        company: job?.company
+        company: job?.company,
+        resumeBase64: tailoredPdfBase64 || jobResume?.pdfBase64 || activeResume?.pdfBase64 || '',
+        resumeFileName: tailoredFileName || jobResume?.name || activeResume?.name || `${(profile.fullName || 'Candidate').split(' ')[0]}_Resume.pdf`,
       };
 
       const res = await api.sendReferralEmail(payload);
@@ -589,6 +613,12 @@ ${firstName}`;
     const ANSWERS_KEY = 'hamzo_apply_answers';
     let savedAnswers = {};
     try { savedAnswers = JSON.parse(localStorage.getItem(ANSWERS_KEY) || '{}'); } catch {}
+    try {
+      const serverVault = await fetch('http://localhost:3000/api/vault/answers').then((r) => r.json());
+      if (serverVault?.answers) {
+        savedAnswers = { ...serverVault.answers, ...savedAnswers };
+      }
+    } catch {}
 
     // Listen for the ready response
     const readyPromise = new Promise((resolve) => {
@@ -643,6 +673,8 @@ ${firstName}`;
       }
     }
 
+    const currentResumeText = activeResume?.text || jobResume?.text || '';
+
     // Send the apply request to the extension
     window.postMessage({
       source: 'hamzo-app',
@@ -652,6 +684,7 @@ ${firstName}`;
       answers: savedAnswers,
       resumeBase64: pdfToAttach,
       resumeName: fileNameToAttach,
+      resumeText: currentResumeText,
       jobTitle: job?.title || '',
       company: job?.company || '',
       autoSubmit: autoSubmitEnabled,
@@ -709,7 +742,7 @@ ${firstName}`;
     );
   }
 
-  const userEmail = profile.email || localStorage.getItem('mailmind_gmail_email') || 'jaswanthnelluru2004@gmail.com';
+  const userEmail = connectedGmailEmail || profile.email || localStorage.getItem('mailmind_gmail_email') || 'Connected Google Account';
   // Banner + sends: just-tailored (this session) > resume saved for this job > global active.
   const effectiveResume = (tailoredPdfBase64 && { name: tailoredFileName, pdfBase64: tailoredPdfBase64 }) || jobResume || activeResume;
   const resumeDisplayName = effectiveResume?.name || `${(profile.fullName || 'Jaswanth').split(' ')[0]}-resume.pdf`;
@@ -1189,6 +1222,17 @@ ${firstName}`;
               >
                 View Sent Mails
               </button>
+            </div>
+          )}
+
+          {/* Connected Gmail Account Indicator */}
+          {gmailConnected && !gmailAuthError && (
+            <div style={{ padding: '12px 18px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '14px', color: '#166534', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', fontSize: '13px', fontWeight: '600' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
+                <span>Referral emails will be sent from your connected account: <strong>{connectedGmailEmail || userEmail}</strong></span>
+              </div>
+              <span style={{ fontSize: '11.5px', color: '#15803d', fontWeight: '800', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px' }}>Gmail API Active</span>
             </div>
           )}
 
