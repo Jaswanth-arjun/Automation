@@ -64,8 +64,8 @@ export default function Dashboard() {
           {topMatches.map(job => (
             <article key={job.id} className="match-card" onClick={() => navigate(`/dashboard/jobs/${job.id}`)}>
               <div className="match-card-top">
-                <div className="job-card-company-mark">{job.companyMark}</div>
-                <div>
+                <div className="job-card-company-mark">{job.companyMark || job.company?.[0]?.toUpperCase() || 'J'}</div>
+                <div className="match-card-info">
                   <h4>{job.title}</h4>
                   <p>{job.company} · {job.location}</p>
                 </div>
@@ -73,11 +73,11 @@ export default function Dashboard() {
                   color: job.matchResult?.score >= 70 ? '#22a65b' : '#445cf5',
                   background: job.matchResult?.score >= 70 ? '#22a65b14' : '#445cf514',
                 }}>
-                  {job.matchResult?.score || 0}%
+                  {job.matchResult?.score || 0}% match
                 </span>
               </div>
               <div className="job-card-skills">
-                {job.skills?.slice(0, 3).map(s => <span key={s} className="skill-tag">{s}</span>)}
+                {job.skills?.slice(0, 4).map(s => <span key={s} className="skill-tag">{s}</span>)}
               </div>
             </article>
           ))}
