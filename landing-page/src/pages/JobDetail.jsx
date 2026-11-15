@@ -240,13 +240,6 @@ export default function JobDetail() {
                   onComplete={() => navigate('/dashboard/profile')}
                   size="normal"
                 />
-                {matchResult.missingProfileLabels?.length > 0 && (
-                  <ul>
-                    {matchResult.missingProfileLabels.map((label) => (
-                      <li key={label}>{label}</li>
-                    ))}
-                  </ul>
-                )}
                 <button
                   className="btn-accent"
                   type="button"

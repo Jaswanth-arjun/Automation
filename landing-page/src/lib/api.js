@@ -218,16 +218,19 @@ export const resumeStore = {
     const next = makeActive ? all.map((r) => ({ ...r, isActive: false })) : all;
     next.push({ ...resume, id: Date.now().toString(), uploadedAt: new Date().toISOString(), isActive: makeActive });
     localStorage.setItem('wayin_resumes', JSON.stringify(next));
+    window.dispatchEvent(new Event('resumes_updated'));
     return next;
   },
   setActive(id) {
     const all = this.getAll().map(r => ({ ...r, isActive: r.id === id }));
     localStorage.setItem('wayin_resumes', JSON.stringify(all));
+    window.dispatchEvent(new Event('resumes_updated'));
     return all;
   },
   remove(id) {
     const all = this.getAll().filter(r => r.id !== id);
     localStorage.setItem('wayin_resumes', JSON.stringify(all));
+    window.dispatchEvent(new Event('resumes_updated'));
     return all;
   },
 };

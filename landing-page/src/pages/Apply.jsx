@@ -47,7 +47,11 @@ export default function Apply() {
     : null;
   const jobResume = jobResumes.length ? jobResumes[jobResumes.length - 1] : (companyResume || null);
 
-  const matchResult = useMemo(() => calculateMatchScore(profile, job || {}), [profile, job]);
+  const matchResult = useMemo(
+    () => calculateMatchScore(profile, job || {}, { userId: user?.id || user?.email || 'anon' }),
+    [profile, job, user],
+  );
+  const hasMatchScore = typeof matchResult.score === 'number';
 
   const [activeTab, setActiveTab] = useState('referral'); // 'referral' | 'linkedin' | 'tailor'
   const [copiedNoteIndex, setCopiedNoteIndex] = useState(null);
@@ -418,7 +422,7 @@ ${firstName}`;
         company: job?.company,
         companyMark: job?.companyMark,
         jobId: job?.id,
-        matchScore: matchResult.score,
+        ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
         resumeUsed: tailoredFileName || jobResume?.name || activeResume?.name || `${(profile.fullName || 'User').split(' ')[0]}-resume.pdf`,
         referralSentTo: selectedEmployees.map(e => e.name).join(', ')
       });
@@ -582,7 +586,7 @@ ${firstName}`;
             company: job?.company,
             companyMark: job?.companyMark,
             jobId: job?.id,
-            matchScore: matchResult.score,
+            ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
             resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
           });
           setSubmitted(true);
@@ -808,9 +812,15 @@ ${firstName}`;
         {/* Match Score Chip */}
         <div style={{ background: 'rgba(255,255,255,0.08)', padding: '12px 18px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.12)', textAlign: 'right' }}>
           <div style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', fontWeight: '700' }}>Skills Match</div>
-          <div style={{ fontSize: '20px', fontWeight: '800', color: matchResult.score >= 70 ? '#22a65b' : matchResult.score >= 40 ? '#d4920a' : '#ef4444' }}>
-            {matchResult.score}% Match
-          </div>
+          {hasMatchScore ? (
+            <div style={{ fontSize: '20px', fontWeight: '800', color: matchResult.score >= 70 ? '#22a65b' : matchResult.score >= 40 ? '#d4920a' : '#ef4444' }}>
+              {matchResult.score}% Match
+            </div>
+          ) : (
+            <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#fbbf24', maxWidth: 190, lineHeight: 1.4 }}>
+              Complete Your Profile to Calculate Match Score
+            </div>
+          )}
         </div>
       </div>
 
