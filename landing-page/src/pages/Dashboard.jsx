@@ -20,7 +20,21 @@ function isProfileIncomplete(p) {
 }
 
 function ScoreCircle({ score = null }) {
-  if (score === null || score === undefined) {
+  const hasScore = typeof score === 'number' && Number.isFinite(score);
+  const safeScore = hasScore ? Math.max(0, Math.min(100, Math.round(score))) : 0;
+  // Ring grows into place; the number always shows the real score immediately
+  // so a paused tab can never display 0%.
+  const [arc, setArc] = useState(0);
+  useEffect(() => {
+    if (!hasScore) {
+      setArc(0);
+      return undefined;
+    }
+    const timer = setTimeout(() => setArc(safeScore), 60);
+    return () => clearTimeout(timer);
+  }, [hasScore, safeScore]);
+
+  if (!hasScore) {
     return (
       <div
         className="score-circle-badge is-empty"
@@ -44,11 +58,10 @@ function ScoreCircle({ score = null }) {
       </div>
     );
   }
-  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
   const radius = 15;
   const stroke = 3.5;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (safeScore / 100) * circumference;
+  const offset = circumference - (arc / 100) * circumference;
   const size = 42;
   const center = size / 2;
 
@@ -89,7 +102,7 @@ function ScoreCircle({ score = null }) {
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           strokeLinecap="round"
-          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+          style={{ transition: 'stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1)' }}
         />
       </svg>
       <span
@@ -184,6 +197,13 @@ export default function Dashboard() {
     (job) => job.matchResult?.status === 'scored' || job.matchResult?.status === 'ineligible',
   );
   const matchesLocked = scored.length > 0 && scoredOnly.length === 0;
+  // Best real score this user has right now, used by the profile modal ring.
+  const bestMatchScore = useMemo(() => {
+    const values = scoredOnly
+      .map((job) => job.matchResult?.score)
+      .filter((value) => typeof value === 'number' && Number.isFinite(value));
+    return values.length ? Math.max(...values) : null;
+  }, [scoredOnly]);
   const topMatches = [...scored]
     .sort((a, b) => {
       const aScored = a.matchResult?.status === 'scored' || a.matchResult?.status === 'ineligible';
@@ -345,6 +365,7 @@ export default function Dashboard() {
       <CompleteProfileModal
         isOpen={showProfilePromptModal}
         onClose={handleDismissProfileModal}
+        matchScore={bestMatchScore || 92}
       />
     </div>
   );

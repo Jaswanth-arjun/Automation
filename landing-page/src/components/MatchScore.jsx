@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertCircle, ShieldAlert } from 'lucide-react';
 import './JobMatch.css';
 
@@ -22,36 +22,26 @@ export default function MatchScore({
   const viewSize = isSmall ? 42 : 58;
   const hasScore = typeof score === 'number' && Number.isFinite(score);
   const incomplete = status === 'incomplete' || !hasScore;
+  const safeScore = hasScore ? Math.max(0, Math.min(100, Math.round(score))) : 0;
+
+  // Grow the ring from empty to the real score. The number itself is rendered
+  // from the final score straight away so a paused/throttled tab (or any
+  // environment without animation frames) can never show 0%.
+  const [arc, setArc] = useState(0);
+  useEffect(() => {
+    if (incomplete) {
+      setArc(0);
+      return undefined;
+    }
+    const timer = setTimeout(() => setArc(safeScore), 60);
+    return () => clearTimeout(timer);
+  }, [incomplete, safeScore]);
 
   /* ---------------- no evidence yet ---------------- */
   if (incomplete) {
-    if (isSmall) {
-      return (
-        <div
-          className="score-circle-badge is-empty"
-          title="Complete Your Profile to Calculate Match Score"
-          style={{
-            width: viewSize,
-            height: viewSize,
-            borderRadius: '50%',
-            border: '2px dashed #d8d5cc',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#a8a29a',
-            fontSize: 11,
-            fontWeight: 800,
-            flexShrink: 0,
-            background: '#faf9f6',
-          }}
-        >
-          —
-        </div>
-      );
-    }
     return (
       <div
-        className="match-score is-incomplete"
+        className={`match-score ${isSmall ? 'is-small' : 'is-incomplete'}`}
         title="Complete Your Profile to Calculate Match Score"
         style={{
           display: 'inline-flex',
@@ -62,34 +52,37 @@ export default function MatchScore({
       >
         <div
           className="match-score-empty-ring"
-          style={{ width: viewSize, height: viewSize, fontSize: 14, fontWeight: 800 }}
+          style={{ width: viewSize, height: viewSize, fontSize: isSmall ? 11 : 14, fontWeight: 800 }}
         >
           —
         </div>
-        <strong className="match-score-locked">Complete Your Profile to Calculate Match Score</strong>
-        {missingLabels.length > 0 && (
-          <ul className="match-score-missing">
-            {missingLabels.slice(0, 5).map((label) => (
-              <li key={label}><AlertCircle size={11} /> {label}</li>
-            ))}
-          </ul>
-        )}
-        {onComplete && (
-          <button type="button" className="match-score-cta" onClick={onComplete}>
-            Complete your profile
-          </button>
+        {!isSmall && (
+          <>
+            <strong className="match-score-locked">Complete Your Profile to Calculate Match Score</strong>
+            {missingLabels.length > 0 && (
+              <ul className="match-score-missing">
+                {missingLabels.slice(0, 5).map((label) => (
+                  <li key={label}><AlertCircle size={11} /> {label}</li>
+                ))}
+              </ul>
+            )}
+            {onComplete && (
+              <button type="button" className="match-score-cta" onClick={onComplete}>
+                Complete your profile
+              </button>
+            )}
+          </>
         )}
       </div>
     );
   }
 
   /* ---------------- scored ---------------- */
-  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
   const ineligible = status === 'ineligible';
   const radius = isSmall ? 15 : 24;
   const stroke = isSmall ? 3.5 : 4.5;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (safeScore / 100) * circumference;
+  const offset = circumference - (arc / 100) * circumference;
   const center = viewSize / 2;
 
   const isHigh = safeScore >= 70;
@@ -123,7 +116,7 @@ export default function MatchScore({
             strokeDasharray={circumference}
             strokeDashoffset={offset}
             strokeLinecap="round"
-            style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+            style={{ transition: 'stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1)' }}
           />
         </svg>
         <span
@@ -177,7 +170,7 @@ export default function MatchScore({
             strokeDasharray={circumference}
             strokeDashoffset={offset}
             strokeLinecap="round"
-            style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+            style={{ transition: 'stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1)' }}
           />
         </svg>
 
@@ -205,9 +198,7 @@ export default function MatchScore({
       {!isSmall && (
         <div className="match-score-text">
           <strong style={{ color }}>{safeScore}% Match</strong>
-          {ineligible && (
-            <span className="match-score-sub">Skills match · not eligible</span>
-          )}
+          {ineligible && <span className="match-score-sub">Skills match · not eligible</span>}
           {explanation && (
             <p className="match-score-explanation" style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280', lineHeight: '1.4' }}>
               {explanation}

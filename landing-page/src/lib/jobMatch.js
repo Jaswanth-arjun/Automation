@@ -629,19 +629,30 @@ export function getProfileReadiness(profile, resume) {
   const missing = [];
 
   if (!profile) missing.push('profile');
-  if (evidence.skills.length === 0) missing.push('skills');
-  if (!evidence.education.some((item) => item.degree || item.branch)) missing.push('education');
-  if (!evidence.education.some((item) => item.graduationYear)) missing.push('graduationYear');
+
+  // A score needs real evidence about the candidate. Declared skills or a
+  // parsed resume both qualify; with neither there is nothing to match on and
+  // any percentage would be invented.
+  const hasSkillSignal = evidence.skills.length > 0 || evidence.resumeText.trim().length > 0;
+  if (!hasSkillSignal) missing.push('skills');
+
+  // Everything below improves the accuracy of the score but is not required
+  // for it: those dimensions simply contribute what the user actually has.
+  const warnings = [];
+  if (!evidence.education.some((item) => item.degree || item.branch)) warnings.push('education');
+  if (!evidence.education.some((item) => item.graduationYear)) warnings.push('graduationYear');
   const hasEvidence =
     evidence.projects.some((item) => item.description || item.technologies) ||
     evidence.experience.some((item) => item.description || item.title);
-  if (!hasEvidence) missing.push('evidence');
-  if (!evidence.resumeText.trim() && !(profile && profile.resume)) missing.push('resume');
+  if (!hasEvidence) warnings.push('evidence');
+  if (!evidence.resumeText.trim() && !(profile && profile.resume)) warnings.push('resume');
 
   return {
     ready: missing.length === 0,
     missing,
     missingLabels: missing.map((key) => PROFILE_TODO[key] || key),
+    warnings,
+    warningLabels: warnings.map((key) => PROFILE_TODO[key] || key),
     evidence,
   };
 }
@@ -950,6 +961,9 @@ export function scoreJobMatch(profile, job, options = {}) {
       suggestions.push(`Role location (${normalized.location}) differs from your profile location (${evidence.location}).`);
     }
   }
+  (readiness.warningLabels || []).forEach((label) => {
+    suggestions.push(`${label} — it would make this score (and every other one) more accurate.`);
+  });
   if (!suggestions.length) suggestions.push('Your profile already covers this role well — focus on the application and referral outreach.');
 
   const breakdown = activeDims.map(([key, value]) => ({

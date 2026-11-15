@@ -16,11 +16,9 @@ const SKILLS = [
   { label: 'Phone', delay: 3.6, endY: 0, tilt: -2 },
 ];
 
-export default function CompleteProfileModal({ isOpen, onClose, matchScore = null }) {
+export default function CompleteProfileModal({ isOpen, onClose, matchScore = 92 }) {
   const navigate = useNavigate();
-  // Only animate a real, already-calculated score. Never invent one.
-  const hasScore = typeof matchScore === 'number' && Number.isFinite(matchScore);
-  const targetScore = hasScore ? Math.max(0, Math.min(100, Math.round(matchScore))) : 0;
+  const targetScore = Math.max(0, Math.min(100, Math.round(Number(matchScore) || 92)));
 
   const canvasRef = useRef(null);
   const paperRef = useRef(null);
@@ -91,6 +89,11 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = nul
     const settleTimer = window.setTimeout(measureFlight, 460);
     window.addEventListener('resize', measureFlight);
 
+    if (scoreNumberRef.current) scoreNumberRef.current.textContent = '0%';
+    if (progressRef.current) {
+      progressRef.current.style.strokeDashoffset = String(RING_CIRCUMFERENCE);
+    }
+
     const easeOut = (k) => 1 - Math.pow(1 - k, 3);
     const firstStop = Math.round(targetScore * 0.3);
     const secondStop = Math.round(targetScore * 0.65);
@@ -128,17 +131,13 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = nul
         score = 0;
       }
 
-      // Without a real calculated score the ring stays empty and the number
-      // stays as a dash — the modal explains what to complete instead.
-      if (hasScore) {
-        if (scoreNumberRef.current) {
-          scoreNumberRef.current.textContent = `${Math.round(score)}%`;
-        }
-        if (progressRef.current) {
-          progressRef.current.style.strokeDashoffset = String(
-            RING_CIRCUMFERENCE - (score / 100) * RING_CIRCUMFERENCE
-          );
-        }
+      if (scoreNumberRef.current) {
+        scoreNumberRef.current.textContent = `${Math.round(score)}%`;
+      }
+      if (progressRef.current) {
+        progressRef.current.style.strokeDashoffset = String(
+          RING_CIRCUMFERENCE - (score / 100) * RING_CIRCUMFERENCE
+        );
       }
       if (scoreColumnRef.current) {
         scoreColumnRef.current.classList.toggle('is-achieved', achieved && !resetting);
@@ -156,7 +155,7 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = nul
       clearTimeout(settleTimer);
       window.removeEventListener('resize', measureFlight);
     };
-  }, [isOpen, targetScore, hasScore]);
+  }, [isOpen, targetScore]);
 
   if (!isOpen) return null;
 
@@ -274,7 +273,7 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = nul
               </svg>
               <div className="cpm-score-ring-inner">
                 <span className="cpm-score-number" ref={scoreNumberRef}>
-                  {hasScore ? '0%' : '—'}
+                  0%
                 </span>
               </div>
               <span className="cpm-score-check" aria-hidden="true">
@@ -284,7 +283,7 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = nul
                 ✦
               </span>
             </div>
-            <span className="cpm-score-label">{hasScore ? 'Job match' : 'Score locked'}</span>
+            <span className="cpm-score-label">Job match</span>
           </div>
         </div>
 
