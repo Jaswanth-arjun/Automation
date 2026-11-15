@@ -8,6 +8,70 @@ import { computeJobScores } from '../lib/matchScore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import ApplyOptionsModal from '../components/ApplyOptionsModal';
 
+function ScoreCircle({ score = 0 }) {
+  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  const radius = 15;
+  const stroke = 3.5;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (safeScore / 100) * circumference;
+  const size = 42;
+  const center = size / 2;
+
+  const isHigh = safeScore >= 70;
+  const color = isHigh ? '#16a34a' : safeScore >= 40 ? '#ea580c' : '#f97316';
+  const track = isHigh ? '#dcfce7' : '#ffedd5';
+
+  return (
+    <div
+      className="score-circle-badge"
+      title={`${safeScore}% match score`}
+      style={{
+        position: 'relative',
+        width: size,
+        height: size,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={track}
+          strokeWidth={stroke}
+        />
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 0.4s ease' }}
+        />
+      </svg>
+      <span
+        style={{
+          position: 'absolute',
+          fontSize: '11px',
+          fontWeight: '800',
+          letterSpacing: '-0.02em',
+          color: color,
+        }}
+      >
+        {safeScore}%
+      </span>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -67,12 +131,7 @@ export default function Dashboard() {
             <article key={job.id} className="match-card" onClick={() => navigate(`/dashboard/jobs/${job.id}`)}>
               <div className="match-card-header-row">
                 <div className="job-card-company-mark">{job.companyMark || job.company?.[0]?.toUpperCase() || 'J'}</div>
-                <span className="match-badge" style={{
-                  color: job.matchResult?.score >= 70 ? '#16a34a' : '#ea580c',
-                  background: job.matchResult?.score >= 70 ? '#dcfce7' : '#ffedd5',
-                }}>
-                  {job.matchResult?.score || 0}% match
-                </span>
+                <ScoreCircle score={job.matchResult?.score || 0} />
               </div>
               <div className="match-card-body">
                 <h4 title={job.title}>{job.title}</h4>
