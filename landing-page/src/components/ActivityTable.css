@@ -228,36 +228,43 @@
   gap: 10px;
 }
 
-/* Grid layout definition shared between header and card rows */
+/* Grid layout definition shared identically between header and card rows */
 .activity-grid-header,
 .activity-card-row {
   display: grid;
-  grid-template-columns: 210px 1.6fr 120px 95px 105px 115px 75px 44px;
+  grid-template-columns: 240px 1.5fr 130px 110px 120px 115px 80px 44px;
   align-items: center;
   column-gap: 16px;
 }
 
-/* 1. Header row */
+/* 1. Header row - Dark, bold, prominent surface */
 .activity-grid-header {
-  padding: 6px 20px 6px;
-  background: transparent;
+  padding: 10px 20px;
+  background: #fdfaf6;
+  border: 1px solid #f1ece4;
+  border-radius: 14px;
+  margin-bottom: 4px;
   user-select: none;
 }
 
 .col-h {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: #0f172a; /* Dark bold header text */
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   white-space: nowrap;
 }
 
 .col-h svg {
-  color: #94a3b8;
+  color: #ea580c; /* High-contrast orange accent on icons */
+}
+
+.col-h.col-status {
+  justify-content: center;
 }
 
 /* 2. Card row */
@@ -287,8 +294,9 @@
   transform: translateY(-1px);
 }
 
-/* Left vertical orange accent bar (exactly as shown in reference) */
-.row-accent-bar {
+/* Left vertical orange accent bar via ::before (never consumes a grid track) */
+.activity-card-row::before {
+  content: '';
   position: absolute;
   left: 0;
   top: 14px;
@@ -296,6 +304,7 @@
   width: 4.5px;
   background: #ea580c;
   border-radius: 0 4px 4px 0;
+  z-index: 2;
 }
 
 /* Cells */
@@ -303,6 +312,10 @@
   display: flex;
   align-items: center;
   min-width: 0;
+}
+
+.col-cell.col-status {
+  justify-content: center;
 }
 
 /* Company */

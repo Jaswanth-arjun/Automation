@@ -284,9 +284,6 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                       tabIndex={0}
                       role="button"
                     >
-                      {/* Left vertical orange bar (matches reference design) */}
-                      <div className="row-accent-bar" />
-
                       {/* 1. Company Column */}
                       <div className="col-cell col-company">
                         <div className="row-company-wrap">
