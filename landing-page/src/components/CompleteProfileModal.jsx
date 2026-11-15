@@ -43,10 +43,13 @@ export default function CompleteProfileModal({ isOpen, onClose }) {
   const modalContent = (
     <div className="cpm-overlay" onClick={handleLater} role="dialog" aria-modal="true">
       <div className="cpm-card-modal" onClick={(e) => e.stopPropagation()}>
-        {/* ─── Top Canvas with Graphic & Close Button ─── */}
+        {/* ─── Top Canvas with Motion Graphic & Close Button ─── */}
         <div className="cpm-top-canvas">
+          {/* Ambient Glowing Aura */}
+          <div className="cpm-canvas-glow" />
+
           {/* Close X Button */}
-          <button className="cpm-close-btn" onClick={handleLater} title="Close">
+          <button className="cpm-close-btn" onClick={handleLater} title="Close" aria-label="Close">
             <X size={15} />
           </button>
 
@@ -56,9 +59,7 @@ export default function CompleteProfileModal({ isOpen, onClose }) {
             width="14"
             height="14"
             viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            fill="currentColor"
           >
             <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
           </svg>
@@ -68,17 +69,30 @@ export default function CompleteProfileModal({ isOpen, onClose }) {
             width="16"
             height="16"
             viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            fill="currentColor"
           >
             <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
           </svg>
 
-          {/* Left: Floating Resume / Profile Card */}
+          <svg
+            className="cpm-sparkle-star cpm-star-center"
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+          >
+            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" />
+          </svg>
+
+          {/* Left: Floating Resume / Profile Card with Scanning Laser */}
           <div className="cpm-paper-card">
+            {/* Animated Laser Scanning Beam */}
+            <div className="cpm-scan-beam" />
+
             <div className="cpm-paper-top">
-              <div className="cpm-paper-avatar" />
+              <div className="cpm-paper-avatar">
+                <div className="cpm-avatar-pulse" />
+              </div>
               <div className="cpm-paper-header-lines">
                 <div className="cpm-paper-h-line-1" />
                 <div className="cpm-paper-h-line-2" />
@@ -93,9 +107,17 @@ export default function CompleteProfileModal({ isOpen, onClose }) {
             </div>
           </div>
 
-          {/* Right: Circular 0% Job Match Indicator */}
+          {/* Right: Circular 0% Job Match Indicator with Animated Ring */}
           <div className="cpm-score-column">
             <div className="cpm-score-ring-outer">
+              <svg className="cpm-score-svg-ring" viewBox="0 0 100 100">
+                <circle
+                  className="cpm-svg-ring-active"
+                  cx="50"
+                  cy="50"
+                  r="44"
+                />
+              </svg>
               <div className="cpm-score-ring-inner">
                 <span className="cpm-score-number">0%</span>
               </div>
