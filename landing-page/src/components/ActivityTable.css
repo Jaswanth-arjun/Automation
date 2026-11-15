@@ -232,27 +232,37 @@
 .activity-grid-header,
 .activity-card-row {
   display: grid;
-  grid-template-columns: 240px 1.5fr 130px 110px 120px 115px 80px 44px;
+  grid-template-columns: 240px 1.5fr 125px 105px 115px 115px 80px 44px;
   align-items: center;
   column-gap: 16px;
+  padding: 14px 20px;
 }
+
+/* Explicit Grid columns to guarantee 100% alignment between header & rows */
+.col-company    { grid-column: 1; }
+.col-role       { grid-column: 2; }
+.col-email      { grid-column: 3; }
+.col-outreach   { grid-column: 4; }
+.col-responses  { grid-column: 5; }
+.col-status     { grid-column: 6; }
+.col-time       { grid-column: 7; }
+.col-action     { grid-column: 8; }
 
 /* 1. Header row - Dark, bold, prominent surface */
 .activity-grid-header {
-  padding: 10px 20px;
-  background: #fdfaf6;
-  border: 1px solid #f1ece4;
+  background: #fbf7f2;
+  border: 1px solid #eee7de;
   border-radius: 14px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   user-select: none;
 }
 
 .col-h {
   font-size: 12px;
   font-weight: 850;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #0f172a; /* Dark bold header text */
+  color: #0f172a; /* Dark bold high-contrast header text */
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -261,6 +271,7 @@
 
 .col-h svg {
   color: #ea580c; /* High-contrast orange accent on icons */
+  flex-shrink: 0;
 }
 
 .col-h.col-status {
@@ -279,7 +290,6 @@
   background: #ffffff;
   border: 1px solid #ebe5dc;
   border-radius: 18px;
-  padding: 14px 20px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
   transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
