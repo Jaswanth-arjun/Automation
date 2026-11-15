@@ -34,7 +34,7 @@ export default function Dashboard() {
   const displayName = getUserName(user, profile);
 
   const scored = useMemo(() => computeJobScores(profile || {}, adminJobs), [profile, adminJobs]);
-  const topMatches = [...scored].sort((a, b) => (b.matchResult?.score || 0) - (a.matchResult?.score || 0)).slice(0, 3);
+  const topMatches = [...scored].sort((a, b) => (b.matchResult?.score || 0) - (a.matchResult?.score || 0)).slice(0, 4);
 
   return (
     <div className="page-overview">

@@ -3149,50 +3149,74 @@ nav.mobile-nav {
 /* Top matches grid */
 .top-matches-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 14px
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1180px) {
+  .top-matches-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .match-card {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 18px;
+  padding: 16px;
   cursor: pointer;
-  transition: .2s all
+  transition: .2s all;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .match-card:hover {
   border-color: var(--accent);
   box-shadow: 0 8px 24px #445cf510;
-  transform: translateY(-2px)
+  transform: translateY(-2px);
 }
 
 .match-card-top {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.match-card-top > div {
+  min-width: 0;
+  flex: 1;
 }
 
 .match-card-top h4 {
-  font-size: 14px;
+  font-size: 13.5px;
   margin: 0;
-  font-weight: 700
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .match-card-top p {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
-  margin: 2px 0 0
+  margin: 3px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .match-badge {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 800;
-  padding: 4px 10px;
-  border-radius: 8px
+  padding: 4px 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
 }
 
 /* Prompt card */
