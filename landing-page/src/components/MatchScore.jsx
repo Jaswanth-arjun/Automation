@@ -1,28 +1,31 @@
 import React from 'react';
-import { User } from 'lucide-react';
-import { profileStore } from '../lib/api';
 
 export default function MatchScore({ score = 0, explanation = '', size = 'normal' }) {
-  const radius = size === 'small' ? 18 : 28;
-  const stroke = size === 'small' ? 3 : 4;
+  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  const isSmall = size === 'small';
+
+  const radius = isSmall ? 15 : 24;
+  const stroke = isSmall ? 3.5 : 4.5;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
-  const viewSize = (radius + stroke) * 2;
+  const offset = circumference - (safeScore / 100) * circumference;
+  const viewSize = isSmall ? 42 : 58;
+  const center = viewSize / 2;
 
-  const profile = profileStore?.get ? profileStore.get() : null;
-  const avatarUrl = profile?.avatarUrl;
-
-  const getColor = (s) => {
-    if (s >= 80) return '#22a65b';
-    if (s >= 60) return '#445cf5';
-    if (s >= 40) return '#d4920a';
-    return '#c74a3d';
-  };
-
-  const color = getColor(score);
+  const isHigh = safeScore >= 70;
+  const color = isHigh ? '#16a34a' : safeScore >= 40 ? '#ea580c' : '#f97316';
+  const track = isHigh ? '#dcfce7' : '#ffedd5';
 
   return (
-    <div className={`match-score match-score-${size}`}>
+    <div
+      className={`match-score match-score-${size}`}
+      title={`${safeScore}% match score`}
+      style={{
+        display: 'inline-flex',
+        flexDirection: isSmall ? 'row' : 'column',
+        alignItems: isSmall ? 'center' : 'flex-start',
+        gap: isSmall ? '0' : '8px',
+      }}
+    >
       <div
         className="match-score-circle-wrapper"
         style={{
@@ -35,18 +38,22 @@ export default function MatchScore({ score = 0, explanation = '', size = 'normal
           flexShrink: 0,
         }}
       >
-        <svg width={viewSize} height={viewSize} className="match-score-ring" style={{ position: 'absolute', inset: 0 }}>
+        <svg
+          width={viewSize}
+          height={viewSize}
+          style={{ transform: 'rotate(-90deg)', display: 'block' }}
+        >
           <circle
-            cx={radius + stroke}
-            cy={radius + stroke}
+            cx={center}
+            cy={center}
             r={radius}
             fill="none"
-            stroke="#e8e8e3"
+            stroke={track}
             strokeWidth={stroke}
           />
           <circle
-            cx={radius + stroke}
-            cy={radius + stroke}
+            cx={center}
+            cy={center}
             r={radius}
             fill="none"
             stroke={color}
@@ -54,41 +61,34 @@ export default function MatchScore({ score = 0, explanation = '', size = 'normal
             strokeDasharray={circumference}
             strokeDashoffset={offset}
             strokeLinecap="round"
-            transform={`rotate(-90 ${radius + stroke} ${radius + stroke})`}
-            className="match-score-progress"
+            style={{ transition: 'stroke-dashoffset 0.4s ease' }}
           />
         </svg>
 
-        {/* User Profile icon or Avatar centered inside the score circle */}
-        <div
+        <span
           style={{
-            width: radius * 1.35,
-            height: radius * 1.35,
-            borderRadius: '50%',
-            overflow: 'hidden',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: avatarUrl ? 'transparent' : '#f4f4f0',
+            position: 'absolute',
+            fontSize: isSmall ? '11px' : '14px',
+            fontWeight: '800',
+            letterSpacing: '-0.02em',
             color: color,
-            zIndex: 1,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+            userSelect: 'none',
+            lineHeight: 1,
           }}
         >
-          {avatarUrl ? (
-            <img src={avatarUrl} alt="User Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <User size={size === 'small' ? 14 : 22} strokeWidth={2.2} style={{ color }} />
-          )}
-        </div>
+          {safeScore}%
+        </span>
       </div>
 
-      <div className="match-score-text">
-        <strong style={{ color }}>{score}%</strong>
-        {size !== 'small' && <span>Match</span>}
-      </div>
-      {explanation && size !== 'small' && (
-        <p className="match-score-explanation">{explanation}</p>
+      {!isSmall && (
+        <div className="match-score-text">
+          <strong style={{ color }}>{safeScore}% Match</strong>
+          {explanation && (
+            <p className="match-score-explanation" style={{ margin: '4px 0 0', fontSize: '11px', color: '#6b7280', lineHeight: '1.4' }}>
+              {explanation}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
