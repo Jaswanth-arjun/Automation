@@ -1,0 +1,353 @@
+/* CompleteProfileModal Styles & Keyframe Animations */
+
+.cpm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.68);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 20px;
+  animation: cpmFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cpmFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.cpm-modal {
+  position: relative;
+  background: #ffffff;
+  width: 100%;
+  max-width: 480px;
+  border-radius: 24px;
+  padding: 32px 28px 28px;
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(226, 232, 240, 0.8);
+  text-align: center;
+  overflow: hidden;
+  animation: cpmSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cpmSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.cpm-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.cpm-close-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  transform: rotate(90deg);
+}
+
+/* ─── Motion Graphic Container ─── */
+.cpm-graphic-wrap {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Ambient warm radial glow behind the graphic */
+.cpm-graphic-glow {
+  position: absolute;
+  width: 180px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(234, 88, 12, 0.22) 0%, rgba(249, 115, 22, 0.08) 50%, transparent 70%);
+  filter: blur(14px);
+  animation: cpmGlowPulse 3s ease-in-out infinite alternate;
+}
+
+@keyframes cpmGlowPulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
+/* Floating Card Group */
+.cpm-card-float {
+  position: relative;
+  animation: cpmFloat 3.5s ease-in-out infinite;
+}
+
+@keyframes cpmFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Animated Profile Card SVG styling */
+.cpm-svg-card {
+  filter: drop-shadow(0 12px 24px rgba(234, 88, 12, 0.16));
+}
+
+/* Scanning ray animation */
+.cpm-scan-line {
+  animation: cpmScan 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes cpmScan {
+  0% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(50px);
+    opacity: 0.3;
+  }
+}
+
+/* Sparkle floating animations */
+.cpm-sparkle-1 {
+  animation: cpmTwinkle 2s ease-in-out infinite;
+}
+
+.cpm-sparkle-2 {
+  animation: cpmTwinkle 2.4s ease-in-out 0.8s infinite;
+}
+
+.cpm-sparkle-3 {
+  animation: cpmTwinkle 2.2s ease-in-out 1.4s infinite;
+}
+
+@keyframes cpmTwinkle {
+  0%, 100% {
+    transform: scale(0.7) rotate(0deg);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.15) rotate(180deg);
+    opacity: 1;
+  }
+}
+
+/* Pop checkmark badge */
+.cpm-check-badge {
+  animation: cpmPopCheck 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.3s both;
+}
+
+@keyframes cpmPopCheck {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Progress ring animation */
+.cpm-ring-progress {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: cpmDash 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
+}
+
+@keyframes cpmDash {
+  to {
+    stroke-dashoffset: 35;
+  }
+}
+
+/* ─── Modal Typography & Content ─── */
+.cpm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff7ed;
+  border: 1px solid #ffedd5;
+  color: #ea580c;
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  margin-bottom: 12px;
+}
+
+.cpm-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0f172a;
+  margin: 0 0 8px;
+  line-height: 1.25;
+}
+
+.cpm-desc {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #64748b;
+  margin: 0 auto 20px;
+  max-width: 400px;
+}
+
+/* 3 Feature value props */
+.cpm-features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.cpm-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.cpm-feature-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cpm-feature-icon.green {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.cpm-feature-icon.orange {
+  background: #ffedd5;
+  color: #ea580c;
+}
+
+/* Actions */
+.cpm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cpm-primary-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 750;
+  padding: 14px 20px;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 20px -4px rgba(234, 88, 12, 0.4);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cpm-primary-btn:hover {
+  background: linear-gradient(135deg, #c2410c 0%, #ea580c 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -4px rgba(234, 88, 12, 0.5);
+}
+
+.cpm-primary-btn:active {
+  transform: translateY(0);
+}
+
+.cpm-primary-btn svg {
+  transition: transform 0.2s ease;
+}
+
+.cpm-primary-btn:hover svg {
+  transform: translateX(3px);
+}
+
+.cpm-later-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.cpm-later-btn:hover {
+  color: #475569;
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .cpm-modal {
+    padding: 24px 20px 20px;
+    border-radius: 20px;
+  }
+
+  .cpm-title {
+    font-size: 20px;
+  }
+
+  .cpm-desc {
+    font-size: 12.5px;
+  }
+}

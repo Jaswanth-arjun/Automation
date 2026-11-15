@@ -7,6 +7,15 @@ import { profileStore, getUserName, getEmailUsername } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import ApplyOptionsModal from '../components/ApplyOptionsModal';
+import CompleteProfileModal from '../components/CompleteProfileModal';
+
+function isProfileIncomplete(p) {
+  if (!p) return true;
+  const hasName = Boolean(p.fullName && p.fullName.trim() && p.fullName.trim() !== 'Your Name');
+  const hasResume = Boolean(p.resume?.dataUrl || p.resume?.fileName);
+  const hasSkills = Boolean(p.skills && p.skills.length > 0);
+  return !hasName || !hasResume || !hasSkills;
+}
 
 function ScoreCircle({ score = 0 }) {
   const safeScore = Math.max(0, Math.min(100, Math.round(score)));
@@ -82,6 +91,22 @@ export default function Dashboard() {
   const [showJobUrlModal, setShowJobUrlModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [applyingJob, setApplyingJob] = useState(null);
+  const [showProfilePromptModal, setShowProfilePromptModal] = useState(false);
+
+  useEffect(() => {
+    // Check if profile is incomplete and user hasn't dismissed in current session
+    const isDismissed = sessionStorage.getItem('hamzo_profile_modal_dismissed') === 'true';
+    const currentProfile = profileStore.get();
+    if (!isDismissed && isProfileIncomplete(currentProfile)) {
+      const timer = setTimeout(() => setShowProfilePromptModal(true), 650);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const handleDismissProfileModal = () => {
+    sessionStorage.setItem('hamzo_profile_modal_dismissed', 'true');
+    setShowProfilePromptModal(false);
+  };
 
   useEffect(() => {
     adminJobStore.syncWithBackend();
@@ -223,6 +248,12 @@ export default function Dashboard() {
         job={applyingJob}
         isOpen={Boolean(applyingJob)}
         onClose={() => setApplyingJob(null)}
+      />
+
+      {/* Complete Profile First-Time Modal */}
+      <CompleteProfileModal
+        isOpen={showProfilePromptModal}
+        onClose={handleDismissProfileModal}
       />
     </div>
   );
