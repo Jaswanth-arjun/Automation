@@ -272,19 +272,18 @@ export function buildActivityRows(sources = {}, overlay = readOverlay()) {
     (a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime(),
   );
 
+  // 1. Direct 1-to-1 match: email recipient matches reply sender
+  const unassignedReplies = [];
   replies.forEach((mail) => {
     const sender = norm(mail.senderEmail);
-    const subject = stripSubject(mail.subject);
-    const candidates = sortedSent.filter((email) => {
-      if (replyBySentId.has(email.id)) return false;
-      return (
-        (sender && norm(email.recipient) === sender) ||
-        (subject && stripSubject(email.subject) === subject)
-      );
-    });
-    if (!candidates.length) return;
-    const direct = candidates.find((email) => norm(email.recipient) === sender);
-    replyBySentId.set((direct || candidates[0]).id, mail);
+    const directSent = sortedSent.find(
+      (email) => !replyBySentId.has(email.id) && sender && norm(email.recipient) === sender,
+    );
+    if (directSent) {
+      replyBySentId.set(directSent.id, mail);
+    } else {
+      unassignedReplies.push(mail);
+    }
   });
 
   const bounceFor = (email) => {
@@ -333,6 +332,37 @@ export function buildActivityRows(sources = {}, overlay = readOverlay()) {
         fromEmail: reply.senderEmail || '',
         receivedAt: reply.receivedAt || reply.sentAt,
         threadId: reply.threadId || '',
+      };
+    }
+  });
+
+  // 2. Separate contact for replies from hiring managers whose recipient was different
+  unassignedReplies.forEach((mail) => {
+    const subject = stripSubject(mail.subject);
+    const matchingSent = sortedSent.find((email) => subject && stripSubject(email.subject) === subject);
+    if (matchingSent) {
+      const row = ensureRow(matchingSent.company, matchingSent.jobTitle);
+      const contactId = `email:${norm(mail.senderEmail) || mail.id}`;
+      let contact = row.contacts.find((item) => item.id === contactId);
+      if (!contact) {
+        contact = {
+          id: contactId,
+          name: mail.senderName || mail.senderEmail || 'Sender',
+          email: mail.senderEmail || '',
+          title: 'Hiring Team',
+          channel: 'email',
+          emails: [],
+        };
+        row.contacts.push(contact);
+      }
+      contact.reply = {
+        id: mail.id,
+        subject: mail.subject || '',
+        body: mail.bodyText || mail.snippet || '',
+        from: mail.senderName || mail.senderEmail || 'Recipient',
+        fromEmail: mail.senderEmail || '',
+        receivedAt: mail.receivedAt || mail.sentAt,
+        threadId: mail.threadId || '',
       };
     }
   });

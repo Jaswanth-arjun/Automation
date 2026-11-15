@@ -331,40 +331,50 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
           </button>
         </div>
 
-        <div className="atd-body">
-          <div className="atd-contacts" role="tabpanel">
-            {contacts.length === 0 ? (
-              <p className="atd-none">
-                {tab === 'email'
-                  ? 'No email outreach yet for this role.'
-                  : 'No LinkedIn referrals yet for this company.'}
-              </p>
-            ) : (
-              contacts.map((contact) => {
-                const label = contactStatus(contact);
-                return (
-                  <button
-                    key={contact.id}
-                    className={`atd-contact ${selectedContact?.id === contact.id ? 'active' : ''}`}
-                    onClick={() => setActiveId(contact.id)}
-                  >
-                    <span className="atd-avatar">{String(contact.name || '?').charAt(0).toUpperCase()}</span>
-                    <span className="atd-contact-main">
-                      <strong>{contact.name}</strong>
-                      <small>{contact.email || contact.title || 'LinkedIn member'}</small>
-                    </span>
-                    <span className={`atd-pill s-${statusClass(label)}`}>{label}</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
+        <div className="atd-body atd-body-free">
+          {/* Spacious Horizontal Contact Switcher (Replaces cramped vertical sidebar) */}
+          {contacts.length > 1 && (
+            <div className="atd-contact-bar">
+              <span className="atd-contact-bar-label">Contact:</span>
+              <div className="atd-contact-pill-list">
+                {contacts.map((contact) => {
+                  const label = contactStatus(contact);
+                  const isSelected = selectedContact?.id === contact.id;
+                  return (
+                    <button
+                      key={contact.id}
+                      className={`atd-contact-pill ${isSelected ? 'active' : ''}`}
+                      onClick={() => setActiveId(contact.id)}
+                      title={`View conversation with ${contact.name}`}
+                    >
+                      <span className="atd-pill-avatar">
+                        {String(contact.name || '?').charAt(0).toUpperCase()}
+                      </span>
+                      <span className="atd-pill-name">{contact.name}</span>
+                      <span className={`atd-pill-badge s-${statusClass(label)}`}>
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-          <div className="atd-detail">
+          <div className="atd-detail atd-detail-full">
             {notice && <div className="atd-note success"><CheckCircle2 size={14} /> {notice}</div>}
             {error && <div className="atd-note error"><AlertCircle size={14} /> {error}</div>}
 
-            {!selectedContact ? (
+            {contacts.length === 0 ? (
+              <div className="atd-empty-detail">
+                <Mail size={26} />
+                <p>
+                  {tab === 'email'
+                    ? 'No email outreach yet for this role.'
+                    : 'No LinkedIn referrals yet for this company.'}
+                </p>
+              </div>
+            ) : !selectedContact ? (
               <div className="atd-empty-detail">
                 <Mail size={26} />
                 <p>Select a contact to see the conversation and send a reply.</p>
