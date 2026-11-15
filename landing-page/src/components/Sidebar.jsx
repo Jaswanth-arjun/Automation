@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Briefcase,
+  Bookmark,
   User,
   FileText,
   FolderOpen,
@@ -40,6 +41,7 @@ const navSections = [
     items: [
       { to: '/dashboard', icon: LayoutDashboard, label: 'Home', end: true },
       { to: '/dashboard/jobs', icon: Briefcase, label: 'Jobs' },
+      { to: '/dashboard/saved', icon: Bookmark, label: 'Saved Jobs' },
       { to: '/dashboard/applications', icon: FolderOpen, label: 'Job Tracker' },
       { to: '/dashboard/resume', icon: FileText, label: 'Resume' },
       { to: '/dashboard/profile', icon: User, label: 'Profile' },

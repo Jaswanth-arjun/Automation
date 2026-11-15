@@ -16,6 +16,7 @@ import Apply from './pages/Apply';
 import MailAutomation from './pages/MailAutomation';
 import LinkedInAutomation from './pages/LinkedInAutomation';
 import AdminJobs from './pages/AdminJobs';
+import SavedJobs from './pages/SavedJobs';
 import VideoLoader from './components/VideoLoader';
 
 function ProtectedRoute({ children }) {
@@ -42,6 +43,8 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="jobs" element={<Jobs />} />
             <Route path="jobs/:id" element={<JobDetail />} />
+            <Route path="saved" element={<SavedJobs />} />
+            <Route path="saved-jobs" element={<Navigate to="/dashboard/saved" replace />} />
             <Route path="profile" element={<Profile />} />
             <Route path="resume" element={<ResumeManager />} />
             <Route path="applications" element={<Applications />} />

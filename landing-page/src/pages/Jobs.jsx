@@ -6,6 +6,7 @@ import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
+import { savedJobsStore } from '../lib/savedJobsStore';
 
 const JOB_TYPES = ['All', 'Full Time', 'Internship', 'Part Time', 'Contract'];
 
@@ -13,14 +14,30 @@ export default function Jobs() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
   const [sortBy, setSortBy] = useState('match');
-  const [savedJobs, setSavedJobs] = useState(() => {
-    const s = localStorage.getItem('wayin_saved_jobs');
-    return s ? JSON.parse(s) : [];
-  });
+  const [savedJobs, setSavedJobs] = useState(() => savedJobsStore.get());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [adminJobs, setAdminJobs] = useState(() => adminJobStore.getWithFreshDates());
 
-  const profile = profileStore.get();
+  const [profile, setProfile] = useState(() => profileStore.get());
+  const [resumeTick, setResumeTick] = useState(0);
+
+  useEffect(() => {
+    const refreshProfile = () => setProfile(profileStore.get());
+    const refreshSaved = () => setSavedJobs(savedJobsStore.get());
+    const bump = () => setResumeTick((value) => value + 1);
+
+    window.addEventListener('profile_updated', refreshProfile);
+    window.addEventListener('storage', refreshProfile);
+    window.addEventListener('resumes_updated', bump);
+    window.addEventListener('saved_jobs_updated', refreshSaved);
+
+    return () => {
+      window.removeEventListener('profile_updated', refreshProfile);
+      window.removeEventListener('storage', refreshProfile);
+      window.removeEventListener('resumes_updated', bump);
+      window.removeEventListener('saved_jobs_updated', refreshSaved);
+    };
+  }, []);
 
   // Listen for admin job updates and sync with backend API
   useEffect(() => {
@@ -33,7 +50,10 @@ export default function Jobs() {
   // Merge admin jobs + demo jobs (admin first)
   const allJobs = useMemo(() => [...adminJobs, ...DEMO_JOBS], [adminJobs]);
 
-  const scoredJobs = useMemo(() => computeJobScores(profile || {}, allJobs), [profile, allJobs]);
+  const scoredJobs = useMemo(
+    () => computeJobScores(profile || {}, allJobs, { userId: profile?.email || 'anon' }),
+    [profile, allJobs, resumeTick],
+  );
 
   const filtered = useMemo(() => {
     let list = scoredJobs;
@@ -53,7 +73,14 @@ export default function Jobs() {
     }
 
     if (sortBy === 'match') {
-      list = [...list].sort((a, b) => (b.matchResult?.score || 0) - (a.matchResult?.score || 0));
+      // Scored jobs first, highest score first; unscored jobs keep posting order.
+      list = [...list].sort((a, b) => {
+        const aScored = typeof a.matchResult?.score === 'number';
+        const bScored = typeof b.matchResult?.score === 'number';
+        if (aScored !== bScored) return aScored ? -1 : 1;
+        if (aScored && bScored) return b.matchResult.score - a.matchResult.score;
+        return (a.postedDaysAgo ?? 99) - (b.postedDaysAgo ?? 99);
+      });
     } else if (sortBy === 'recent') {
       list = [...list].sort((a, b) => (a.postedDaysAgo || 99) - (b.postedDaysAgo || 99));
     }
@@ -71,9 +98,7 @@ export default function Jobs() {
   }, [scoredJobs, search, typeFilter, sortBy]);
 
   const toggleSave = (id) => {
-    const next = savedJobs.includes(id) ? savedJobs.filter(x => x !== id) : [...savedJobs, id];
-    setSavedJobs(next);
-    localStorage.setItem('wayin_saved_jobs', JSON.stringify(next));
+    savedJobsStore.toggle(id);
   };
 
   return (

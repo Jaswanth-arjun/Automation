@@ -3245,6 +3245,54 @@ nav.mobile-nav {
   font-weight: 500;
 }
 
+.match-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: auto;
+}
+
+.match-card-actions .match-card-apply-btn {
+  flex: 1;
+  margin-top: 0;
+  height: 38px;
+}
+
+.match-card-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #ea580c;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.match-card-save-btn:hover {
+  background: #ffedd5;
+  border-color: #ea580c;
+  color: #c2410c;
+  transform: translateY(-1px);
+}
+
+.match-card-save-btn.saved {
+  background: #ea580c;
+  border-color: #ea580c;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.25);
+}
+
+.match-card-save-btn:active {
+  transform: translateY(0);
+}
+
 .match-card-apply-btn {
   width: 100%;
   display: inline-flex;

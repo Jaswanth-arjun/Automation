@@ -1,10 +1,11 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Link2, Crown, X, Check, ExternalLink } from 'lucide-react';
+import { ArrowRight, Link2, Crown, X, Check, ExternalLink, Bookmark } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore, getUserName, getEmailUsername } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
+import { savedJobsStore } from '../lib/savedJobsStore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import ApplyOptionsModal from '../components/ApplyOptionsModal';
 import CompleteProfileModal from '../components/CompleteProfileModal';
@@ -18,7 +19,31 @@ function isProfileIncomplete(p) {
   return !hasName || !hasResume || !hasSkills;
 }
 
-function ScoreCircle({ score = 0 }) {
+function ScoreCircle({ score = null }) {
+  if (score === null || score === undefined) {
+    return (
+      <div
+        className="score-circle-badge is-empty"
+        title="Complete Your Profile to Calculate Match Score"
+        style={{
+          width: 42,
+          height: 42,
+          borderRadius: '50%',
+          border: '2px dashed #d8d5cc',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#a8a29a',
+          fontSize: 11,
+          fontWeight: 800,
+          flexShrink: 0,
+          background: '#faf9f6',
+        }}
+      >
+        —
+      </div>
+    );
+  }
   const safeScore = Math.max(0, Math.min(100, Math.round(score)));
   const radius = 15;
   const stroke = 3.5;
@@ -132,8 +157,42 @@ export default function Dashboard() {
 
   const displayName = getUserName(user, profile);
 
-  const scored = useMemo(() => computeJobScores(profile || {}, adminJobs), [profile, adminJobs]);
-  const topMatches = [...scored].sort((a, b) => (b.matchResult?.score || 0) - (a.matchResult?.score || 0)).slice(0, 4);
+  const [resumeTick, setResumeTick] = useState(0);
+  const [savedJobIds, setSavedJobIds] = useState(() => savedJobsStore.get());
+
+  useEffect(() => {
+    const handleSavedUpdated = () => setSavedJobIds(savedJobsStore.get());
+    window.addEventListener('saved_jobs_updated', handleSavedUpdated);
+    window.addEventListener('storage', handleSavedUpdated);
+    return () => {
+      window.removeEventListener('saved_jobs_updated', handleSavedUpdated);
+      window.removeEventListener('storage', handleSavedUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
+    const bump = () => setResumeTick((value) => value + 1);
+    window.addEventListener('resumes_updated', bump);
+    return () => window.removeEventListener('resumes_updated', bump);
+  }, []);
+
+  const scored = useMemo(
+    () => computeJobScores(profile || {}, adminJobs, { userId: user?.id || user?.email || 'anon' }),
+    [profile, adminJobs, user, resumeTick],
+  );
+  const scoredOnly = scored.filter(
+    (job) => job.matchResult?.status === 'scored' || job.matchResult?.status === 'ineligible',
+  );
+  const matchesLocked = scored.length > 0 && scoredOnly.length === 0;
+  const topMatches = [...scored]
+    .sort((a, b) => {
+      const aScored = a.matchResult?.status === 'scored' || a.matchResult?.status === 'ineligible';
+      const bScored = b.matchResult?.status === 'scored' || b.matchResult?.status === 'ineligible';
+      if (aScored !== bScored) return aScored ? -1 : 1;
+      if (aScored && bScored) return (b.matchResult?.score || 0) - (a.matchResult?.score || 0);
+      return (a.postedDaysAgo ?? 99) - (b.postedDaysAgo ?? 99);
+    })
+    .slice(0, 4);
 
   return (
     <div className="page-overview">
@@ -156,6 +215,15 @@ export default function Dashboard() {
             View all <ArrowRight size={14} />
           </button>
         </div>
+        {matchesLocked && (
+          <div className="match-locked-banner">
+            <span>
+              Complete Your Profile to Calculate Match Score — scores are generated only from your own resume,
+              skills, education and eligibility.
+            </span>
+            <button onClick={() => navigate('/dashboard/profile')}>Complete profile</button>
+          </div>
+        )}
         <div className="top-matches-grid">
           {topMatches.length === 0 && (
             <p style={{ color: '#718096', fontSize: '14px' }}>No jobs posted yet. Jobs an admin posts will show up here.</p>
@@ -164,21 +232,41 @@ export default function Dashboard() {
             <article key={job.id} className="match-card" onClick={() => navigate(`/dashboard/jobs/${job.id}`)}>
               <div className="match-card-header-row">
                 <div className="job-card-company-mark">{job.companyMark || job.company?.[0]?.toUpperCase() || 'J'}</div>
-                <ScoreCircle score={job.matchResult?.score || 0} />
+                <ScoreCircle
+                  score={
+                    job.matchResult?.status === 'scored' || job.matchResult?.status === 'ineligible'
+                      ? job.matchResult.score
+                      : null
+                  }
+                />
               </div>
               <div className="match-card-body">
                 <h4 title={job.title}>{job.title}</h4>
                 <p>{job.company} · {job.location}</p>
               </div>
-              <button
-                className="match-card-apply-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setApplyingJob(job);
-                }}
-              >
-                Apply <ArrowRight size={13} />
-              </button>
+              <div className="match-card-actions">
+                <button
+                  className="match-card-apply-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setApplyingJob(job);
+                  }}
+                >
+                  Apply <ArrowRight size={13} />
+                </button>
+                <button
+                  type="button"
+                  className={`match-card-save-btn ${savedJobIds.includes(job.id) ? 'saved' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    savedJobsStore.toggle(job.id);
+                  }}
+                  title={savedJobIds.includes(job.id) ? 'Remove from saved' : 'Save job'}
+                  aria-label="Save job"
+                >
+                  <Bookmark size={15} fill={savedJobIds.includes(job.id) ? 'currentColor' : 'none'} />
+                </button>
+              </div>
             </article>
           ))}
         </div>
