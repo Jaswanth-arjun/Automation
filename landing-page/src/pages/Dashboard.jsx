@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Sparkles, Link2, Bot, Crown, ChevronRight, X, Check, ExternalLink } from 'lucide-react';
+import { ArrowRight, Sparkles, Link2, Crown, X, Check, ExternalLink } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore, getUserName, getEmailUsername } from '../lib/api';
@@ -49,42 +49,6 @@ export default function Dashboard() {
           <span>Add Job Link</span>
         </button>
       </section>
-
-      {/* 3 Quick Action Cards */}
-      <div className="dash-quick-actions">
-        <div className="quick-action-card" onClick={() => setShowJobUrlModal(true)}>
-          <div className="qa-icon-wrap qa-blue">
-            <Link2 size={22} />
-          </div>
-          <div className="qa-content">
-            <strong className="qa-title">Add Job Link</strong>
-            <span className="qa-subtitle">Paste a job URL to analyze</span>
-          </div>
-          <ChevronRight size={18} className="qa-arrow" />
-        </div>
-
-        <div className="quick-action-card" onClick={() => navigate('/dashboard/linkedin')}>
-          <div className="qa-icon-wrap qa-green">
-            <Bot size={22} />
-          </div>
-          <div className="qa-content">
-            <strong className="qa-title">Run Agent Anywhere</strong>
-            <span className="qa-subtitle">Start automation from anywhere</span>
-          </div>
-          <ChevronRight size={18} className="qa-arrow" />
-        </div>
-
-        <div className="quick-action-card" onClick={() => setShowUpgradeModal(true)}>
-          <div className="qa-icon-wrap qa-purple">
-            <Crown size={22} />
-          </div>
-          <div className="qa-content">
-            <strong className="qa-title">Upgrade Plan</strong>
-            <span className="qa-subtitle">Unlock more automation</span>
-          </div>
-          <ChevronRight size={18} className="qa-arrow" />
-        </div>
-      </div>
 
       <section className="dash-section">
         <div className="section-header">
