@@ -8,7 +8,29 @@ export const adminJobStore = {
   getAll() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      const cleaned = parsed.filter((j) => {
+        if (!j) return false;
+        const comp = String(j.company || '').toLowerCase().trim();
+        const id = String(j.id || '').trim();
+        if (id === '1' || id === '2' || id === '3' || id === '4') return false;
+        if (
+          comp === 'northstar labs' ||
+          comp === 'pixelcraft studio' ||
+          comp === 'cloudsync technologies' ||
+          comp === 'athena ai'
+        ) {
+          return false;
+        }
+        return true;
+      });
+      if (cleaned.length !== parsed.length) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+        } catch {}
+      }
+      return cleaned;
     } catch {
       return [];
     }
@@ -28,6 +50,10 @@ export const adminJobStore = {
       postedDaysAgo = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
     }
 
+    const locationValue = filters.location || apiJob.location
+      || (filters.workMode && filters.workMode !== 'Remote' ? filters.workMode : '')
+      || 'India';
+
     return {
       id: String(apiJob.id || 'api_' + Math.random().toString(36).slice(2)),
       title: apiJob.role || apiJob.title || 'Software Engineer',
@@ -35,13 +61,15 @@ export const adminJobStore = {
       companyLogoUrl: apiJob.logo || '',
       location: (filters.workMode === 'Remote' || String(apiJob.location || '').toLowerCase().includes('remote'))
         ? 'Remote'
-        : (apiJob.location || 'India'),
-      category: filters.experience || filters.visibility || 'Freshers',
-      experienceLabel: '0–1 years',
-      experienceMin: 0,
-      experienceMax: 1,
+        : locationValue,
+      category: filters.category || filters.experience || filters.visibility || 'Freshers',
+      experienceLabel: filters.experienceLabel || '0–1 years',
+      experienceMin: Number(filters.experienceMin ?? 0),
+      experienceMax: Number(filters.experienceMax ?? 1),
       type: filters.type || 'Full Time',
       applyLink: apiJob.applyLink || '',
+      sourceUrl: apiJob.sourceUrl || '',
+      postedBy: apiJob.postedBy || null,
       requiredSkills: mustHave,
       preferredSkills: goodToHave,
       skills: allSkills.length ? allSkills : ['Software Development'],
@@ -104,11 +132,18 @@ export const adminJobStore = {
         visibility: 'Confidential',
         workMode: (job.location || '').includes('Remote') ? 'Remote' : (job.location || 'India'),
         type: job.type || 'Full Time',
+        category: job.category || 'Freshers',
+        location: job.location || 'India',
+        experienceLabel: job.experienceLabel || '0–1 years',
+        experienceMin: job.experienceMin ?? 0,
+        experienceMax: job.experienceMax ?? 1,
       },
       mustHaveSkills: job.requiredSkills || [],
       goodToHaveSkills: job.preferredSkills || [],
       applyLink: job.applyLink || '',
       description: job.description || '',
+      sourceUrl: job.sourceUrl || '',
+      postedBy: job.postedBy || null,
     };
 
     try {
@@ -145,6 +180,24 @@ export const adminJobStore = {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
     window.dispatchEvent(new Event('admin_jobs_updated'));
     return newJob;
+  },
+
+  /**
+   * Read a public job link into a structured draft for the admin form.
+   * Returns the draft job plus the resolved source URL.
+   */
+  async importFromLink(url) {
+    const res = await fetch('/api/jobs/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (!res.ok || !data?.job) {
+      throw new Error(data?.error || `That job link could not be read (${res.status}).`);
+    }
+    return data;
   },
 
   async remove(id) {
@@ -188,7 +241,60 @@ export const adminJobStore = {
     const all = this.getAll().map((j) => (String(j.id) === stringId ? { ...j, ...updates } : j));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
     window.dispatchEvent(new Event('admin_jobs_updated'));
+
+    // Persist the edit server-side too, so it survives a reload on any device.
+    const edited = all.find((j) => String(j.id) === stringId);
+    if (edited) {
+      fetch(`/api/jobs/${encodeURIComponent(stringId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          logo: edited.companyLogoUrl || '',
+          role: edited.title,
+          company: edited.company,
+          filters: {
+            experience: edited.category || 'Freshers',
+            visibility: 'Confidential',
+            workMode: (edited.location || '').includes('Remote') ? 'Remote' : (edited.location || 'India'),
+            type: edited.type || 'Full Time',
+            category: edited.category || 'Freshers',
+            location: edited.location || 'India',
+            experienceLabel: edited.experienceLabel || '0–1 years',
+            experienceMin: edited.experienceMin ?? 0,
+            experienceMax: edited.experienceMax ?? 1,
+          },
+          mustHaveSkills: edited.requiredSkills || [],
+          goodToHaveSkills: edited.preferredSkills || [],
+          applyLink: edited.applyLink || '',
+          description: edited.description || '',
+          sourceUrl: edited.sourceUrl || '',
+        }),
+      }).catch((err) => console.warn('Backend job update failed:', err.message));
+    }
+
     return all;
+  },
+
+  /** Give ownership of legacy (owner-less) postings to the given user. */
+  async claimOwnerless(owner) {
+    if (!owner || (!owner.id && !owner.email)) return 0;
+    const all = this.getAll();
+    const legacy = all.filter((job) => !job.postedBy);
+    if (!legacy.length) return 0;
+
+    const next = all.map((job) => (job.postedBy ? job : { ...job, postedBy: owner }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+
+    await Promise.all(legacy.map((job) =>
+      fetch(`/api/jobs/${encodeURIComponent(job.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postedBy: owner }),
+      }).catch(() => null),
+    ));
+
+    window.dispatchEvent(new Event('admin_jobs_updated'));
+    return legacy.length;
   },
 
   getWithFreshDates() {
