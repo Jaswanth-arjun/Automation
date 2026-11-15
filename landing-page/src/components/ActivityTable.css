@@ -222,19 +222,21 @@
 }
 
 .activity-list-scroll {
-  min-width: 980px;
+  min-width: 940px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-/* Grid layout definition shared identically between header and card rows */
+/* Grid layout definition shared identically between header and card rows.
+   One template, one gap, one padding — so every value sits in a straight
+   line directly under its heading. The role column absorbs the free space. */
 .activity-grid-header,
 .activity-card-row {
   display: grid;
-  grid-template-columns: 240px 1.5fr 125px 105px 115px 115px 80px 44px;
+  grid-template-columns: 190px minmax(140px, 1fr) 104px 104px 104px 100px 66px 36px;
   align-items: center;
-  column-gap: 16px;
+  column-gap: 14px;
   padding: 14px 20px;
 }
 
@@ -275,7 +277,7 @@
 }
 
 .col-h.col-status {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* 2. Card row */
@@ -325,7 +327,7 @@
 }
 
 .col-cell.col-status {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* Company */
@@ -845,7 +847,7 @@
   gap: 8px;
 }
 
-.activity-card-row {
+.activity-card-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -853,11 +855,11 @@
   font-size: 11.5px;
 }
 
-.activity-card-row span {
+.activity-card-meta span {
   color: var(--muted);
 }
 
-.activity-card-row strong {
+.activity-card-meta strong {
   text-align: right;
   font-weight: 700;
   color: #2f3138;
@@ -1696,7 +1698,7 @@
     font-size: 15px;
   }
 
-  .activity-table-wrap {
+  .activity-list-container {
     display: none;
   }
 

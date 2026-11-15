@@ -253,7 +253,7 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                 <div className="col-h col-company">Company</div>
                 <div className="col-h col-role">Role</div>
                 <div className="col-h col-email"><Mail size={12} /> Email</div>
-                <div className="col-h col-outreach"><LinkedInIcon size={12} /> Outreach</div>
+                <div className="col-h col-outreach"><LinkedInIcon size={12} /> LinkedIn</div>
                 <div className="col-h col-responses">Responses</div>
                 <div className="col-h col-status">Status</div>
                 <div className="col-h col-time"><Clock size={12} /> Last</div>
@@ -327,16 +327,16 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                       {/* 4. Outreach Column (LinkedIn Sent / Seen) */}
                       <div className="col-cell col-outreach">
                         <div className="row-stacked-stat">
-                          <span><b>{row.liSent || (hasReply ? 24 : 0)}</b> sent</span>
-                          <span><b>{row.liSeen || (hasReply ? 1 : 0)}</b> seen</span>
+                          <span><b>{row.liSent}</b> sent</span>
+                          <span><b>{row.liSeen}</b> seen</span>
                         </div>
                       </div>
 
                       {/* 5. Responses Column (LinkedIn Accepted / Replied) */}
                       <div className="col-cell col-responses">
                         <div className="row-stacked-stat">
-                          <span><b>{row.liAccepted || (hasReply ? 5 : 0)}</b> accepted</span>
-                          <span className={row.liReplied || hasReply ? 'is-hot' : ''}><b>{row.liReplied || (hasReply ? 5 : 0)}</b> replied</span>
+                          <span className={row.liAccepted ? 'is-good' : ''}><b>{row.liAccepted}</b> accepted</span>
+                          <span className={row.liReplied ? 'is-hot' : ''}><b>{row.liReplied}</b> replied</span>
                         </div>
                       </div>
 
@@ -408,16 +408,16 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
 
                   {open && (
                     <div className="activity-card-detail">
-                      <div className="activity-card-row">
+                      <div className="activity-card-meta">
                         <span>LinkedIn</span>
                         <strong>{row.liAccepted} accepted · {row.liSeen} seen · {row.liReplied} replied</strong>
                       </div>
-                      <div className="activity-card-row">
+                      <div className="activity-card-meta">
                         <span>Application</span>
                         <strong>{row.applicationStatus}</strong>
                       </div>
                       {row.matchScore !== undefined && (
-                        <div className="activity-card-row">
+                        <div className="activity-card-meta">
                           <span>Match</span>
                           <strong>{Math.round(row.matchScore)}%</strong>
                         </div>
