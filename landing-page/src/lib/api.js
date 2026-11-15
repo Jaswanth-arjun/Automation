@@ -127,60 +127,82 @@ export const profileStore = {
   },
 };
 
-export function getEmailUsername(user, profile) {
+export function formatAccountName(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let str = raw.trim();
+  if (str.includes('@')) {
+    str = str.split('@')[0];
+  }
+
+  // If already a clean spaced name without numbers (e.g. "Nelluru Jaswanth"), return capitalized words
+  if (!/\d/.test(str) && str.includes(' ')) {
+    return str
+      .split(/\s+/)
+      .map((w) => (w.toLowerCase() === 'nlr' ? 'Nelluru' : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+      .join(' ');
+  }
+
+  // Remove trailing years/digits (e.g. 2004, 123, 20)
+  str = str.replace(/\d+$/g, '').replace(/^[._-]+|[._-]+$/g, '');
+
+  // If there are separators (. - _)
+  if (/[._-]/.test(str)) {
+    const parts = str.split(/[._-]+/).filter(Boolean);
+    return parts
+      .map((part) => {
+        const lower = part.toLowerCase();
+        if (lower === 'nlr') return 'Nelluru';
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      })
+      .join(' ');
+  }
+
+  // If no separators, detect common name roots:
+  const lower = str.toLowerCase();
+  if (lower.startsWith('nlr') && lower.length > 3) {
+    const rest = lower.slice(3);
+    return 'Nelluru ' + rest.charAt(0).toUpperCase() + rest.slice(1);
+  }
+  if (lower.startsWith('nelluru') && lower.length > 7) {
+    const rest = lower.slice(7);
+    return 'Nelluru ' + rest.charAt(0).toUpperCase() + rest.slice(1);
+  }
+  if (lower.startsWith('jaswanth') && lower.length > 8) {
+    const rest = lower.slice(8);
+    return 'Jaswanth ' + rest.charAt(0).toUpperCase() + rest.slice(1);
+  }
+  if (lower.startsWith('jaswant') && lower.length > 7) {
+    const rest = lower.slice(7);
+    return 'Jaswanth ' + rest.charAt(0).toUpperCase() + rest.slice(1);
+  }
+  if (lower.startsWith('puchakayala') && lower.length > 11) {
+    const rest = lower.slice(11);
+    return 'Puchakayala ' + rest.charAt(0).toUpperCase() + rest.slice(1);
+  }
+
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+export function getUserName(user, profile) {
   const savedProfile = profile !== undefined ? profile : profileStore.get();
-  
-  // 1. Direct email from user object or saved profile
-  const rawEmail = user?.email || user?.gmailEmail || savedProfile?.email || '';
-  if (rawEmail && rawEmail.includes('@')) {
-    const handle = rawEmail.split('@')[0].trim();
-    if (handle) return handle;
-  }
-
-  // 2. If displayName is an email address
-  if (user?.displayName && user.displayName.includes('@')) {
-    const handle = user.displayName.split('@')[0].trim();
-    if (handle) return handle;
-  }
-
-  // 3. Fallback to displayName if available
-  if (user?.displayName && user.displayName.trim()) {
-    return user.displayName.trim();
-  }
-
-  // 4. Fallback to saved profile full name
   if (savedProfile?.fullName && savedProfile.fullName.trim() && savedProfile.fullName.trim() !== 'Your Name') {
     return savedProfile.fullName.trim();
+  }
+
+  if (user?.displayName && user.displayName.trim() && !user.displayName.includes('@')) {
+    return formatAccountName(user.displayName);
+  }
+
+  const email = user?.email || user?.gmailEmail || savedProfile?.email || '';
+  if (email) {
+    return formatAccountName(email);
   }
 
   return 'User';
 }
 
-export function getUserName(user, profile) {
-  const savedProfile = profile !== undefined ? profile : profileStore.get();
-  if (savedProfile?.fullName && savedProfile.fullName.trim()) {
-    return savedProfile.fullName.trim();
-  }
-
-  if (user?.displayName) {
-    const dName = user.displayName.trim();
-    const isEmailHandle = user.email && (dName === user.email || dName === user.email.split('@')[0] || (/^[a-z0-9._-]+$/i.test(dName) && /\d+/.test(dName)));
-    if (!isEmailHandle && !dName.includes('@')) {
-      return dName;
-    }
-  }
-
-  const handle = user?.displayName || user?.email?.split('@')[0] || savedProfile?.email?.split('@')[0] || '';
-  if (handle) {
-    const rawParts = handle.replace(/\d+/g, '').split(/[._-]+/).filter(Boolean);
-    const validParts = rawParts.filter(p => p.length > 2 || rawParts.length === 1);
-    const partsToUse = validParts.length > 0 ? validParts : rawParts;
-    if (partsToUse.length > 0) {
-      return partsToUse.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
-    }
-  }
-
-  return 'User';
+export function getEmailUsername(user, profile) {
+  return getUserName(user, profile);
 }
 
 

@@ -37,6 +37,18 @@ export default function AuthCallback() {
       localStorage.removeItem('mailmind_gmail_connected');
       localStorage.removeItem('mailmind_gmail_email');
 
+      if (name) {
+        try {
+          const rawP = localStorage.getItem('wayin_profile');
+          const p = rawP ? JSON.parse(rawP) : {};
+          if (!p.fullName || p.fullName === 'Your Name') {
+            p.fullName = name;
+            p.email = email;
+            localStorage.setItem('wayin_profile', JSON.stringify(p));
+          }
+        } catch {}
+      }
+
       handleCallback('google_oauth_session').then(() => {
         navigate('/dashboard', { replace: true });
       });
@@ -50,14 +62,27 @@ export default function AuthCallback() {
         ...(existing || {}),
         id: existing?.id || `google-${email}`,
         email: existing?.email || email,
-        displayName: existing?.displayName || email.split('@')[0],
-        avatarUrl: existing?.avatarUrl || '',
+        displayName: name || existing?.displayName || email.split('@')[0],
+        avatarUrl: picture || existing?.avatarUrl || '',
         gmailConnected: true,
         gmailEmail: email,
       };
       localStorage.setItem('wayin_user', JSON.stringify(sessionUser));
       localStorage.setItem('mailmind_gmail_connected', 'true');
       localStorage.setItem('mailmind_gmail_email', email);
+
+      if (name) {
+        try {
+          const rawP = localStorage.getItem('wayin_profile');
+          const p = rawP ? JSON.parse(rawP) : {};
+          if (!p.fullName || p.fullName === 'Your Name') {
+            p.fullName = name;
+            p.email = email;
+            localStorage.setItem('wayin_profile', JSON.stringify(p));
+          }
+        } catch {}
+      }
+
       if (!localStorage.getItem('mailmind_token')) {
         localStorage.setItem('mailmind_token', 'google_oauth_session');
       }

@@ -1699,7 +1699,14 @@ function normalizeAuthEmail(value) {
 }
 
 function createOtpUser(email) {
-  const displayName = email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  let handle = email.split('@')[0].replace(/\d+$/g, '').trim();
+  let displayName = handle.replace(/[._-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+  const lower = displayName.toLowerCase();
+  if (lower.startsWith('nlr ') || lower === 'nlr') {
+    displayName = 'Nelluru' + (displayName.length > 3 ? displayName.slice(3) : ' Jaswanth');
+  } else if (lower.startsWith('nlrjaswanth')) {
+    displayName = 'Nelluru Jaswanth';
+  }
   return {
     id: `user-${crypto.createHash('sha256').update(email).digest('hex').slice(0, 16)}`,
     email,
@@ -1851,6 +1858,8 @@ app.get('/api/gmail/callback', async (req, res) => {
       refresh_token: tokenData.refresh_token || currentTokens.refresh_token,
       expiry_date: Date.now() + (tokenData.expires_in * 1000),
       email: userEmail,
+      displayName: displayName || currentTokens.displayName || '',
+      picture: avatarUrl || currentTokens.picture || '',
       connected: true,
       connectedAt: new Date().toISOString()
     };
@@ -1858,7 +1867,13 @@ app.get('/api/gmail/callback', async (req, res) => {
     writeGmailTokens(updatedTokens);
     process.env.GMAIL_USER = userEmail;
 
-    const frontendUrl = `${FRONTEND_URL}/auth/callback?connected=true&email=${encodeURIComponent(userEmail)}`;
+    const connectedParams = new URLSearchParams({
+      connected: 'true',
+      email: userEmail,
+      name: displayName,
+      picture: avatarUrl
+    });
+    const frontendUrl = `${FRONTEND_URL}/auth/callback?${connectedParams.toString()}`;
     res.redirect(frontendUrl);
   } catch (err) {
     console.error('Google Callback Error:', err);
@@ -1878,6 +1893,44 @@ app.post('/api/gmail/disconnect', (req, res) => {
   res.json({ ok: true, connected: false });
 });
 
+app.get('/api/dashboard', async (req, res) => {
+  const tokens = readGmailTokens();
+  let displayName = tokens.displayName || '';
+  let avatarUrl = tokens.picture || '';
+  let email = tokens.email || '';
+
+  if (tokens.connected && (!displayName || !email)) {
+    try {
+      const token = await getValidAccessToken();
+      if (token) {
+        const info = await fetchGoogleUserInfo(token);
+        if (info.name) displayName = info.name;
+        if (info.email) email = info.email;
+        if (info.picture) avatarUrl = info.picture;
+        tokens.displayName = displayName;
+        tokens.picture = avatarUrl;
+        tokens.email = email;
+        writeGmailTokens(tokens);
+      }
+    } catch (e) {
+      console.warn('Could not auto-fetch Google user info for dashboard:', e.message);
+    }
+  }
+
+  res.json({
+    user: {
+      id: email ? `google-${email}` : 'default-user',
+      email: email,
+      displayName: displayName || (email ? email.split('@')[0] : 'User'),
+      avatarUrl: avatarUrl,
+      gmailConnection: {
+        connected: Boolean(tokens.connected && tokens.email),
+        gmailEmail: tokens.email || '',
+      }
+    }
+  });
+});
+
 app.get('/api/config/gmail', (req, res) => {
   const tokens = readGmailTokens();
   const hasOAuth = Boolean(GOOGLE_CLIENT_ID && tokens.connected && tokens.refresh_token);
@@ -1889,6 +1942,8 @@ app.get('/api/config/gmail', (req, res) => {
       connected: true,
       method: 'oauth',
       email: tokens.email || '',
+      displayName: tokens.displayName || '',
+      picture: tokens.picture || '',
     });
   }
 

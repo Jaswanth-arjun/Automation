@@ -31,7 +31,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  const emailUsername = getEmailUsername(user, profile);
+  const displayName = getUserName(user, profile);
 
   const scored = useMemo(() => computeJobScores(profile || {}, adminJobs), [profile, adminJobs]);
   const topMatches = [...scored].sort((a, b) => (b.matchResult?.score || 0) - (a.matchResult?.score || 0)).slice(0, 3);
@@ -39,7 +39,7 @@ export default function Dashboard() {
   return (
     <div className="page-overview">
       <section className="dash-hero">
-        <h1>Welcome, {emailUsername} 👋</h1>
+        <h1>Welcome, {displayName} 👋</h1>
       </section>
 
       {/* 3 Quick Action Cards */}
