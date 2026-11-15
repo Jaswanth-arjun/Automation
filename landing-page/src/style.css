@@ -3219,7 +3219,7 @@ nav.mobile-nav {
 
 .match-card-body {
   flex: 1;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .match-card-body h4 {
@@ -3245,21 +3245,43 @@ nav.mobile-nav {
   font-weight: 500;
 }
 
-.match-card .job-card-skills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.match-card-apply-btn {
+  width: 100%;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: #fff7ed;
+  color: #ea580c;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid #ffedd5;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  margin-top: auto;
 }
 
-.match-card .skill-tag {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 6px;
-  background: #f4f4f5;
-  color: #52525b;
-  border: 1px solid #e4e4e7;
+.match-card-apply-btn:hover {
+  background: #ea580c;
+  color: #ffffff;
+  border-color: #ea580c;
+  box-shadow: 0 4px 14px rgba(234, 88, 12, 0.25);
+  transform: translateY(-1px);
+}
+
+.match-card-apply-btn:active {
+  transform: translateY(0);
+}
+
+.match-card-apply-btn svg {
+  transition: transform 0.2s ease;
+}
+
+.match-card-apply-btn:hover svg {
+  transform: translateX(2px);
 }
 
 /* Prompt card */

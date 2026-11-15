@@ -6,6 +6,7 @@ import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore, getUserName, getEmailUsername } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
+import ApplyOptionsModal from '../components/ApplyOptionsModal';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -16,6 +17,7 @@ export default function Dashboard() {
   // Modal states
   const [showJobUrlModal, setShowJobUrlModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [applyingJob, setApplyingJob] = useState(null);
 
   useEffect(() => {
     adminJobStore.syncWithBackend();
@@ -76,9 +78,15 @@ export default function Dashboard() {
                 <h4 title={job.title}>{job.title}</h4>
                 <p>{job.company} · {job.location}</p>
               </div>
-              <div className="job-card-skills">
-                {job.skills?.slice(0, 3).map(s => <span key={s} className="skill-tag">{s}</span>)}
-              </div>
+              <button
+                className="match-card-apply-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setApplyingJob(job);
+                }}
+              >
+                Apply <ArrowRight size={13} />
+              </button>
             </article>
           ))}
         </div>
@@ -151,6 +159,12 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      {/* Apply Options Modal */}
+      <ApplyOptionsModal
+        job={applyingJob}
+        isOpen={Boolean(applyingJob)}
+        onClose={() => setApplyingJob(null)}
+      />
     </div>
   );
 }
