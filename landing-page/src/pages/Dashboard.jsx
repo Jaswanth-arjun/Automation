@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Sparkles, Link2, Crown, X, Check, ExternalLink } from 'lucide-react';
+import { ArrowRight, Link2, Crown, X, Check, ExternalLink } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore, getUserName, getEmailUsername } from '../lib/api';
@@ -182,17 +182,6 @@ export default function Dashboard() {
           ))}
         </div>
       </section>
-
-      {!profile?.fullName && (
-        <section className="dash-prompt">
-          <Sparkles size={20} />
-          <div>
-            <strong>Complete your profile</strong>
-            <p>Add your skills and experience to unlock personalized job matching.</p>
-          </div>
-          <button className="btn-accent" onClick={() => navigate('/dashboard/profile')}>Set up profile</button>
-        </section>
-      )}
 
       {/* Add Job Link Interactive Modal (Analyzing -> Results Flow) */}
       <JobAnalyzerModal 
