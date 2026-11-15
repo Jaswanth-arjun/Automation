@@ -49,3 +49,4 @@ export const savedJobsStore = {
     window.dispatchEvent(new CustomEvent('saved_jobs_updated', { detail: list }));
   },
 };
+

@@ -181,7 +181,21 @@ app.post('/api/jobs', (req, res) => {
 
 app.delete('/api/jobs/:id', (req, res) => {
   const jobs = readJobs();
-  const idx = jobs.findIndex(j => j.id === req.params.id);
+  const rawTarget = decodeURIComponent(req.params.id || '').trim();
+
+  let idx = jobs.findIndex(j => String(j.id).trim() === rawTarget);
+
+  if (idx === -1) {
+    idx = jobs.findIndex(j => String(j.id).toLowerCase() === rawTarget.toLowerCase());
+  }
+
+  if (idx === -1) {
+    idx = jobs.findIndex(j => {
+      const key = `${(j.role || j.title || '').toLowerCase().trim()}-${(j.company || '').toLowerCase().trim()}`;
+      return key === rawTarget.toLowerCase() || (j.role || j.title || '').toLowerCase().trim() === rawTarget.toLowerCase();
+    });
+  }
+
   if (idx === -1) return res.status(404).json({ error: 'Job not found.' });
 
   // Delete logo file if exists
@@ -195,7 +209,7 @@ app.delete('/api/jobs/:id', (req, res) => {
 
   jobs.splice(idx, 1);
   writeJobs(jobs);
-  res.json({ message: 'Job deleted.' });
+  res.json({ success: true, message: 'Job deleted.', deletedId: job.id });
 });
 
 // ─── Company employees (admin form + PDF extract) ───

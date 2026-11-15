@@ -384,6 +384,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });
           if (res.ok) {
+            try {
+              const saved = JSON.parse(localStorage.getItem('hamzo_admin_jobs') || '[]');
+              const updated = saved.filter((j) => String(j.id) !== String(id));
+              localStorage.setItem('hamzo_admin_jobs', JSON.stringify(updated));
+              window.dispatchEvent(new Event('admin_jobs_updated'));
+            } catch {}
             showToast('Job deleted.');
             fetchJobs();
           } else {
