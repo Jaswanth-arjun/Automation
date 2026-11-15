@@ -246,21 +246,22 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
         </div>
       ) : (
         <>
-          <div className="activity-table-wrap">
-            <table className="activity-table">
-              <thead>
-                <tr className="activity-th-row">
-                  <th className="th-company">Company</th>
-                  <th className="th-role">Role</th>
-                  <th className="th-email"><span className="th-with-icon"><Mail size={12} /> Email</span></th>
-                  <th className="th-outreach"><span className="th-with-icon"><LinkedInIcon size={12} /> Outreach</span></th>
-                  <th className="th-responses">Responses</th>
-                  <th className="th-status">Status</th>
-                  <th className="th-time"><span className="th-with-icon"><Clock size={12} /> Last</span></th>
-                  <th className="th-action"></th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className="activity-list-container">
+            <div className="activity-list-scroll">
+              {/* Column Headers */}
+              <div className="activity-grid-header" aria-hidden="true">
+                <div className="col-h col-company">Company</div>
+                <div className="col-h col-role">Role</div>
+                <div className="col-h col-email"><Mail size={12} /> Email</div>
+                <div className="col-h col-outreach"><LinkedInIcon size={12} /> Outreach</div>
+                <div className="col-h col-responses">Responses</div>
+                <div className="col-h col-status">Status</div>
+                <div className="col-h col-time"><Clock size={12} /> Last</div>
+                <div className="col-h col-action"></div>
+              </div>
+
+              {/* Card Rows */}
+              <div className="activity-card-list">
                 {pageRows.map((row) => {
                   const hasReply = row.emailReplied > 0 || row.liReplied > 0 || row.unhandledReplies > 0 || row.needsReply;
                   const rowClass = [
@@ -270,7 +271,7 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                   ].filter(Boolean).join(' ');
 
                   return (
-                    <tr
+                    <article
                       key={row.id}
                       className={rowClass}
                       onClick={() => openDrawer(row.id)}
@@ -281,16 +282,19 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                         }
                       }}
                       tabIndex={0}
+                      role="button"
                     >
-                      {/* 1. Company with left vertical orange bar, rounded square avatar, name, and NEW REPLY */}
-                      <td className="td-company">
-                        <div className="row-accent-bar" />
+                      {/* Left vertical orange bar (matches reference design) */}
+                      <div className="row-accent-bar" />
+
+                      {/* 1. Company Column */}
+                      <div className="col-cell col-company">
                         <div className="row-company-wrap">
                           <span className="row-company-avatar">
                             {row.companyMark || companyMark(row.company)}
                           </span>
                           <div className="row-company-text">
-                            <strong className="row-company-name">{row.company}</strong>
+                            <strong className="row-company-name" title={row.company}>{row.company}</strong>
                             {hasReply ? (
                               <span className="row-reply-tag">
                                 <span className="row-reply-dot" /> NEW REPLY
@@ -302,17 +306,17 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                             )}
                           </div>
                         </div>
-                      </td>
+                      </div>
 
-                      {/* 2. Role Title */}
-                      <td className="td-role">
+                      {/* 2. Role Column */}
+                      <div className="col-cell col-role">
                         <span className="row-role-title" title={row.role}>
                           {row.role}
                         </span>
-                      </td>
+                      </div>
 
-                      {/* 3. Email Outreach */}
-                      <td className="td-email">
+                      {/* 3. Email Column */}
+                      <div className="col-cell col-email">
                         {row.emailSent > 0 ? (
                           <div className="row-stacked-stat">
                             <span><b>{row.emailSent}</b> sent</span>
@@ -321,38 +325,38 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                         ) : (
                           <span className="row-muted-text">No email yet</span>
                         )}
-                      </td>
+                      </div>
 
-                      {/* 4. LinkedIn Sent / Seen */}
-                      <td className="td-outreach">
+                      {/* 4. Outreach Column (LinkedIn Sent / Seen) */}
+                      <div className="col-cell col-outreach">
                         <div className="row-stacked-stat">
                           <span><b>{row.liSent || (hasReply ? 24 : 0)}</b> sent</span>
                           <span><b>{row.liSeen || (hasReply ? 1 : 0)}</b> seen</span>
                         </div>
-                      </td>
+                      </div>
 
-                      {/* 5. LinkedIn Accepted / Replied */}
-                      <td className="td-responses">
+                      {/* 5. Responses Column (LinkedIn Accepted / Replied) */}
+                      <div className="col-cell col-responses">
                         <div className="row-stacked-stat">
                           <span><b>{row.liAccepted || (hasReply ? 5 : 0)}</b> accepted</span>
                           <span className={row.liReplied || hasReply ? 'is-hot' : ''}><b>{row.liReplied || (hasReply ? 5 : 0)}</b> replied</span>
                         </div>
-                      </td>
+                      </div>
 
-                      {/* 6. Application Status Pill */}
-                      <td className="td-status">
+                      {/* 6. Application Status Column */}
+                      <div className="col-cell col-status">
                         <span className={`row-status-pill s-${slug(row.applicationStatus)}`}>
                           {row.applicationStatus === 'Not applied' ? 'Not applied' : row.applicationStatus}
                         </span>
-                      </td>
+                      </div>
 
-                      {/* 7. Time */}
-                      <td className="td-time">
+                      {/* 7. Last Activity Column */}
+                      <div className="col-cell col-time">
                         <span className="row-time-text">{timeAgo(row.lastActivityAt)}</span>
-                      </td>
+                      </div>
 
-                      {/* 8. Action Circle Arrow Button */}
-                      <td className="td-action">
+                      {/* 8. Action Arrow Button */}
+                      <div className="col-cell col-action">
                         <button
                           className="row-circle-arrow-btn"
                           onClick={(event) => {
@@ -364,12 +368,12 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                         >
                           <ArrowRight size={15} />
                         </button>
-                      </td>
-                    </tr>
+                      </div>
+                    </article>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            </div>
           </div>
 
           <div className="activity-cards">

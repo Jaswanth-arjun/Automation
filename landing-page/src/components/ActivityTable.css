@@ -213,168 +213,185 @@
   background: #ffb27a;
 }
 
-/* ---------- Table Wrap & Card Rows (Pixel-matched to reference design) ---------- */
-.activity-table-wrap {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
+/* ---------- Activity List: CSS Grid Card Format (Pixel-matched to reference) ---------- */
+.activity-list-container {
+  width: 100%;
   overflow-x: auto;
   overflow-y: visible;
-  overscroll-behavior: auto;
-  padding: 4px 0 16px;
+  padding: 4px 0 20px;
 }
 
-.activity-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0 12px;
-  font-size: 13.5px;
-  table-layout: auto;
+.activity-list-scroll {
+  min-width: 980px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.activity-th-row th {
+/* Grid layout definition shared between header and card rows */
+.activity-grid-header,
+.activity-card-row {
+  display: grid;
+  grid-template-columns: 210px 1.6fr 120px 95px 105px 115px 75px 44px;
+  align-items: center;
+  column-gap: 16px;
+}
+
+/* 1. Header row */
+.activity-grid-header {
+  padding: 6px 20px 6px;
   background: transparent;
-  border: none;
-  padding: 4px 18px 8px;
-  text-align: left;
+  user-select: none;
+}
+
+.col-h {
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   white-space: nowrap;
 }
 
+.col-h svg {
+  color: #94a3b8;
+}
+
+/* 2. Card row */
+.activity-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .activity-card-row {
+  position: relative;
   background: #ffffff;
-  cursor: pointer;
+  border: 1px solid #ebe5dc;
+  border-radius: 18px;
+  padding: 14px 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
   transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
   outline: none;
-  position: relative;
 }
 
-.activity-card-row td {
-  background: #ffffff;
-  border-top: 1px solid #ebe5dc;
-  border-bottom: 1px solid #ebe5dc;
-  padding: 16px 18px;
-  vertical-align: middle;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-
-.activity-card-row td:first-child {
-  border-left: 1px solid #ebe5dc;
-  border-top-left-radius: 20px;
-  border-bottom-left-radius: 20px;
-  position: relative;
-}
-
-.activity-card-row td:last-child {
-  border-right: 1px solid #ebe5dc;
-  border-top-right-radius: 20px;
-  border-bottom-right-radius: 20px;
-}
-
-.activity-card-row:hover td {
+.activity-card-row:hover,
+.activity-card-row:focus-visible {
   background: #fffdfa;
   border-color: #fed7aa;
-}
-
-.activity-card-row:hover {
-  box-shadow: 0 8px 24px -4px rgba(234, 88, 12, 0.1);
+  box-shadow: 0 8px 24px -4px rgba(234, 88, 12, 0.12);
   transform: translateY(-1px);
 }
 
-/* Left vertical orange accent bar on card */
+/* Left vertical orange accent bar (exactly as shown in reference) */
 .row-accent-bar {
   position: absolute;
-  left: -1px;
+  left: 0;
   top: 14px;
   bottom: 14px;
-  width: 5px;
+  width: 4.5px;
   background: #ea580c;
   border-radius: 0 4px 4px 0;
 }
 
-/* Company avatar and title */
+/* Cells */
+.col-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Company */
 .row-company-wrap {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding-left: 6px;
+  gap: 12px;
+  padding-left: 2px;
+  min-width: 0;
 }
 
 .row-company-avatar {
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   border-radius: 12px;
   background: #fff8f0;
   border: 1.5px solid #fed7aa;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 850;
   color: #ea580c;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(234, 88, 12, 0.08);
+  box-shadow: 0 2px 5px rgba(234, 88, 12, 0.08);
 }
 
 .row-company-text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
 .row-company-name {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 800;
   color: #0f172a;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row-reply-tag {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 4px;
+  font-size: 10.5px;
   font-weight: 850;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #ea580c;
+  white-space: nowrap;
 }
 
 .row-reply-dot {
-  width: 6.5px;
-  height: 6.5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #ea580c;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 .row-sub-tag {
-  font-size: 11.5px;
+  font-size: 11px;
   color: #94a3b8;
   font-weight: 600;
+  white-space: nowrap;
 }
 
-/* Role Title */
+/* Role */
 .row-role-title {
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 700;
   color: #1e293b;
-  display: block;
   line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-/* Stacked stats (Email, LinkedIn outreach, Responses) */
+/* Stacked stats (Email, Outreach, Responses) */
 .row-stacked-stat {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 13.5px;
+  gap: 2px;
+  font-size: 13px;
   color: #64748b;
   line-height: 1.25;
   white-space: nowrap;
@@ -383,8 +400,8 @@
 .row-stacked-stat b {
   color: #0f172a;
   font-weight: 800;
-  font-size: 14px;
-  margin-right: 4px;
+  font-size: 13.5px;
+  margin-right: 3px;
 }
 
 .row-stacked-stat .is-hot b {
@@ -397,12 +414,12 @@
 
 .row-muted-text {
   color: #94a3b8;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
 }
 
-/* Application Status Pill */
+/* Status Pill */
 .row-status-pill {
   display: inline-flex;
   align-items: center;
@@ -435,18 +452,22 @@
   color: #dc2626;
 }
 
-/* Time column */
+/* Time */
 .row-time-text {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
   color: #475569;
   white-space: nowrap;
 }
 
-/* Circle Action Arrow Button */
+/* Action button */
+.col-action {
+  justify-content: flex-end;
+}
+
 .row-circle-arrow-btn {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   border: 1.5px solid #e2e8f0;
   background: #ffffff;
@@ -456,15 +477,14 @@
   color: #64748b;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  margin-left: auto;
 }
 
 .row-circle-arrow-btn:hover {
   border-color: #ea580c;
   color: #ea580c;
   background: #fff7ed;
-  transform: translateX(3px);
-  box-shadow: 0 3px 10px rgba(234, 88, 12, 0.2);
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.2);
 }
 
 .activity-role strong {
