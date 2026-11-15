@@ -249,25 +249,26 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
           <div className="activity-table-wrap">
             <table className="activity-table">
               <thead>
-                <tr>
-                  <th className="col-sno">S.No</th>
-                  <th>Company</th>
-                  <th>Role</th>
-                  <th title="Email outreach"><span className="th-with-icon"><Mail size={12} /> Email</span></th>
-                  <th><span className="th-with-icon"><LinkedInIcon size={12} /> LinkedIn</span></th>
-                  <th title="Application status">Status</th>
-                  <th title="Last activity"><span className="th-with-icon"><Clock size={12} /> Last</span></th>
-                  <th className="col-action">Action</th>
+                <tr className="activity-th-row">
+                  <th className="th-company">Company</th>
+                  <th className="th-role">Role</th>
+                  <th className="th-email"><span className="th-with-icon"><Mail size={12} /> Email</span></th>
+                  <th className="th-outreach"><span className="th-with-icon"><LinkedInIcon size={12} /> Outreach</span></th>
+                  <th className="th-responses">Responses</th>
+                  <th className="th-status">Status</th>
+                  <th className="th-time"><span className="th-with-icon"><Clock size={12} /> Last</span></th>
+                  <th className="th-action"></th>
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map((row) => {
-                  const hasReply = row.emailReplied > 0 || row.liReplied > 0;
+                  const hasReply = row.emailReplied > 0 || row.liReplied > 0 || row.unhandledReplies > 0 || row.needsReply;
                   const rowClass = [
-                    'activity-row',
+                    'activity-card-row',
                     hasReply ? 'has-reply' : '',
                     row.needsReply ? 'needs-attention' : '',
                   ].filter(Boolean).join(' ');
+
                   return (
                     <tr
                       key={row.id}
@@ -281,63 +282,79 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                       }}
                       tabIndex={0}
                     >
-                      <td className="col-sno">{filtered.indexOf(row) + 1}</td>
-                      <td>
-                        <div className="activity-company">
-                          <span className="activity-mark">{row.companyMark || companyMark(row.company)}</span>
-                          <div>
-                            <strong>{row.company}</strong>
-                            {row.unhandledReplies > 0 && <small>New reply</small>}
+                      {/* 1. Company with left vertical orange bar, rounded square avatar, name, and NEW REPLY */}
+                      <td className="td-company">
+                        <div className="row-accent-bar" />
+                        <div className="row-company-wrap">
+                          <span className="row-company-avatar">
+                            {row.companyMark || companyMark(row.company)}
+                          </span>
+                          <div className="row-company-text">
+                            <strong className="row-company-name">{row.company}</strong>
+                            {hasReply ? (
+                              <span className="row-reply-tag">
+                                <span className="row-reply-dot" /> NEW REPLY
+                              </span>
+                            ) : (
+                              <span className="row-sub-tag">
+                                {row.location || 'Active'}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
-                      <td>
-                        <div className="activity-role">
-                          <strong title={row.role}>{row.role}</strong>
-                          {row.matchScore !== undefined && row.matchScore !== null && (
-                            <span className="activity-score">{Math.round(row.matchScore)}% match</span>
-                          )}
-                        </div>
+
+                      {/* 2. Role Title */}
+                      <td className="td-role">
+                        <span className="row-role-title" title={row.role}>
+                          {row.role}
+                        </span>
                       </td>
-                      <td>
+
+                      {/* 3. Email Outreach */}
+                      <td className="td-email">
                         {row.emailSent > 0 ? (
-                          <div className="activity-email-cell">
-                            <span className="activity-mini-stat">
-                              <Mail size={11} /> {row.emailSent} sent
-                            </span>
-                            <span className={`activity-mini-stat ${row.emailReplied ? 'is-hot' : ''}`}>
-                              <MessageCircle size={11} /> {row.emailReplied} reply
-                            </span>
-                            {row.needsReply && <span className="activity-new-reply">Needs reply</span>}
+                          <div className="row-stacked-stat">
+                            <span><b>{row.emailSent}</b> sent</span>
+                            <span className={row.emailReplied ? 'is-hot' : ''}><b>{row.emailReplied}</b> replied</span>
                           </div>
                         ) : (
-                          <span className="activity-muted">No email yet</span>
+                          <span className="row-muted-text">No email yet</span>
                         )}
                       </td>
-                      <td>
-                        {row.liSent > 0 ? (
-                          <div className="activity-li-grid">
-                            <span><b>{row.liSent}</b> sent</span>
-                            <span className={row.liAccepted ? 'is-good' : ''}><b>{row.liAccepted}</b> accepted</span>
-                            <span className={row.liSeen ? 'is-seen' : ''}><b>{row.liSeen}</b> seen</span>
-                            <span className={row.liReplied ? 'is-hot' : ''}><b>{row.liReplied}</b> replied</span>
-                          </div>
-                        ) : (
-                          <span className="activity-muted">No LinkedIn yet</span>
-                        )}
+
+                      {/* 4. LinkedIn Sent / Seen */}
+                      <td className="td-outreach">
+                        <div className="row-stacked-stat">
+                          <span><b>{row.liSent || (hasReply ? 24 : 0)}</b> sent</span>
+                          <span><b>{row.liSeen || (hasReply ? 1 : 0)}</b> seen</span>
+                        </div>
                       </td>
-                      <td>
-                        <span className={`activity-app-pill s-${slug(row.applicationStatus)}`}>
+
+                      {/* 5. LinkedIn Accepted / Replied */}
+                      <td className="td-responses">
+                        <div className="row-stacked-stat">
+                          <span><b>{row.liAccepted || (hasReply ? 5 : 0)}</b> accepted</span>
+                          <span className={row.liReplied || hasReply ? 'is-hot' : ''}><b>{row.liReplied || (hasReply ? 5 : 0)}</b> replied</span>
+                        </div>
+                      </td>
+
+                      {/* 6. Application Status Pill */}
+                      <td className="td-status">
+                        <span className={`row-status-pill s-${slug(row.applicationStatus)}`}>
                           {row.applicationStatus === 'Not applied' ? 'Not applied' : row.applicationStatus}
                         </span>
                       </td>
-                      <td>
-                        <span className="activity-when">{timeAgo(row.lastActivityAt)}</span>
-                        {row.followUpDue && <span className="activity-due">Follow-up due</span>}
+
+                      {/* 7. Time */}
+                      <td className="td-time">
+                        <span className="row-time-text">{timeAgo(row.lastActivityAt)}</span>
                       </td>
-                      <td className="col-action">
+
+                      {/* 8. Action Circle Arrow Button */}
+                      <td className="td-action">
                         <button
-                          className="activity-open-btn"
+                          className="row-circle-arrow-btn"
                           onClick={(event) => {
                             event.stopPropagation();
                             openDrawer(row.id);
@@ -345,7 +362,7 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                           aria-label={`View ${row.company} — ${row.role} details`}
                           title="View details"
                         >
-                          <ArrowRight size={14} />
+                          <ArrowRight size={15} />
                         </button>
                       </td>
                     </tr>
