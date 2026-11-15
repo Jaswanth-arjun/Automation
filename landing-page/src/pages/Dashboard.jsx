@@ -8,6 +8,7 @@ import { computeJobScores } from '../lib/matchScore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import ApplyOptionsModal from '../components/ApplyOptionsModal';
 import CompleteProfileModal from '../components/CompleteProfileModal';
+import ActivityTable from '../components/ActivityTable';
 
 function isProfileIncomplete(p) {
   if (!p) return true;
@@ -182,6 +183,12 @@ export default function Dashboard() {
           ))}
         </div>
       </section>
+
+      <ActivityTable
+        jobs={scored}
+        matchedCount={scored.length}
+        onStartOutreach={() => navigate('/dashboard/jobs')}
+      />
 
       {/* Add Job Link Interactive Modal (Analyzing -> Results Flow) */}
       <JobAnalyzerModal 

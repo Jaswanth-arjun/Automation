@@ -13,7 +13,7 @@
 }
 
 html {
-  scroll-behavior: smooth
+  scroll-behavior: auto;
 }
 
 body {
@@ -2095,7 +2095,7 @@ nav {
 .dash-main {
   padding: 34px 44px 90px;
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow-x: clip;
   box-sizing: border-box;
 }
 

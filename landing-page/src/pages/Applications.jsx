@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FolderOpen, ArrowRight } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
@@ -9,6 +9,7 @@ const STATUS_COLORS = {
   Applied: { bg: '#445cf514', color: '#445cf5' },
   Outreach: { bg: '#8b5cf614', color: '#8b5cf6' },
   Response: { bg: '#0ea5e914', color: '#0ea5e9' },
+  Shortlisted: { bg: '#d4920a14', color: '#b45309' },
   Interview: { bg: '#d4920a14', color: '#d4920a' },
   Offer: { bg: '#22a65b14', color: '#22a65b' },
   Rejected: { bg: '#c74a3d14', color: '#c74a3d' },
@@ -17,8 +18,18 @@ const STATUS_COLORS = {
 
 export default function Applications() {
   const navigate = useNavigate();
-  const [applications] = useState(() => applicationStore.getAll());
+  const [applications, setApplications] = useState(() => applicationStore.getAll());
   const [statusFilter, setStatusFilter] = useState('All');
+
+  useEffect(() => {
+    const refresh = () => setApplications(applicationStore.getAll());
+    window.addEventListener('applications_updated', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('applications_updated', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   const filtered = statusFilter === 'All' ? applications : applications.filter(a => a.status === statusFilter);
 

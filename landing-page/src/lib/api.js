@@ -233,6 +233,12 @@ export const resumeStore = {
 };
 
 // Applications (localStorage)
+function saveApplications(all) {
+  localStorage.setItem('wayin_applications', JSON.stringify(all));
+  window.dispatchEvent(new Event('applications_updated'));
+  return all;
+}
+
 export const applicationStore = {
   getAll() {
     const raw = localStorage.getItem('wayin_applications');
@@ -241,12 +247,14 @@ export const applicationStore = {
   add(application) {
     const all = this.getAll();
     all.unshift({ ...application, id: Date.now().toString(), appliedAt: new Date().toISOString(), status: 'Applied' });
-    localStorage.setItem('wayin_applications', JSON.stringify(all));
-    return all;
+    return saveApplications(all);
   },
   updateStatus(id, status) {
     const all = this.getAll().map(a => a.id === id ? { ...a, status, lastActivity: new Date().toISOString() } : a);
-    localStorage.setItem('wayin_applications', JSON.stringify(all));
-    return all;
+    return saveApplications(all);
+  },
+  remove(id) {
+    const all = this.getAll().filter(a => a.id !== id);
+    return saveApplications(all);
   },
 };

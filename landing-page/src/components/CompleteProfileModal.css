@@ -145,9 +145,66 @@
   }
 }
 
+/* ─── Skill chips flying from the paper into the score ring ─── */
+.cpm-flight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.cpm-skill-chip {
+  position: absolute;
+  left: var(--sx, 34%);
+  top: var(--sy, 52%);
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1.5px solid #fdba74;
+  color: #c2410c;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgba(234, 88, 12, 0.18);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: cpmSkillFly 7s linear infinite;
+}
+
+@keyframes cpmSkillFly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(0.7);
+  }
+  2% {
+    opacity: 1;
+    transform: translate(calc(-50% + 8px), calc(-50% - 6px)) rotate(var(--tilt, 0deg)) scale(1);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--fx, 200px)), calc(-50% + var(--fy, 0px) + var(--oy, 0px))) rotate(0deg) scale(1);
+  }
+  14% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--fx, 200px)), calc(-50% + var(--fy, 0px) + var(--oy, 0px))) rotate(0deg) scale(0.9);
+  }
+  17% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--fx, 200px)), calc(-50% + var(--fy, 0px) + var(--oy, 0px))) rotate(0deg) scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(0.7);
+  }
+}
+
 /* ─── Left Profile Paper Card ─── */
 .cpm-paper-card {
   position: relative;
+  z-index: 3;
   width: 130px;
   background: #ffffff;
   border-radius: 18px;
@@ -323,6 +380,8 @@
 
 /* ─── Right Job Match Score Circle ─── */
 .cpm-score-column {
+  position: relative;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -350,34 +409,163 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-/* Rotating SVG Ring around Score */
+/* Expanding halo that makes the score ring visibly "breathe" */
+.cpm-score-halo {
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  border: 2px solid rgba(249, 115, 22, 0.55);
+  pointer-events: none;
+  animation: cpmHaloPulse 2.4s ease-out infinite;
+}
+
+@keyframes cpmHaloPulse {
+  0% {
+    transform: scale(0.84);
+    opacity: 0.8;
+  }
+  70% {
+    opacity: 0.16;
+  }
+  100% {
+    transform: scale(1.24);
+    opacity: 0;
+  }
+}
+
+/* Progress ring — starts at 12 o'clock and fills to the match score */
 .cpm-score-svg-ring {
   position: absolute;
   inset: -4px;
   width: calc(100% + 8px);
   height: calc(100% + 8px);
-  animation: cpmRingSpin 7s linear infinite;
+  transform: rotate(-90deg);
   pointer-events: none;
+  overflow: visible;
+}
+
+.cpm-svg-ring-track {
+  fill: none;
+  stroke: rgba(234, 88, 12, 0.16);
+  stroke-width: 5;
 }
 
 .cpm-svg-ring-active {
   fill: none;
   stroke: #ea580c;
-  stroke-width: 3.5;
+  stroke-width: 5;
   stroke-linecap: round;
-  stroke-dasharray: 45 230;
   filter: drop-shadow(0 0 4px rgba(234, 88, 12, 0.7));
+  transition: stroke-dashoffset 0.12s linear, stroke-width 0.25s ease;
 }
 
-@keyframes cpmRingSpin {
-  from {
-    transform: rotate(0deg);
-  }
+/* Small comet arc orbiting the ring */
+.cpm-svg-ring-orbit {
+  fill: none;
+  stroke: #fb923c;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 7 269.5;
+  opacity: 0.95;
+  transform-origin: 50px 50px;
+  animation: cpmOrbitSpin 3.6s linear infinite;
+}
+
+@keyframes cpmOrbitSpin {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Verified badge + sparkle that appear once the ring reaches the target score */
+.cpm-score-check {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid #ffffff;
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 10px rgba(22, 163, 74, 0.35);
+  opacity: 0;
+  transform: scale(0.35);
+  transition: opacity 0.25s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 4;
+}
+
+.cpm-score-check::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(34, 197, 94, 0.55);
+  animation: cpmCheckBurst 1.8s ease-out infinite;
+}
+
+@keyframes cpmCheckBurst {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.cpm-score-column.is-achieved .cpm-score-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cpm-score-spark {
+  position: absolute;
+  top: -18px;
+  right: -24px;
+  font-size: 16px;
+  line-height: 1;
+  color: #fb923c;
+  opacity: 0;
+  filter: drop-shadow(0 0 4px rgba(251, 146, 60, 0.6));
+  pointer-events: none;
+}
+
+.cpm-score-column.is-achieved .cpm-score-spark {
+  animation: cpmScoreSpark 1.5s ease-in-out infinite;
+}
+
+@keyframes cpmScoreSpark {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0.5) rotate(0deg);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.15) rotate(45deg);
+  }
+}
+
+.cpm-score-column.is-achieved .cpm-svg-ring-active {
+  stroke-width: 6;
+  filter: drop-shadow(0 0 6px rgba(234, 88, 12, 0.85));
+}
+
+/* Short fade while the loop rewinds from 92% back to 0% */
+.cpm-score-column.is-resetting .cpm-score-ring-outer,
+.cpm-score-column.is-resetting .cpm-score-label {
+  opacity: 0;
+  transform: scale(0.94);
+}
+
+.cpm-score-label {
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .cpm-score-ring-inner {
@@ -402,10 +590,12 @@
 @keyframes cpmNumberPulse {
   0%, 100% {
     transform: scale(1);
+    text-shadow: 0 0 0 rgba(234, 88, 12, 0);
   }
   50% {
-    transform: scale(1.08);
+    transform: scale(1.07);
     color: #ea580c;
+    text-shadow: 0 0 12px rgba(234, 88, 12, 0.35);
   }
 }
 
@@ -445,12 +635,26 @@
   border-radius: 20px;
   margin-bottom: 16px;
   box-shadow: 0 8px 20px rgba(234, 88, 12, 0.15);
-  transition: all 0.22s ease;
+  transition: border-color 0.22s ease, box-shadow 0.22s ease;
+  animation: cpmCtaGlow 2.6s ease-in-out infinite;
+}
+
+/* Attention pulse — the whole frame glows so the CTA is impossible to miss */
+@keyframes cpmCtaGlow {
+  0%, 100% {
+    border-color: #fed7aa;
+    box-shadow: 0 8px 20px rgba(234, 88, 12, 0.15), 0 0 0 0 rgba(249, 115, 22, 0.32);
+  }
+  50% {
+    border-color: #fdba74;
+    box-shadow: 0 16px 38px rgba(234, 88, 12, 0.34), 0 0 0 7px rgba(249, 115, 22, 0.1);
+  }
 }
 
 .cpm-big-button-wrap:hover {
   border-color: #ea580c;
   box-shadow: 0 12px 28px rgba(234, 88, 12, 0.28);
+  animation-play-state: paused;
 }
 
 .cpm-big-orange-btn {
@@ -472,6 +676,17 @@
   box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.4), 0 4px 12px rgba(234, 88, 12, 0.35);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
+  animation: cpmBtnBreathe 2.6s ease-in-out infinite;
+}
+
+@keyframes cpmBtnBreathe {
+  0%, 100% {
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.4), 0 4px 12px rgba(234, 88, 12, 0.35);
+    background-position: 0% 50%;
+  }
+  50% {
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.5), 0 8px 22px rgba(234, 88, 12, 0.55);
+  }
 }
 
 /* Button sheen animation */
@@ -482,13 +697,13 @@
   left: -70%;
   width: 50%;
   height: 200%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
   transform: rotate(25deg);
-  animation: cpmBtnSheen 4.5s ease-in-out infinite;
+  animation: cpmBtnSheen 3.2s ease-in-out infinite;
 }
 
 @keyframes cpmBtnSheen {
-  0%, 70% {
+  0%, 55% {
     left: -70%;
   }
   100% {
@@ -507,10 +722,21 @@
 
 .cpm-big-orange-btn svg {
   transition: transform 0.2s ease;
+  animation: cpmArrowNudge 1.9s ease-in-out infinite;
+}
+
+@keyframes cpmArrowNudge {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(4px);
+  }
 }
 
 .cpm-big-orange-btn:hover svg {
-  transform: translateX(3px);
+  animation: none;
+  transform: translateX(4px);
 }
 
 /* Dismiss text link */
