@@ -2323,16 +2323,65 @@ nav.mobile-nav {
 .dash-hero {
   background: linear-gradient(115deg, #e8944a 0%, #f27259 50%, #ea580c 100%);
   border-radius: 20px;
-  padding: 40px 40px 36px;
+  padding: 34px 38px;
   margin-bottom: 28px;
-  color: #fff
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  box-shadow: 0 12px 32px -10px rgba(234, 88, 12, 0.35);
+  position: relative;
+  overflow: hidden;
 }
 
 .dash-hero h1 {
-  font-size: clamp(30px, 4vw, 44px);
+  font-size: clamp(28px, 3.6vw, 42px);
   font-weight: 800;
-  letter-spacing: -.04em;
-  margin: 0
+  letter-spacing: -.03em;
+  margin: 0;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.dash-hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #ffffff;
+  color: #ea580c;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px 24px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dash-hero-btn:hover {
+  background: #fff8f5;
+  color: #c2410c;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.dash-hero-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.dash-hero-btn svg {
+  stroke-width: 2.3;
+  transition: transform 0.2s ease;
+}
+
+.dash-hero-btn:hover svg {
+  transform: rotate(-12deg);
 }
 
 /* Quick action cards below welcome banner */
@@ -5148,12 +5197,19 @@ nav.mobile-nav {
   }
 
   .dash-hero {
-    padding: 32px 20px 28px;
-    border-radius: 16px
+    padding: 28px 20px 24px;
+    border-radius: 16px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
   }
 
   .dash-hero h1 {
-    margin-bottom: 20px
+    margin-bottom: 0;
+  }
+
+  .dash-hero-btn {
+    align-self: flex-start;
   }
 
   .hero-card {

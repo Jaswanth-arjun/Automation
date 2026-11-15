@@ -40,6 +40,14 @@ export default function Dashboard() {
     <div className="page-overview">
       <section className="dash-hero">
         <h1>Welcome, {displayName} 👋</h1>
+        <button
+          className="dash-hero-btn"
+          onClick={() => setShowJobUrlModal(true)}
+          title="Add Job Link"
+        >
+          <Link2 size={18} />
+          <span>Add Job Link</span>
+        </button>
       </section>
 
       {/* 3 Quick Action Cards */}
