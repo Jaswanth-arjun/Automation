@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Sparkles, Link2, Bot, Crown, ChevronRight, X, Check, ExternalLink } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, getUserName } from '../lib/api';
+import { profileStore, getUserName, getEmailUsername } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 
@@ -31,8 +31,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  const displayName = getUserName(user, profile);
-  const firstName = displayName.split(' ')[0];
+  const emailUsername = getEmailUsername(user, profile);
 
   const scored = useMemo(() => computeJobScores(profile || {}, adminJobs), [profile, adminJobs]);
   const topMatches = [...scored].sort((a, b) => (b.matchResult?.score || 0) - (a.matchResult?.score || 0)).slice(0, 3);
@@ -40,7 +39,7 @@ export default function Dashboard() {
   return (
     <div className="page-overview">
       <section className="dash-hero">
-        <h1>Welcome, {firstName} 👋</h1>
+        <h1>Welcome, {emailUsername} 👋</h1>
       </section>
 
       {/* 3 Quick Action Cards */}

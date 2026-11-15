@@ -127,6 +127,35 @@ export const profileStore = {
   },
 };
 
+export function getEmailUsername(user, profile) {
+  const savedProfile = profile !== undefined ? profile : profileStore.get();
+  
+  // 1. Direct email from user object or saved profile
+  const rawEmail = user?.email || user?.gmailEmail || savedProfile?.email || '';
+  if (rawEmail && rawEmail.includes('@')) {
+    const handle = rawEmail.split('@')[0].trim();
+    if (handle) return handle;
+  }
+
+  // 2. If displayName is an email address
+  if (user?.displayName && user.displayName.includes('@')) {
+    const handle = user.displayName.split('@')[0].trim();
+    if (handle) return handle;
+  }
+
+  // 3. Fallback to displayName if available
+  if (user?.displayName && user.displayName.trim()) {
+    return user.displayName.trim();
+  }
+
+  // 4. Fallback to saved profile full name
+  if (savedProfile?.fullName && savedProfile.fullName.trim() && savedProfile.fullName.trim() !== 'Your Name') {
+    return savedProfile.fullName.trim();
+  }
+
+  return 'User';
+}
+
 export function getUserName(user, profile) {
   const savedProfile = profile !== undefined ? profile : profileStore.get();
   if (savedProfile?.fullName && savedProfile.fullName.trim()) {
