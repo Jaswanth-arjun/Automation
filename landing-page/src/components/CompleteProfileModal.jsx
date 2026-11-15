@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { X, ArrowRight, Sparkles, CheckCircle2, Zap, FileText } from 'lucide-react';
 import './CompleteProfileModal.css';
@@ -39,7 +40,7 @@ export default function CompleteProfileModal({ isOpen, onClose }) {
     onClose?.();
   };
 
-  return (
+  const modalContent = (
     <div className="cpm-overlay" onClick={handleLater} role="dialog" aria-modal="true">
       <div className="cpm-modal" onClick={(e) => e.stopPropagation()}>
         {/* Close Button */}
@@ -230,4 +231,6 @@ export default function CompleteProfileModal({ isOpen, onClose }) {
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }

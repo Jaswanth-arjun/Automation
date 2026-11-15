@@ -91,22 +91,29 @@ export default function Dashboard() {
   const [showJobUrlModal, setShowJobUrlModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [applyingJob, setApplyingJob] = useState(null);
-  const [showProfilePromptModal, setShowProfilePromptModal] = useState(false);
-
-  useEffect(() => {
-    // Check if profile is incomplete and user hasn't dismissed in current session
-    const isDismissed = sessionStorage.getItem('hamzo_profile_modal_dismissed') === 'true';
-    const currentProfile = profileStore.get();
-    if (!isDismissed && isProfileIncomplete(currentProfile)) {
-      const timer = setTimeout(() => setShowProfilePromptModal(true), 650);
-      return () => clearTimeout(timer);
-    }
-  }, []);
+  const [showProfilePromptModal, setShowProfilePromptModal] = useState(() => {
+    return isProfileIncomplete(profileStore.get());
+  });
 
   const handleDismissProfileModal = () => {
-    sessionStorage.setItem('hamzo_profile_modal_dismissed', 'true');
     setShowProfilePromptModal(false);
   };
+
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      const currentProfile = profileStore.get();
+      setProfile(currentProfile);
+      if (!isProfileIncomplete(currentProfile)) {
+        setShowProfilePromptModal(false);
+      }
+    };
+    window.addEventListener('profile_updated', handleProfileUpdate);
+    window.addEventListener('storage', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('profile_updated', handleProfileUpdate);
+      window.removeEventListener('storage', handleProfileUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     adminJobStore.syncWithBackend();

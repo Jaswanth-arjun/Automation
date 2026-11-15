@@ -3,7 +3,7 @@
 .cpm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -351,3 +351,4 @@
     font-size: 12.5px;
   }
 }
+
