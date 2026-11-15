@@ -1,0 +1,183 @@
+/* ======================================================================
+   SCROLL-LINKED SECTION ANIMATIONS
+   ----------------------------------------------------------------------
+   Every block on the landing page wakes up as it travels through the
+   viewport. Motion is tied to the element's own scroll progress (CSS view
+   timelines), not to a one-shot timer, so:
+     • it plays in as you scroll down and rewinds if you scroll back up
+     • it staggers child by child, matching the section's content
+     • it needs no JS, no scroll listeners and no layout thrash
+
+   Per-section choreography
+     headers            → kicker → headline → copy cascade upward
+     product cards      → rise + settle, left to right
+     manual vs HAMZO    → pain slides from the left, gain from the right
+     setup cards        → pop with a soft overshoot
+     workflow steps     → pop, one after another
+     pricing ticks      → pop in a quick cascade
+     FAQ                → questions glide in one by one
+     reviews            → marquee rows fade up
+     footer             → cards lift, watermark last
+
+   Unsupported browsers and reduced-motion users just see the page
+   normally — nothing is ever left hidden.
+   ====================================================================== */
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+
+    @keyframes fx-rise {
+      0% {
+        opacity: 0;
+        transform: translateY(52px) scale(0.965);
+      }
+      55% {
+        opacity: 1;
+      }
+      100% {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes fx-left {
+      0% {
+        opacity: 0;
+        transform: translateX(-64px) rotate(-1.6deg) scale(0.97);
+      }
+      100% {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes fx-right {
+      0% {
+        opacity: 0;
+        transform: translateX(64px) rotate(1.6deg) scale(0.97);
+      }
+      100% {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes fx-pop {
+      0% {
+        opacity: 0;
+        transform: translateY(30px) scale(0.86);
+      }
+      62% {
+        opacity: 1;
+        transform: translateY(-5px) scale(1.025);
+      }
+      100% {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes fx-zoom {
+      0% {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+      100% {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes fx-fade {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    /* ---------- shared timing for every animated block ---------- */
+    .hmz-head > *,
+    .hmz-logostrip > *,
+    .hmz-strip > *,
+    .hmz-freeinner > *:not(.fx-stagger),
+    .hmz-finalinner > *,
+    .hmz-faq > div:first-child > *,
+    .hmz-compare > *,
+    .hmz-mq-rows > *,
+    .fx-stagger > * {
+      animation-name: fx-rise;
+      animation-duration: 1s;
+      animation-timing-function: cubic-bezier(0.22, 0.8, 0.28, 1);
+      animation-fill-mode: backwards;
+      animation-timeline: view();
+      animation-range: entry 4% entry 100%;
+    }
+
+    /* ---------- cascade: each child starts a little later ---------- */
+    .hmz-head > :nth-child(1),
+    .hmz-logostrip > :nth-child(1),
+    .hmz-strip > :nth-child(1),
+    .hmz-freeinner > :nth-child(1),
+    .hmz-finalinner > :nth-child(1),
+    .hmz-faq > div:first-child > :nth-child(1),
+    .hmz-compare > :nth-child(1),
+    .hmz-mq-rows > :nth-child(1),
+    .fx-stagger > :nth-child(1) {
+      animation-range: entry 2% entry 92%;
+    }
+
+    .hmz-head > :nth-child(2),
+    .hmz-logostrip > :nth-child(2),
+    .hmz-strip > :nth-child(2),
+    .hmz-freeinner > :nth-child(2),
+    .hmz-finalinner > :nth-child(2),
+    .hmz-faq > div:first-child > :nth-child(2),
+    .hmz-compare > :nth-child(2),
+    .hmz-mq-rows > :nth-child(2),
+    .fx-stagger > :nth-child(2) {
+      animation-range: entry 6% entry 96%;
+    }
+
+    .hmz-head > :nth-child(3),
+    .hmz-freeinner > :nth-child(3),
+    .hmz-finalinner > :nth-child(3),
+    .hmz-faq > div:first-child > :nth-child(3),
+    .fx-stagger > :nth-child(3) {
+      animation-range: entry 10% entry 100%;
+    }
+
+    .hmz-head > :nth-child(4),
+    .hmz-freeinner > :nth-child(4),
+    .hmz-finalinner > :nth-child(4),
+    .fx-stagger > :nth-child(4) {
+      animation-range: entry 14% entry 100%;
+    }
+
+    .hmz-head > :nth-child(5),
+    .fx-stagger > :nth-child(5) {
+      animation-range: entry 18% entry 100%;
+    }
+
+    .hmz-head > :nth-child(6),
+    .fx-stagger > :nth-child(6) {
+      animation-range: entry 22% entry 100%;
+    }
+
+    /* ---------- per-section character ---------- */
+
+    /* Manual vs HAMZO: the two sides meet in the middle */
+    .hmz-compare > .hmz-cmp.pain { animation-name: fx-left; }
+    .hmz-compare > .hmz-cmp.gain { animation-name: fx-right; }
+
+    /* Setup + workflow step cards land with a soft overshoot */
+    .hmz-setupgrid > .hmz-setupcard,
+    .hmz-steps > .hmz-step { animation-name: fx-pop; }
+
+    /* Pricing ticks pop like little badges */
+    .hmz-freeticks > span { animation-name: fx-pop; }
+
+    /* Footer: content lifts, the HAMZO watermark fades in last */
+    .hmz-footer-watermark { animation-name: fx-fade; }
+
+    /* Final call to action: the headline settles out of a blur-zoom */
+    .hmz-finalinner > h2 { animation-name: fx-zoom; }
+  }
+}

@@ -33,6 +33,7 @@ import OutreachWalkthrough from '../components/OutreachWalkthrough';
 import FrameLift from '../components/FrameLift';
 import ResumeTailoringDemo from '../components/ResumeTailoringDemo';
 import './Landing.css';
+import './scroll-fx.css';
 
 /* ================= helpers ================= */
 
@@ -1322,7 +1323,7 @@ function Pillars({ onOpen }) {
         <h2>Your entire job search<br />in <em>one place.</em></h2>
         <p>Job matches, copilot extension, resume builder and tracker — one workspace, free to start.</p>
       </div>
-      <div className={`hmz-grid ${gridVisible ? 'in-view' : ''}`} ref={gridRef}>
+      <div className={`hmz-grid fx-stagger ${gridVisible ? 'in-view' : ''}`} ref={gridRef}>
         {PILLARS.map((f) => (
           <TiltCard key={f.name} className={`hmz-card tint-${f.tint}`} maxTilt={4}>
             <div className="hmz-cardicon">{f.icon}</div>
@@ -1348,7 +1349,7 @@ function Compare() {
         <span className="hmz-kicker">WHY IT WORKS</span>
         <h2>Manual grind vs <em>HAMZO agent.</em></h2>
       </div>
-      <div className={`hmz-compare ${cmpVisible ? 'in-view' : ''}`} ref={cmpRef}>
+      <div className={`hmz-compare fx-stagger ${cmpVisible ? 'in-view' : ''}`} ref={cmpRef}>
         <div className="hmz-cmp pain">
           <h3>Manual job hunt</h3>
           <ul>
@@ -1380,7 +1381,7 @@ function Setup({ onOpen }) {
         <span className="hmz-kicker">SETUP</span>
         <h2>Configure in less than <em>60 seconds.</em></h2>
       </div>
-      <div className={`hmz-setupgrid ${gridVisible ? 'in-view' : ''}`} ref={gridRef}>
+      <div className={`hmz-setupgrid fx-stagger ${gridVisible ? 'in-view' : ''}`} ref={gridRef}>
         <TiltCard className="hmz-setupcard" maxTilt={3}>
           <div className="hmz-cardicon"><Mail size={20} /></div>
           <h3>Gmail — any Gmail works</h3>
@@ -1421,7 +1422,7 @@ function Workflow() {
         <span className="hmz-kicker light">HOW IT WORKS</span>
         <h2>One click. Automated referrals. <em>More interviews.</em></h2>
       </div>
-      <div className="hmz-steps">
+      <div className="hmz-steps fx-stagger">
         {STEPS.map((s, i) => (
           <StepCard key={s.n} onClick={() => setStep(i)} className={`hmz-step ${i === step ? 'on' : ''}`}>
             <span className="hmz-stepn">{s.n}</span>
@@ -1458,7 +1459,7 @@ function Reviews() {
         <h2>Loved by people doing<br /><em>serious</em> job search.</h2>
         <p className="hmz-mq-sub">Real workflows, real replies, real interviews.</p>
       </div>
-      <div className="hmz-mq-rows">
+      <div className="hmz-mq-rows fx-stagger">
         <div className="hmz-mq-row"><div className="hmz-mq-track">{rowA.map((r, i) => <RevCard key={`${r.name}-${i}`} r={r} />)}</div></div>
         <div className="hmz-mq-row rev"><div className="hmz-mq-track">{rowB.map((r, i) => <RevCard key={`${r.name}-${i}`} r={r} />)}</div></div>
       </div>
@@ -1472,7 +1473,7 @@ function FreeBand({ onGetStarted }) {
       <div className="hmz-freeinner">
         <span className="hmz-kicker">PRICING</span>
         <h2>Start free. <em>Pay nothing to start.</em></h2>
-        <div className="hmz-freeticks">
+        <div className="hmz-freeticks fx-stagger">
           {['Unlimited job links + match scores', 'AI resume tailor (3 formats)', 'Gmail + LinkedIn outreach', 'Application tracker + vault', 'No credit card · Disconnect anytime'].map((t) => (
             <span key={t}><Check size={14} />{t}</span>
           ))}
@@ -1490,7 +1491,7 @@ function Faq() {
   return (
     <div className="hmz-faq" id="faq">
       <div><span className="hmz-kicker">FAQ</span><h2>Questions before<br />you <em>start?</em></h2></div>
-      <div className="hmz-acc">
+      <div className="hmz-acc fx-stagger">
         {FAQS.map(([q, a], i) => (
           <article key={q} className={open === i ? 'open' : ''}>
             <button onClick={() => setOpen(open === i ? -1 : i)}>{q}<ChevronDown size={17} /></button>
@@ -1520,7 +1521,7 @@ function FinalCta({ onGetStarted }) {
 function Footer() {
   return (
     <footer className="hmz-nyeras-footer">
-      <div className="hmz-footer-wrap">
+      <div className="hmz-footer-wrap fx-stagger">
 
         {/* Card 1: Site Map, Address & Navigation Columns */}
         <div className="hmz-fcard main-card">
