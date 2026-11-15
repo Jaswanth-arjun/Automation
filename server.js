@@ -951,10 +951,16 @@ app.post('/api/gmail/sync', async (req, res) => {
 app.post('/api/ai/mail/summarize', async (req, res) => {
   try {
     const { subject, from, body } = req.body || {};
-    const text = await askGemini(`Summarize this received email in 4 short bullet points. Mention who it is from, what they want, and any deadline or next step.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${String(body || '').slice(0, 6000)}`);
+    const textBody = String(body || '').trim();
+    if (!textBody || textBody.length < 100) {
+      return res.json({ text: textBody });
+    }
+    const text = await askGemini(`Summarize this received email in 4 short bullet points. Mention who it is from, what they want, and any deadline or next step.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${textBody.slice(0, 6000)}`);
     res.json({ text });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Could not summarize this email.' });
+    const textBody = String(req.body?.body || '').trim();
+    const fallback = textBody.split(/\r?\n/).filter(Boolean).slice(0, 3).join(' ') || textBody;
+    res.json({ text: fallback });
   }
 });
 

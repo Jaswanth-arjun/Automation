@@ -157,11 +157,19 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     setError('');
   }, [selectedContact?.id, row?.role]);
 
-  /* AI summary for whichever reply is open. */
+  /* Only summarize if the reply has substantial content (at least 120 chars and 20 words) */
+  const shouldShowSummary = Boolean(
+    activeReply?.body &&
+    activeReply.body.trim().length >= 120 &&
+    activeReply.body.trim().split(/\s+/).filter(Boolean).length >= 20
+  );
+
+  /* AI summary for whichever reply is open (only when substantial). */
   useEffect(() => {
-    if (!activeReply?.body) {
+    if (!shouldShowSummary || !activeReply?.body) {
       setSummary('');
       setSummaryError('');
+      setSummaryLoading(false);
       return undefined;
     }
     let alive = true;
@@ -176,7 +184,6 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       .catch(() => {
         if (!alive) return;
         setSummary(fallbackSummary(activeReply.body));
-        setSummaryError('AI service unavailable — showing an extract instead.');
       })
       .finally(() => {
         if (alive) setSummaryLoading(false);
@@ -184,7 +191,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     return () => {
       alive = false;
     };
-  }, [activeReply?.body, selectedContact?.id, row?.id, summaryNonce]);
+  }, [shouldShowSummary, activeReply?.body, selectedContact?.id, row?.id, summaryNonce]);
 
   if (!row) return null;
 
@@ -436,12 +443,14 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                             <p>{linkedinReply.body}</p>
                           </div>
                         </div>
-                        <SummaryBox
-                          loading={summaryLoading}
-                          text={summary}
-                          error={summaryError}
-                          onRetry={() => setSummaryNonce((value) => value + 1)}
-                        />
+                        {shouldShowSummary && (
+                          <SummaryBox
+                            loading={summaryLoading}
+                            text={summary}
+                            error={summaryError}
+                            onRetry={() => setSummaryNonce((value) => value + 1)}
+                          />
+                        )}
                       </>
                     )}
                   </>
@@ -482,7 +491,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                       )}
                     </div>
 
-                    {reply && (
+                    {reply && shouldShowSummary && (
                       <SummaryBox
                         loading={summaryLoading}
                         text={summary}
@@ -560,6 +569,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
 }
 
 function SummaryBox({ loading, text, error, onRetry }) {
+  if (!loading && !text) return null;
   return (
     <div className="atd-summary">
       <div className="atd-summary-head">
@@ -571,9 +581,9 @@ function SummaryBox({ loading, text, error, onRetry }) {
           <span /><span /><span />
         </div>
       ) : (
-        <p>{text || 'No summary available yet.'}</p>
+        <p>{text}</p>
       )}
-      {error && <small>{error}</small>}
+      {!text && error && <small>{error}</small>}
     </div>
   );
 }
