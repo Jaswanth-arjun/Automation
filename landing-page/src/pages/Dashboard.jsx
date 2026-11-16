@@ -4,6 +4,7 @@ import { ArrowRight, Link2, Crown, X, Check, ExternalLink, Bookmark } from 'luci
 import { useAuth } from '../lib/auth';
 import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore, getUserName, getEmailUsername } from '../lib/api';
+import { DEMO_JOBS } from '../lib/mockData';
 import { computeJobScores } from '../lib/matchScore';
 import { savedJobsStore } from '../lib/savedJobsStore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
@@ -189,9 +190,13 @@ export default function Dashboard() {
     return () => window.removeEventListener('resumes_updated', bump);
   }, []);
 
+  // Same feed as the Jobs page (admin postings + demo roles) so Top Matches
+  // can never miss the highest scoring job.
+  const allJobs = useMemo(() => [...adminJobs, ...DEMO_JOBS], [adminJobs]);
+
   const scored = useMemo(
-    () => computeJobScores(profile || {}, adminJobs, { userId: user?.id || user?.email || 'anon' }),
-    [profile, adminJobs, user, resumeTick],
+    () => computeJobScores(profile || {}, allJobs, { userId: user?.id || user?.email || 'anon' }),
+    [profile, allJobs, user, resumeTick],
   );
   const scoredOnly = scored.filter(
     (job) => job.matchResult?.status === 'scored' || job.matchResult?.status === 'ineligible',

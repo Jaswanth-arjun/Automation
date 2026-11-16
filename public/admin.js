@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let mustHaveSkills = [];
   let goodToHaveSkills = [];
   let logoFile = null;
+  let importedLogoUrl = '';
+  let importedSourceUrl = '';
   let allJobs = [];
 
   // DOM Elements
@@ -35,6 +37,106 @@ document.addEventListener('DOMContentLoaded', () => {
   const jobsCountBadge = document.getElementById('jobsCountBadge');
   const toastNotification = document.getElementById('toastNotification');
   const toastMessage = document.getElementById('toastMessage');
+  const importJobUrl = document.getElementById('importJobUrl');
+  const importJobBtn = document.getElementById('importJobBtn');
+  const importStatus = document.getElementById('importStatus');
+
+  // ─── Import From Job Link ───
+  function setImportStatus(message, isError = false) {
+    importStatus.textContent = message;
+    importStatus.classList.toggle('hidden', !message);
+    importStatus.classList.toggle('is-error', Boolean(isError));
+  }
+
+  function setSelectValue(select, value) {
+    if (!select || !value) return;
+    const wanted = String(value).trim();
+    const exists = [...select.options].some((opt) => opt.value.toLowerCase() === wanted.toLowerCase());
+    if (!exists) {
+      const option = document.createElement('option');
+      option.value = wanted;
+      option.textContent = wanted;
+      select.appendChild(option);
+    }
+    const match = [...select.options].find((opt) => opt.value.toLowerCase() === wanted.toLowerCase());
+    if (match) select.value = match.value;
+  }
+
+  function applyImportedJob(job, sourceUrl) {
+    jobRole.value = job.title || '';
+    jobCompany.value = job.company || '';
+    applyLink.value = job.applyLink || sourceUrl || '';
+    jobDescription.value = job.description || '';
+    renderDescriptionPreview(jobDescription.value);
+
+    setSelectValue(filterWorkMode, job.location || 'Remote');
+    setSelectValue(filterType, job.type || 'Full Time');
+    setSelectValue(filterExperience, job.category || 'Freshers');
+    setSelectValue(filterVisibility, job.category === 'Remote' ? 'Remote' : 'Confidential');
+
+    mustHaveSkills = [...(job.requiredSkills || [])];
+    goodToHaveSkills = [...(job.preferredSkills || [])];
+    renderSkillTags(mustHaveTagsContainer, mustHaveSkills, 'must');
+    renderSkillTags(goodToHaveTagsContainer, goodToHaveSkills, 'good');
+
+    importedLogoUrl = job.companyLogoUrl || '';
+    importedSourceUrl = job.sourceUrl || sourceUrl || '';
+    logoFile = null;
+    if (importedLogoUrl) {
+      logoPreview.src = importedLogoUrl;
+      logoPreview.classList.remove('hidden');
+      logoPlaceholder.classList.add('hidden');
+    } else {
+      logoPreview.src = '';
+      logoPreview.classList.add('hidden');
+      logoPlaceholder.classList.remove('hidden');
+    }
+  }
+
+  async function handleImportJob() {
+    const url = importJobUrl.value.trim();
+    if (!url) {
+      setImportStatus('Paste the public job link first.', true);
+      return;
+    }
+
+    const originalLabel = importJobBtn.innerHTML;
+    importJobBtn.disabled = true;
+    importJobBtn.innerHTML = '<span class="btn-icon">⏳</span> Reading link...';
+    setImportStatus('Reading the posting — this can take up to 30 seconds on JavaScript careers sites.');
+
+    try {
+      const res = await fetch('/api/jobs/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.job) {
+        throw new Error(data.error || `That job link could not be read (${res.status}).`);
+      }
+
+      applyImportedJob(data.job, data.sourceUrl || url);
+      let host = '';
+      try { host = new URL(data.sourceUrl || url).hostname.replace(/^www\./, ''); } catch (err) { host = ''; }
+      setImportStatus(`✓ Details imported from ${host || 'the link'} — review the fields below, then post the job.`);
+      showToast('Job details imported from the link.');
+    } catch (err) {
+      setImportStatus(err.message || 'That job link could not be read.', true);
+      showToast(err.message || 'That job link could not be read.', true);
+    } finally {
+      importJobBtn.disabled = false;
+      importJobBtn.innerHTML = originalLabel;
+    }
+  }
+
+  importJobBtn.addEventListener('click', handleImportJob);
+  importJobUrl.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleImportJob();
+    }
+  });
 
   // ─── Logo Upload ───
   logoDropZone.addEventListener('click', () => logoUpload.click());
@@ -168,6 +270,13 @@ document.addEventListener('DOMContentLoaded', () => {
         continue;
       }
 
+      // Markdown-style heading (imported postings use "## Section")
+      if (/^#{1,6}\s+/.test(line)) {
+        const title = line.replace(/^#{1,6}\s+/, '').trim();
+        if (title) html += `<h3>${escapeHtml(title)}</h3>`;
+        continue;
+      }
+
       // Hashtag line (e.g. #BackendDeveloper #Python)
       if (/^#\w/.test(line)) {
         inHashtags = true;
@@ -253,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const jobPayload = {
-        logo: logoPath,
+        logo: logoPath || importedLogoUrl,
         role,
         company,
         filters: {
@@ -266,6 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
         goodToHaveSkills,
         applyLink: applyUrl,
         description,
+        ...(importedSourceUrl ? { sourceUrl: importedSourceUrl } : {}),
       };
 
       const res = await fetch('/api/jobs', {
@@ -306,6 +416,10 @@ document.addEventListener('DOMContentLoaded', () => {
     mustHaveSkills = [];
     goodToHaveSkills = [];
     logoFile = null;
+    importedLogoUrl = '';
+    importedSourceUrl = '';
+    importJobUrl.value = '';
+    setImportStatus('');
     logoPreview.src = '';
     logoPreview.classList.add('hidden');
     logoPlaceholder.classList.remove('hidden');
@@ -402,6 +516,160 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
+
+  // ─── Employee contacts (admin only) ───
+  const contactName = document.getElementById('contactName');
+  const contactCompany = document.getElementById('contactCompany');
+  const contactRole = document.getElementById('contactRole');
+  const contactEmail = document.getElementById('contactEmail');
+  const addContactBtn = document.getElementById('addContactBtn');
+  const uploadCompany = document.getElementById('uploadCompany');
+  const uploadContactsInput = document.getElementById('uploadContactsInput');
+  const contactsList = document.getElementById('contactsList');
+  const contactsCountBadge = document.getElementById('contactsCountBadge');
+  const contactsStatus = document.getElementById('contactsStatus');
+
+  function setContactsStatus(message, isError = false) {
+    contactsStatus.textContent = message;
+    contactsStatus.classList.toggle('hidden', !message);
+    contactsStatus.classList.toggle('is-error', Boolean(isError));
+  }
+
+  const contactsSearch = document.getElementById('contactsSearch');
+  const CONTACT_RENDER_LIMIT = 150;
+  let allContacts = [];
+
+  function renderContacts(contacts) {
+    allContacts = contacts;
+    const query = contactsSearch.value.trim().toLowerCase();
+    const filtered = query
+      ? contacts.filter((contact) => [contact.name, contact.company, contact.role, contact.email]
+        .filter(Boolean).join(' ').toLowerCase().includes(query))
+      : contacts;
+    const visible = filtered.slice(0, CONTACT_RENDER_LIMIT);
+
+    contactsCountBadge.textContent = query
+      ? `${filtered.length} of ${contacts.length} contacts`
+      : `${contacts.length} contact${contacts.length === 1 ? '' : 's'}`;
+
+    if (!filtered.length) {
+      contactsList.innerHTML = contacts.length
+        ? '<div class="empty-state"><span class="empty-icon">🔍</span><p>No contact matches that search.</p></div>'
+        : '<div class="empty-state"><span class="empty-icon">📫</span><p>No employee contacts saved yet.</p></div>';
+      return;
+    }
+
+    contactsList.innerHTML = visible.map((contact) => `
+      <div class="contact-item">
+        <div class="contact-info">
+          <strong>${escapeHtml(contact.name || '')}</strong>
+          <div class="contact-meta">${escapeHtml([contact.role, contact.company, contact.email].filter(Boolean).join(' · '))}</div>
+          ${contact.details ? `<div class="contact-details">${escapeHtml(contact.details)}</div>` : ''}
+        </div>
+        <button class="contact-delete" data-id="${escapeHtml(contact.id)}" title="Remove contact">🗑️</button>
+      </div>
+    `).join('') + (filtered.length > visible.length
+      ? `<p class="contacts-more">Showing the first ${visible.length} of ${filtered.length} contacts — use the search box to narrow the list.</p>`
+      : '');
+
+    contactsList.querySelectorAll('.contact-delete').forEach((btn) => {
+      btn.addEventListener('click', async (event) => {
+        const id = event.currentTarget.dataset.id;
+        if (!confirm('Remove this employee contact?')) return;
+        try {
+          await fetch(`/api/employees/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          await loadContacts();
+          showToast('Contact removed.');
+        } catch (err) {
+          showToast('Could not remove that contact.', true);
+        }
+      });
+    });
+  }
+
+  async function loadContacts() {
+    try {
+      const res = await fetch('/api/employees');
+      const rows = await res.json();
+      renderContacts(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      console.warn('Failed to load employee contacts:', err.message);
+    }
+  }
+
+  async function handleAddContact() {
+    const payload = {
+      name: contactName.value.trim(),
+      company: contactCompany.value.trim(),
+      role: contactRole.value.trim(),
+      email: contactEmail.value.trim(),
+    };
+
+    if (!payload.name || !payload.company || !payload.role || !payload.email) {
+      setContactsStatus('Name, company, role and email are all required.', true);
+      return;
+    }
+
+    addContactBtn.disabled = true;
+    setContactsStatus('');
+    try {
+      const res = await fetch('/api/employees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not save that contact.');
+
+      contactName.value = '';
+      contactRole.value = '';
+      contactEmail.value = '';
+      setContactsStatus(`✓ ${data.employee?.name || payload.name} saved for ${payload.company}. Candidates applying to ${payload.company} will see this contact.`);
+      await loadContacts();
+    } catch (err) {
+      setContactsStatus(err.message, true);
+    } finally {
+      addContactBtn.disabled = false;
+    }
+  }
+
+  async function handleContactsUpload(file) {
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    if (uploadCompany.value.trim()) body.append('company', uploadCompany.value.trim());
+
+    setContactsStatus('Reading the file...');
+    try {
+      const res = await fetch('/api/employees/upload-pdf', { method: 'POST', body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not read that file.');
+      setContactsStatus(`✓ Saved ${data.saved || 0} contact${data.saved === 1 ? '' : 's'} from ${file.name}.`);
+      await loadContacts();
+    } catch (err) {
+      setContactsStatus(err.message, true);
+    }
+  }
+
+  contactsSearch.addEventListener('input', () => renderContacts(allContacts));
+
+  addContactBtn.addEventListener('click', handleAddContact);
+  [contactName, contactCompany, contactRole, contactEmail].forEach((input) => {
+    input.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleAddContact();
+      }
+    });
+  });
+
+  uploadContactsInput.addEventListener('change', () => {
+    const file = uploadContactsInput.files?.[0];
+    uploadContactsInput.value = '';
+    handleContactsUpload(file);
+  });
+
+  loadContacts();
 
   // ─── Toast ───
   function showToast(msg, isError = false) {

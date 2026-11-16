@@ -1,919 +1,1660 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Mail,
-  Send,
   Inbox,
-  Clock,
-  CheckCircle,
+  Send,
   RefreshCw,
   Search,
   Star,
   Trash2,
   Sparkles,
   X,
-  FileText,
-  User,
-  ArrowUpRight,
-  ChevronRight
+  ChevronRight,
+  Archive,
+  PenLine,
+  Copy,
+  Check,
+  Loader2,
+  AlertTriangle,
+  Briefcase,
+  Paperclip,
+  ShieldCheck,
+  ArrowDownUp,
+  CornerUpLeft,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
-import ConnectedAccount from '../components/ConnectedAccount';
-import EmptyState from '../components/EmptyState';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import {
+  SIGNAL_META,
+  PIPELINE_SIGNALS,
+  decorateMail,
+  mailContext,
+  formatWhen,
+  daysSince,
+  initials,
+  senderLabel,
+} from '../lib/mailSignals';
+import './MailAutomation.css';
+
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'needs_reply', label: 'Needs reply' },
+  { key: 'job', label: 'Job mail' },
+  { key: 'interview', label: 'Interviews' },
+  { key: 'offer', label: 'Offers' },
+  { key: 'assessment', label: 'Assessments' },
+  { key: 'shortlisted', label: 'Shortlisted' },
+  { key: 'recruiter', label: 'Recruiters' },
+  { key: 'rejected', label: 'Updates' },
+  { key: 'unread', label: 'Unread' },
+  { key: 'starred', label: 'Starred' },
+];
 
 const CATEGORY_COLORS = {
-  'Job/Recruitment': 'bg-cyan-500/10 text-cyan-700 border-cyan-300',
-  'Work/Professional': 'bg-blue-500/10 text-blue-700 border-blue-300',
-  Newsletters: 'bg-purple-500/10 text-purple-700 border-purple-300',
-  Notifications: 'bg-orange-500/10 text-orange-700 border-orange-300',
-  Personal: 'bg-pink-500/10 text-pink-700 border-pink-300',
-  Finance: 'bg-yellow-500/10 text-yellow-700 border-yellow-300',
-  Uncategorized: 'bg-gray-500/10 text-gray-700 border-gray-300'
+  'Job/Recruitment': '#445cf5',
+  'Work/Professional': '#1d63c9',
+  'Newsletters': '#6d28d9',
+  'Notifications': '#b45309',
+  'Uncategorized': '#8a8c86',
 };
 
-function formatTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 3600000) return `${Math.max(1, Math.floor(diff / 60000))}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  if (diff < 172800000) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const SIGNAL_TONE = {
+  OFFER: 'tone-success',
+  INTERVIEW: 'tone-indigo',
+  ASSESSMENT: 'tone-amber',
+  SHORTLISTED: 'tone-blue',
+  RECRUITER: 'tone-blue',
+  REJECTED: 'tone-danger',
+  APPLIED: 'tone-cyan',
+  NEWSLETTER: 'tone-purple',
+  OTHER: 'tone-neutral',
+};
+
+function byDate(a, b) {
+  return new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0);
+}
+
+function matchesFilter(mail, key) {
+  switch (key) {
+    case 'needs_reply':
+      return Boolean(mail.needsReply);
+    case 'job':
+      return Boolean(mail.isJobRelated);
+    case 'interview':
+      return mail.signal === 'INTERVIEW';
+    case 'offer':
+      return mail.signal === 'OFFER';
+    case 'assessment':
+      return mail.signal === 'ASSESSMENT';
+    case 'shortlisted':
+      return mail.signal === 'SHORTLISTED';
+    case 'recruiter':
+      return mail.signal === 'RECRUITER';
+    case 'rejected':
+      return mail.signal === 'REJECTED';
+    case 'unread':
+      return !mail.isRead;
+    case 'starred':
+      return Boolean(mail.isStarred);
+    default:
+      return true;
+  }
+}
+
+function searchMatch(mail, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return [mail.subject, mail.snippet, mail.senderName, mail.senderEmail, mail.company, mail.bodyText]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(q));
 }
 
 export default function MailAutomation() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') || 'overview';
 
-  // Connection state — only true after an explicit Gmail Connect (not Google sign-in)
-  const [gmailConnected, setGmailConnected] = useState(false);
-
-  const [gmailEmail, setGmailEmail] = useState('');
-
-  // Modal for connect email input
-  const [showConnectModal, setShowConnectModal] = useState(false);
-  const [inputEmail, setInputEmail] = useState(user?.email || '');
-
-  // Subtab navigation: ONLY 'dashboard' | 'received' | 'sent'
-  const [activeTab, setActiveTab] = useState('dashboard');
-
-  // Real Inbox & Sent Threads Data
-  const [receivedThreads, setReceivedThreads] = useState([]);
-  const [sentThreads, setSentThreads] = useState([]);
-  const [dashboardData, setDashboardData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [flashMsg, setFlashMsg] = useState('');
-
-  // Search & Filter state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedThread, setSelectedThread] = useState(null);
-  const [selectedSentEmail, setSelectedSentEmail] = useState(null);
-  const [aiPanel, setAiPanel] = useState(null);
-
-  // Fetch data
-  const loadRealData = async () => {
-    if (!gmailConnected) return;
-    setLoading(true);
-    try {
-      const [dashRes, inboxRes, sentRes] = await Promise.all([
-        api.getDashboard().catch(() => null),
-        api.getEmails(0, 50, '', 'INBOX').catch(() => null),
-        api.getEmails(0, 50, '', 'SENT').catch(() => null)
-      ]);
-
-      if (dashRes) setDashboardData(dashRes);
-      if (inboxRes && inboxRes.emails) setReceivedThreads(inboxRes.emails);
-      if (sentRes && sentRes.emails) setSentThreads(sentRes.emails);
-    } catch (err) {
-      console.error('Error loading mail data:', err);
-    } finally {
-      setLoading(false);
-    }
+  const setTab = (next) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'overview') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
   };
 
-  useEffect(() => {
-    // Check URL search params for Google OAuth callback return
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('connected') === 'true') {
-      const email = params.get('email') || user?.email || '';
-      localStorage.setItem('mailmind_gmail_connected', 'true');
-      localStorage.setItem('mailmind_gmail_email', email);
-      setGmailConnected(true);
-      setGmailEmail(email);
-      setFlashMsg(`✅ Gmail connected with full access: ${email}`);
-      setTimeout(() => setFlashMsg(''), 5000);
-      window.history.replaceState({}, document.title, window.location.pathname);
-      return;
+  const [connected, setConnected] = useState(false);
+  const [account, setAccount] = useState({ email: '', method: '' });
+  const [inbox, setInbox] = useState([]);
+  const [sent, setSent] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [flash, setFlash] = useState(null);
+  const [lastSync, setLastSync] = useState(() => localStorage.getItem('mailmind_last_sync') || '');
+
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [sort, setSort] = useState('priority');
+  const [mailError, setMailError] = useState('');
+  const [bodyState, setBodyState] = useState({});
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [summaries, setSummaries] = useState({});
+  const [composer, setComposer] = useState(null);
+  const [ai, setAi] = useState(null);
+  const [copiedId, setCopiedId] = useState('');
+
+  const searchRef = useRef(null);
+  const inflightBodies = useRef(new Set());
+
+  const notify = useCallback((type, text) => setFlash({ type, text }), []);
+
+  const loadMail = useCallback(async () => {
+    const [inboxRes, sentRes] = await Promise.allSettled([
+      api.getEmails(0, 30, '', 'INBOX'),
+      api.getEmails(0, 30, '', 'SENT'),
+    ]);
+
+    if (inboxRes.status === 'rejected' && sentRes.status === 'rejected') {
+      const reason = inboxRes.reason || sentRes.reason;
+      const message = reason?.message || 'Could not load Gmail messages.';
+      setMailError(message);
+      return false;
     }
 
-    api.getGmailConfig()
-      .then(res => {
-        if (res && res.configured) {
-          setGmailConnected(true);
-          const email = res.email || '';
-          setGmailEmail(email);
-          localStorage.setItem('mailmind_gmail_connected', 'true');
-          localStorage.setItem('mailmind_gmail_email', email);
-        } else {
-          setGmailConnected(false);
-          setGmailEmail('');
-          localStorage.removeItem('mailmind_gmail_connected');
-          localStorage.removeItem('mailmind_gmail_email');
-        }
-      })
-      .catch(() => {
-        setGmailConnected(false);
+    setMailError('');
+    if (inboxRes.status === 'fulfilled') {
+      setInbox((inboxRes.value?.emails || []).map((mail) => decorateMail(mail, 'INBOX')));
+    }
+    if (sentRes.status === 'fulfilled') {
+      setSent((sentRes.value?.emails || []).map((mail) => decorateMail(mail, 'SENT')));
+    }
+    // A successful mailbox load means we just read Gmail, so record it.
+    const stamp = new Date().toISOString();
+    localStorage.setItem('mailmind_last_sync', stamp);
+    setLastSync(stamp);
+    return true;
+  }, []);
+
+  /**
+   * Bodies are intentionally not part of the list response: fetching 30 full
+   * messages per mailbox burns the Gmail quota. Load one body on demand and
+   * return the enriched message so AI actions can use the real text.
+   */
+  const ensureBody = useCallback(
+    async (mail) => {
+      if (!mail?.id || mail.bodyText) return mail;
+      if (inflightBodies.current.has(mail.id)) return mail;
+
+      inflightBodies.current.add(mail.id);
+      setBodyState((state) => ({ ...state, [mail.id]: 'loading' }));
+      try {
+        const body = await api.getEmail(mail.id);
+        const merged = { ...mail, ...body };
+        const patch = (list) => list.map((item) => (item.id === mail.id ? { ...item, ...body } : item));
+        setInbox(patch);
+        setSent(patch);
+        setBodyState((state) => ({ ...state, [mail.id]: 'ready' }));
+        return merged;
+      } catch (err) {
+        setBodyState((state) => ({ ...state, [mail.id]: 'error' }));
+        notify('err', err.message || 'Could not load the message body.');
+        return mail;
+      } finally {
+        inflightBodies.current.delete(mail.id);
+      }
+    },
+    [notify],
+  );
+
+  // Boot: resolve the connection, then load mail. Handles the OAuth return
+  // (`?connected=true`) that AuthCallback sends us back with.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const justConnected = params.get('connected') === 'true';
+      const connectedEmail = params.get('email') || '';
+
+      if (justConnected) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      setLoading(true);
+      const cfg = await api.getGmailConfig().catch(() => null);
+      if (cancelled) return;
+
+      const isConnected = Boolean(cfg?.configured);
+      setConnected(isConnected);
+      setAccount({
+        email: cfg?.email || connectedEmail || '',
+        method: cfg?.method || '',
       });
-  }, [user]);
 
+      if (isConnected) {
+        await loadMail();
+        if (cancelled) return;
+        setLoading(false);
+
+        if (justConnected) {
+          notify('ok', `Gmail connected${connectedEmail ? ` — ${connectedEmail}` : ''}. Syncing your inbox…`);
+          try {
+            await api.triggerSync();
+            await loadMail();
+            const stamp = new Date().toISOString();
+            localStorage.setItem('mailmind_last_sync', stamp);
+            setLastSync(stamp);
+            notify('ok', 'Inbox synced.');
+          } catch (err) {
+            notify('err', err.message || 'Connected, but the first sync failed.');
+          }
+        }
+      } else {
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadMail, notify]);
+
+  // Flash messages auto-dismiss so the page never keeps stale banners.
   useEffect(() => {
-    if (gmailConnected) {
-      loadRealData();
-    }
-  }, [gmailConnected]);
+    if (!flash) return undefined;
+    const timer = setTimeout(() => setFlash(null), 6000);
+    return () => clearTimeout(timer);
+  }, [flash]);
 
-  // Connect Gmail Handler (Redirects to Google OAuth 2.0 Consent Screen)
-  const handleInitiateConnect = async () => {
+  // `/` focuses search, Escape closes the reading pane / AI drawer.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const tag = document.activeElement?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      if (event.key === '/' && !typing) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (event.key === 'Escape') {
+        setDetailOpen(false);
+        setAi(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleConnect = async () => {
     try {
-      const res = await fetch('/api/gmail/auth-url').then(r => r.json());
-      if (res && res.authUrl) {
+      const res = await api.getAuthUrl();
+      if (res?.authUrl) {
         window.location.href = res.authUrl;
         return;
       }
-    } catch {}
-    setError('Could not start Gmail sign-in. Please make sure the backend is running and OAuth is configured in the server environment.');
+      notify('err', 'Google did not return an authorization URL.');
+    } catch (err) {
+      notify('err', err.message || 'Could not start Gmail sign-in. Is the backend running?');
+    }
   };
 
-  // Confirm Connect Email
-  const handleConfirmConnect = (e) => {
-    e.preventDefault();
-    if (!inputEmail.trim()) return;
-
-    const emailToConnect = inputEmail.trim();
-    localStorage.setItem('mailmind_gmail_connected', 'true');
-    localStorage.setItem('mailmind_gmail_email', emailToConnect);
-    setGmailConnected(true);
-    setGmailEmail(emailToConnect);
-    setShowConnectModal(false);
-    setFlashMsg(`Gmail connected: ${emailToConnect}`);
-    setTimeout(() => setFlashMsg(''), 4000);
+  const handleDisconnect = async () => {
+    if (!window.confirm('Disconnect this Gmail account? MailMind will stop syncing until you reconnect.')) return;
+    try {
+      await api.disconnectGmail();
+    } catch {
+      // Local state is still cleared so the user is never stuck.
+    }
+    setConnected(false);
+    setAccount({ email: '', method: '' });
+    setInbox([]);
+    setSent([]);
+    setSelectedId(null);
+    setDetailOpen(false);
+    setSummaries({});
+    notify('ok', 'Gmail disconnected. You can reconnect any time.');
   };
 
-  // Disconnect Gmail Handler
-  const handleDisconnectGmail = () => {
-    fetch('/api/gmail/disconnect', { method: 'POST' }).catch(() => {});
-    localStorage.removeItem('mailmind_gmail_connected');
-    localStorage.removeItem('mailmind_gmail_email');
-    setGmailConnected(false);
-    setGmailEmail('');
-    setReceivedThreads([]);
-    setSentThreads([]);
-    setDashboardData(null);
-    setFlashMsg('Gmail account disconnected.');
-    setTimeout(() => setFlashMsg(''), 3000);
-  };
-
-  // Sync Inbox Handler
-  const handleSyncInbox = async () => {
-    if (!gmailConnected) {
-      handleInitiateConnect();
+  const handleSync = async () => {
+    if (!connected) {
+      handleConnect();
       return;
     }
     setSyncing(true);
     try {
-      await api.triggerSync();
-      setFlashMsg('Sync initiated with Gmail API!');
-      await loadRealData();
+      const res = await api.triggerSync();
+      await loadMail();
+      const stamp = new Date().toISOString();
+      localStorage.setItem('mailmind_last_sync', stamp);
+      setLastSync(stamp);
+      notify('ok', `Inbox synced — ${res?.received ?? 0} received, ${res?.sent ?? 0} sent.`);
     } catch (err) {
-      setFlashMsg(err.message || 'Could not sync Gmail.');
+      notify('err', err.message || 'Could not sync Gmail.');
     } finally {
-      setTimeout(() => {
-        setSyncing(false);
-        setTimeout(() => setFlashMsg(''), 3000);
-      }, 1200);
+      setSyncing(false);
     }
   };
 
-  const mailContext = (mail) => ({
-    subject: mail.subject,
-    from: mail.senders?.[0]?.name || mail.senderName || '',
-    to: mail.senders?.[0]?.name || '',
-    email: mail.senders?.[0]?.email || mail.senderEmail || '',
-    body: mail.bodyText || mail.snippet || '',
-  });
+  const openMail = (mail) => {
+    setSelectedId(mail.id);
+    setDetailOpen(true);
+    if (mail.mailbox === 'INBOX' && !mail.isRead) {
+      setInbox((list) => list.map((item) => (item.id === mail.id ? { ...item, isRead: true } : item)));
+      api.markRead(mail.id, true).catch(() => {});
+    }
+    // Fetch the full body lazily; the list only carries metadata.
+    ensureBody(mail);
+  };
 
-  const openAiPanel = async (event, mail, mode) => {
-    event.stopPropagation();
-    setAiPanel({ mode, mail, text: '', subject: mail.subject || '', loading: true, error: '' });
+  const handleStar = async (event, mail) => {
+    event?.stopPropagation?.();
+    const next = !mail.isStarred;
+    const patch = (list) => list.map((item) => (item.id === mail.id ? { ...item, isStarred: next } : item));
+    setInbox(patch);
+    setSent(patch);
     try {
-      const payload = mailContext(mail);
-      const res = mode === 'summary'
-        ? await api.summarizeMail(payload)
-        : mode === 'reply'
-          ? await api.generateMailReply(payload)
-          : await api.generateFollowUp(payload);
-      setAiPanel({
-        mode,
-        mail,
-        text: res.text || '',
-        subject: res.subject || (mode === 'followup' ? `Following up: ${mail.subject || ''}` : mail.subject || ''),
-        loading: false,
-        error: '',
-      });
+      await api.toggleStar(mail.id, next);
     } catch (err) {
-      setAiPanel({ mode, mail, text: '', subject: '', loading: false, error: err.message || 'Gemini could not complete that request.' });
+      notify('err', err.message || 'Could not update the star.');
+      await loadMail().catch(() => {});
     }
   };
 
-  const handleSendFollowUp = async () => {
-    if (!aiPanel?.mail || !aiPanel.text.trim()) return;
-    setAiPanel((prev) => ({ ...prev, sending: true, error: '' }));
+  const removeLocally = (id) => {
+    setInbox((list) => list.filter((mail) => mail.id !== id));
+    setSent((list) => list.filter((mail) => mail.id !== id));
+    if (selectedId === id) {
+      setSelectedId(null);
+      setDetailOpen(false);
+    }
+  };
+
+  const handleArchive = async (event, mail) => {
+    event?.stopPropagation?.();
+    removeLocally(mail.id);
     try {
-      await api.sendFollowUp({
-        to: aiPanel.mail.senders?.[0]?.email || aiPanel.mail.senderEmail,
-        subject: aiPanel.subject,
-        body: aiPanel.text,
-      });
-      setAiPanel(null);
-      setFlashMsg('Follow-up email sent.');
-      setTimeout(() => setFlashMsg(''), 3000);
-      await loadRealData();
+      await api.archiveEmail(mail.id);
+      notify('ok', 'Archived in Gmail.');
     } catch (err) {
-      setAiPanel((prev) => ({ ...prev, sending: false, error: err.message || 'Could not send the follow-up.' }));
+      notify('err', err.message || 'Could not archive the email.');
+      await loadMail().catch(() => {});
     }
   };
 
-  // Toggle Star
-  const handleToggleStar = (e, threadId) => {
-    e.stopPropagation();
-    setReceivedThreads(prev =>
-      prev.map(t => (t.id === threadId ? { ...t, isStarred: !t.isStarred } : t))
-    );
-    api.toggleStar(threadId, true).catch(() => {});
+  const handleTrash = async (event, mail) => {
+    event?.stopPropagation?.();
+    removeLocally(mail.id);
+    try {
+      await api.trashEmail(mail.id);
+      notify('ok', 'Moved to Gmail trash.');
+    } catch (err) {
+      notify('err', err.message || 'Could not trash the email.');
+      await loadMail().catch(() => {});
+    }
   };
 
-  // Move to Trash
-  const handleTrashThread = (e, threadId) => {
-    e.stopPropagation();
-    setReceivedThreads(prev => prev.filter(t => t.id !== threadId));
-    if (selectedThread?.id === threadId) setSelectedThread(null);
-    setFlashMsg('Thread moved to trash');
-    setTimeout(() => setFlashMsg(''), 2500);
-    api.trashEmail(threadId).catch(() => {});
+  const summarize = async (mail) => {
+    if (!mail) return;
+    setSummaries((prev) => ({ ...prev, [mail.id]: { loading: true, text: '' } }));
+    try {
+      const full = await ensureBody(mail);
+      const res = await api.summarizeMail(mailContext(full));
+      setSummaries((prev) => ({
+        ...prev,
+        [mail.id]: { loading: false, text: res?.text || '', note: res?.fallback ? res.note || '' : '' },
+      }));
+    } catch (err) {
+      setSummaries((prev) => ({
+        ...prev,
+        [mail.id]: { loading: false, text: '', error: err.message || 'Summary failed.' },
+      }));
+    }
   };
 
-  // Filter received threads
-  const filteredReceived = receivedThreads.filter(t => {
-    const matchesSearch =
-      !searchQuery ||
-      t.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.senders?.some(s => s.name?.toLowerCase().includes(searchQuery.toLowerCase()) || s.email?.toLowerCase().includes(searchQuery.toLowerCase()));
+  const startReply = async (mail) => {
+    if (!mail) return;
+    setComposer({
+      mail,
+      subject: /^re:/i.test(mail.subject || '') ? mail.subject : `Re: ${mail.subject || 'your message'}`,
+      text: '',
+      loading: true,
+      sending: false,
+      error: '',
+      note: '',
+    });
+    try {
+      const full = await ensureBody(mail);
+      const res = await api.generateMailReply(mailContext(full));
+      setComposer((prev) =>
+        prev && prev.mail.id === mail.id
+          ? { ...prev, text: res?.text || '', loading: false, note: res?.fallback ? res.note || '' : '' }
+          : prev,
+      );
+    } catch (err) {
+      setComposer((prev) =>
+        prev && prev.mail.id === mail.id
+          ? { ...prev, loading: false, error: err.message || 'Could not generate a reply.' }
+          : prev,
+      );
+    }
+  };
 
-    if (!matchesSearch) return false;
+  const sendReply = async () => {
+    if (!composer || !composer.text.trim()) return;
+    setComposer((prev) => ({ ...prev, sending: true, error: '' }));
+    try {
+      await api.replySend({
+        to: composer.mail.senderEmail,
+        subject: composer.subject,
+        body: composer.text,
+        threadId: composer.mail.threadId,
+        inReplyTo: composer.mail.messageIdHeader,
+        references: composer.mail.referencesHeader,
+      });
+      setComposer(null);
+      notify('ok', `Reply sent to ${composer.mail.senderEmail}.`);
+      await loadMail();
+    } catch (err) {
+      setComposer((prev) => ({ ...prev, sending: false, error: err.message || 'Could not send the reply.' }));
+    }
+  };
 
-    if (selectedCategory === 'All') return true;
-    if (selectedCategory === 'Starred') return t.isStarred;
-    if (selectedCategory === 'Unread') return !t.isRead;
-    return t.aiCategory === selectedCategory;
-  });
+  const startFollowUp = async (mail) => {
+    if (!mail) return;
+    setAi({
+      mail,
+      subject: /^follow/i.test(mail.subject || '') ? mail.subject : `Following up: ${mail.subject || 'my last email'}`,
+      text: '',
+      loading: true,
+      sending: false,
+      error: '',
+      note: '',
+    });
+    try {
+      const full = await ensureBody(mail);
+      const res = await api.generateFollowUp(mailContext(full));
+      setAi((prev) =>
+        prev && prev.mail.id === mail.id
+          ? {
+              ...prev,
+              text: res?.text || '',
+              subject: res?.subject || prev.subject,
+              loading: false,
+              note: res?.fallback ? res.note || '' : '',
+            }
+          : prev,
+      );
+    } catch (err) {
+      setAi((prev) =>
+        prev && prev.mail.id === mail.id
+          ? { ...prev, loading: false, error: err.message || 'Could not write a follow-up.' }
+          : prev,
+      );
+    }
+  };
 
-  // Filter sent threads
-  const filteredSent = sentThreads.filter(t => {
-    return (
-      !searchQuery ||
-      t.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.senders?.some(s => s.name?.toLowerCase().includes(searchQuery.toLowerCase()) || s.email?.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
-  });
+  const sendFollowUp = async () => {
+    if (!ai || !ai.text.trim()) return;
+    setAi((prev) => ({ ...prev, sending: true, error: '' }));
+    try {
+      await api.sendFollowUp({ to: ai.mail.senderEmail, subject: ai.subject, body: ai.text });
+      setAi(null);
+      notify('ok', `Follow-up sent to ${ai.mail.senderEmail}.`);
+      await loadMail();
+    } catch (err) {
+      setAi((prev) => ({ ...prev, sending: false, error: err.message || 'Could not send the follow-up.' }));
+    }
+  };
 
-  // Category counts for received mails
-  const categoryCounts = {
-    'Job/Recruitment': receivedThreads.filter(t => t.aiCategory === 'Job/Recruitment').length,
-    'Work/Professional': receivedThreads.filter(t => t.aiCategory === 'Work/Professional').length,
-    Newsletters: receivedThreads.filter(t => t.aiCategory === 'Newsletters').length,
-    Notifications: receivedThreads.filter(t => t.aiCategory === 'Notifications').length
+  const copyText = async (id, text) => {
+    try {
+      await navigator.clipboard.writeText(text || '');
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(''), 1600);
+    } catch {
+      notify('err', 'Clipboard is blocked in this browser.');
+    }
+  };
+
+  const selected = useMemo(
+    () => [...inbox, ...sent].find((mail) => mail.id === selectedId) || null,
+    [inbox, sent, selectedId],
+  );
+
+  const stats = useMemo(() => {
+    const needsReply = inbox.filter((mail) => mail.needsReply).length;
+    const interviews = inbox.filter((mail) => mail.signal === 'INTERVIEW').length;
+    const offers = inbox.filter((mail) => mail.signal === 'OFFER').length;
+    const unread = inbox.filter((mail) => !mail.isRead).length;
+    return { needsReply, interviews, offers, unread };
+  }, [inbox]);
+
+  const categoryRows = useMemo(() => {
+    const counts = {};
+    inbox.forEach((mail) => {
+      const key = mail.aiCategory || 'Uncategorized';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    const labelOf = (key) => (key === 'Uncategorized' ? 'Other' : key);
+    return Object.entries(CATEGORY_COLORS).map(([key, color]) => ({
+      key,
+      label: labelOf(key),
+      color,
+      count: counts[key] || 0,
+    }));
+  }, [inbox]);
+
+  const attention = useMemo(() => {
+    const needsReply = inbox.filter((mail) => mail.needsReply);
+    const pool = needsReply.length ? needsReply : inbox.filter((mail) => mail.isJobRelated && !mail.isRead);
+    return [...pool]
+      .sort((a, b) => b.priority - a.priority || byDate(a, b))
+      .slice(0, 5);
+  }, [inbox]);
+
+  const filteredInbox = useMemo(() => {
+    const list = inbox.filter((mail) => matchesFilter(mail, filter) && searchMatch(mail, query));
+    return [...list].sort(sort === 'priority' ? (a, b) => b.priority - a.priority || byDate(a, b) : byDate);
+  }, [inbox, filter, query, sort]);
+
+  const filteredSent = useMemo(() => {
+    return [...sent.filter((mail) => searchMatch(mail, query))].sort(byDate);
+  }, [sent, query]);
+
+  const lanes = useMemo(
+    () =>
+      PIPELINE_SIGNALS.map((signal) => ({
+        signal,
+        label: SIGNAL_META[signal].label,
+        mails: inbox.filter((mail) => mail.signal === signal).sort(byDate),
+      })),
+    [inbox],
+  );
+
+  const displayName = user?.displayName || user?.email?.split('@')[0] || 'there';
+  const lastSyncLabel = lastSync ? `Last sync ${formatWhen(lastSync)}` : 'Not synced yet';
+
+  const retryLoad = async () => {
+    setLoading(true);
+    await loadMail();
+    setLoading(false);
   };
 
   return (
-    <div className="page-mail">
-      {/* Header */}
-      <header className="page-header">
+    <div className="mm-page">
+      <header className="mm-head">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-2xl font-extrabold tracking-tight">MailMind AI — Email Dashboard</h1>
-            <span className="tag" style={{ color: '#445cf5', borderColor: '#445cf5' }}>
-              <Sparkles size={11} className="inline mr-1" /> Active
-            </span>
+          <div className="mm-eyebrow">
+            <Sparkles size={12} /> MailMind AI
           </div>
-          <p>Monitor your job application emails, received recruiter messages & outgoing sent mails.</p>
+          <h1>Email command center</h1>
+          <p>
+            Job threads, recruiter replies and follow-ups — sorted by what needs you next, {displayName}.
+          </p>
         </div>
-        <div className="header-actions">
-          <button
-            onClick={handleSyncInbox}
-            disabled={syncing}
-            className="btn-accent"
-            style={{ background: '#445cf5' }}
-          >
+        <div className="mm-head-actions">
+          <span className={`mm-sync-note ${connected ? '' : 'is-off'}`}>
+            <span className="mm-dot" />
+            {connected ? lastSyncLabel : 'Gmail not connected'}
+          </span>
+          <button type="button" className="mm-btn primary" onClick={handleSync} disabled={syncing}>
             <RefreshCw size={14} className={syncing ? 'spin' : ''} />
-            {syncing ? 'Syncing Inbox...' : 'Sync Inbox'}
+            {syncing ? 'Syncing…' : connected ? 'Sync inbox' : 'Connect Gmail'}
           </button>
         </div>
       </header>
 
-      {/* Flash Notice */}
-      {flashMsg && (
-        <div className="li-flash ok mb-4">
-          <CheckCircle size={16} /> {flashMsg}
+      {flash && (
+        <div className={`mm-flash ${flash.type === 'err' ? 'err' : 'ok'}`} role="status">
+          {flash.type === 'err' ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+          {flash.text}
         </div>
       )}
 
-      {/* Connected Account Card */}
-      <section className="dash-section">
-        <ConnectedAccount
-          name="Gmail Account"
-          icon={Mail}
-          connected={gmailConnected}
-          email={gmailConnected ? gmailEmail : ''}
-          onConnect={handleInitiateConnect}
-          onDisconnect={handleDisconnectGmail}
-        />
-      </section>
-
-      {/* Gmail Connect Input Modal */}
-      {showConnectModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white border border-[#d9d9d2] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#f0f0ec] pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
-                  <Mail size={16} />
-                </div>
-                <h3 className="font-bold text-base text-[#171817]">Connect Gmail Account</h3>
-              </div>
-              <button onClick={() => setShowConnectModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
+      <section className={`mm-account ${connected ? '' : 'is-off'}`}>
+        <div className="mm-account-icon">
+          <Mail size={19} />
+        </div>
+        <div className="mm-account-info">
+          <strong>Gmail account</strong>
+          <small>
+            {connected
+              ? `${account.email || account.method || 'Connected'} · MailMind reads job mail only`
+              : 'Connect an inbox to read recruiter threads, draft replies and track application updates.'}
+          </small>
+        </div>
+        {connected ? (
+          <>
+            <div className="mm-account-scopes">
+              <span className="mm-scope">read</span>
+              <span className="mm-scope">send</span>
+              <span className="mm-scope">label</span>
+            </div>
+            <div className="mm-account-actions">
+              <span className="mm-status-pill">
+                <CheckCircle2 size={13} /> Connected
+              </span>
+              <button type="button" className="mm-btn" onClick={handleConnect}>
+                Reconnect
+              </button>
+              <button type="button" className="mm-btn danger" onClick={handleDisconnect}>
+                Disconnect
               </button>
             </div>
+          </>
+        ) : (
+          <div className="mm-account-actions">
+            <span className="mm-status-pill off">Not connected</span>
+            <button type="button" className="mm-btn primary" onClick={handleConnect}>
+              Connect Gmail
+            </button>
+          </div>
+        )}
+      </section>
 
-            <form onSubmit={handleConfirmConnect} className="space-y-4">
-              <p className="text-xs text-gray-600 leading-relaxed">
-                Enter your Gmail address to connect your inbox with MailMind AI for tracking job applications and recruiter emails.
-              </p>
+      {!connected ? (
+        <ConnectPanel loading={loading} onConnect={handleConnect} />
+      ) : (
+        <>
+          {mailError && (
+            <div className="mm-flash err" role="alert">
+              <AlertTriangle size={15} />
+              <span style={{ flex: 1 }}>{mailError}</span>
+              <button type="button" className="mm-btn" onClick={retryLoad} disabled={loading}>
+                {loading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} Retry
+              </button>
+            </div>
+          )}
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Your Gmail Address</label>
-                <input
-                  type="email"
-                  required
-                  value={inputEmail}
-                  onChange={e => setInputEmail(e.target.value)}
-                  placeholder="e.g. name@gmail.com"
-                  className="w-full p-2.5 rounded-lg border border-[#d9d9d2] text-xs font-semibold outline-none focus:border-[#445cf5]"
-                />
-              </div>
+          <section className="mm-stats">
+            <StatCard icon={Inbox} value={inbox.length} label="Inbox" foot={`${stats.unread} unread · latest ${inbox.length}`} tone="accent" />
+            <StatCard
+              icon={CornerUpLeft}
+              value={stats.needsReply}
+              label="Needs reply"
+              foot="Recruiter, interview or offer"
+              tone="warn"
+            />
+            <StatCard
+              icon={Briefcase}
+              value={stats.interviews}
+              label="Interviews"
+              foot="Invites and scheduling"
+              tone="success"
+            />
+            <StatCard
+              icon={CheckCircle2}
+              value={stats.offers}
+              label="Offers"
+              foot="Offer letters detected"
+              tone="success"
+            />
+            <StatCard icon={Send} value={sent.length} label="Sent" foot="Outreach and replies" tone="accent" />
+          </section>
 
-              <div className="flex gap-2 pt-2">
+          <div className="mm-tabs" role="tablist" aria-label="Mail views">
+            {[
+              { key: 'overview', label: 'Overview', icon: Sparkles },
+              { key: 'inbox', label: 'Inbox', icon: Inbox, count: inbox.length },
+              { key: 'sent', label: 'Sent', icon: Send, count: sent.length },
+              { key: 'updates', label: 'Job updates', icon: Briefcase, count: stats.needsReply + stats.interviews },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
                 <button
-                  type="submit"
-                  className="btn-accent flex-1 justify-center"
-                  style={{ background: '#445cf5' }}
-                >
-                  <CheckCircle size={14} /> Connect Gmail Account
-                </button>
-                <button
+                  key={item.key}
                   type="button"
-                  onClick={() => setShowConnectModal(false)}
-                  className="btn-ghost"
+                  role="tab"
+                  aria-selected={tab === item.key}
+                  className={`mm-tab ${tab === item.key ? 'active' : ''}`}
+                  onClick={() => setTab(item.key)}
                 >
-                  Cancel
+                  <Icon size={14} />
+                  {item.label}
+                  {typeof item.count === 'number' && item.count > 0 && (
+                    <span className="mm-tab-count">{item.count}</span>
+                  )}
                 </button>
+              );
+            })}
+          </div>
+
+          {tab === 'overview' && (
+            <div className="mm-overview">
+              <div className="mm-stack">
+                <section className="mm-card">
+                  <header className="mm-card-head">
+                    <div className="mm-card-title">
+                      <CornerUpLeft size={15} /> Needs your attention
+                    </div>
+                    <button type="button" className="mm-link" onClick={() => setTab('inbox')}>
+                      Open inbox <ChevronRight size={12} />
+                    </button>
+                  </header>
+                  {loading ? (
+                    <SkeletonRows />
+                  ) : attention.length === 0 ? (
+                    <EmptyBlock
+                      icon={CheckCircle2}
+                      title="Nothing is waiting on you"
+                      description="No recruiter or interview email needs a reply right now."
+                    />
+                  ) : (
+                    <div className="mm-attn">
+                      {attention.map((mail) => (
+                        <div
+                          key={mail.id}
+                          className="mm-attn-row"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openMail(mail)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') openMail(mail);
+                          }}
+                        >
+                          <Avatar mail={mail} />
+                          <div className="mm-attn-body">
+                            <div className="mm-attn-top">
+                              <span className="mm-attn-from">{senderLabel(mail)}</span>
+                              <SignalChip signal={mail.signal} />
+                              {!mail.isRead && <span className="mm-signal tone-indigo">New</span>}
+                            </div>
+                            <div className="mm-attn-subject">{mail.subject || '(No subject)'}</div>
+                            <div className="mm-attn-meta">
+                              {mail.company && <span>{mail.company}</span>}
+                              <span>{daysSince(mail.receivedAt) === 0 ? 'Today' : `${daysSince(mail.receivedAt)}d waiting`}</span>
+                            </div>
+                          </div>
+                          <div className="mm-attn-right">
+                            <span className="mm-attn-time">{formatWhen(mail.receivedAt)}</span>
+                            <ChevronRight size={15} color="#b6b8b0" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="mm-card">
+                  <header className="mm-card-head">
+                    <div className="mm-card-title">
+                      <Mail size={15} /> Recent received
+                    </div>
+                    <button type="button" className="mm-link" onClick={() => setTab('inbox')}>
+                      View all <ChevronRight size={12} />
+                    </button>
+                  </header>
+                  {loading ? (
+                    <SkeletonRows />
+                  ) : inbox.length === 0 ? (
+                    <EmptyBlock
+                      icon={Inbox}
+                      title="No mail yet"
+                      description="Run a sync to pull your latest inbox messages."
+                      action={<button type="button" className="mm-btn primary" onClick={handleSync}>Sync now</button>}
+                    />
+                  ) : (
+                    <div>
+                      {[...inbox].sort(byDate).slice(0, 5).map((mail) => (
+                        <MailRow
+                          key={mail.id}
+                          mail={mail}
+                          selected={mail.id === selectedId}
+                          onOpen={() => openMail(mail)}
+                          onStar={(event) => handleStar(event, mail)}
+                          onArchive={(event) => handleArchive(event, mail)}
+                          onTrash={(event) => handleTrash(event, mail)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
               </div>
-            </form>
+
+              <div className="mm-stack">
+                <section className="mm-card">
+                  <header className="mm-card-head">
+                    <div className="mm-card-title">
+                      <Briefcase size={15} /> Application signals
+                    </div>
+                    <span className="mm-muted" style={{ fontSize: 10.5, fontWeight: 700 }}>
+                      Auto-tagged
+                    </span>
+                  </header>
+                  <div className="mm-card-body">
+                    <div className="mm-pipeline">
+                      {PIPELINE_SIGNALS.map((signal) => {
+                        const meta = SIGNAL_META[signal];
+                        const count = inbox.filter((mail) => mail.signal === signal).length;
+                        return (
+                          <button
+                            key={signal}
+                            type="button"
+                            className="mm-pipe-row"
+                            onClick={() => {
+                              setFilter(signal.toLowerCase());
+                              setTab('inbox');
+                            }}
+                          >
+                            <span
+                              className="mm-pipe-dot"
+                              style={{ background: signalColor(signal) }}
+                            />
+                            <span className="mm-pipe-label">{meta.label}</span>
+                            <span className="mm-pipe-value">{count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="mm-card">
+                  <header className="mm-card-head">
+                    <div className="mm-card-title">
+                      <Inbox size={15} /> Inbox mix
+                    </div>
+                  </header>
+                  <div className="mm-card-body">
+                    <div className="mm-bars">
+                      {categoryRows.map((row) => {
+                        const total = Math.max(1, inbox.length);
+                        const pct = Math.round((row.count / total) * 100);
+                        return (
+                          <div className="mm-bar-row" key={row.key}>
+                            <div className="mm-bar-top">
+                              <span>{row.label}</span>
+                              <span>{row.count}</span>
+                            </div>
+                            <div className="mm-bar-track">
+                              <div
+                                className="mm-bar-fill"
+                                style={{ width: `${pct}%`, background: row.color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="mm-card">
+                  <header className="mm-card-head">
+                    <div className="mm-card-title">
+                      <Send size={15} /> Recent sent
+                    </div>
+                    <button type="button" className="mm-link" onClick={() => setTab('sent')}>
+                      View all <ChevronRight size={12} />
+                    </button>
+                  </header>
+                  {loading ? (
+                    <SkeletonRows rows={2} />
+                  ) : sent.length === 0 ? (
+                    <EmptyBlock
+                      icon={Send}
+                      title="No sent mail yet"
+                      description="Replies and follow-ups you send from MailMind appear here."
+                    />
+                  ) : (
+                    <div>
+                      {[...sent].sort(byDate).slice(0, 4).map((mail) => (
+                        <div key={mail.id} className="mm-attn-row" onClick={() => openMail(mail)}>
+                          <Avatar mail={mail} />
+                          <div className="mm-attn-body">
+                            <div className="mm-attn-top">
+                              <span className="mm-attn-from">{senderLabel(mail)}</span>
+                            </div>
+                            <div className="mm-attn-subject">{mail.subject || '(No subject)'}</div>
+                          </div>
+                          <span className="mm-attn-time">{formatWhen(mail.receivedAt)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+
+          {tab === 'inbox' && (
+            <>
+              <MailToolbar
+                query={query}
+                setQuery={setQuery}
+                filter={filter}
+                setFilter={setFilter}
+                sort={sort}
+                setSort={setSort}
+                inbox={inbox}
+                searchRef={searchRef}
+              />
+              <div className="mm-split">
+                <div className="mm-list">
+                  {loading ? (
+                    <SkeletonRows />
+                  ) : filteredInbox.length === 0 ? (
+                    <EmptyBlock
+                      icon={Search}
+                      title={query ? 'No matches' : 'Nothing in this view'}
+                      description={
+                        query
+                          ? `No email matches “${query}”. Try a different word or clear the filter.`
+                          : 'Try another filter, or sync to pull new messages.'
+                      }
+                    />
+                  ) : (
+                    filteredInbox.map((mail) => (
+                      <MailRow
+                        key={mail.id}
+                        mail={mail}
+                        selected={mail.id === selectedId}
+                        onOpen={() => openMail(mail)}
+                        onStar={(event) => handleStar(event, mail)}
+                        onArchive={(event) => handleArchive(event, mail)}
+                        onTrash={(event) => handleTrash(event, mail)}
+                      />
+                    ))
+                  )}
+                </div>
+
+                <div className={`mm-detail-col ${detailOpen ? 'is-open' : ''}`}>
+                  <ReadingPane
+                    mail={selected}
+                    summary={selected ? summaries[selected.id] : null}
+                    composer={composer && composer.mail?.id === selected?.id ? composer : null}
+                    onSummarize={() => summarize(selected)}
+                    onReply={() => startReply(selected)}
+                    onFollowUp={() => startFollowUp(selected)}
+                    onStar={(event) => handleStar(event, selected)}
+                    onArchive={(event) => handleArchive(event, selected)}
+                    onTrash={(event) => handleTrash(event, selected)}
+                    onClose={() => setDetailOpen(false)}
+                    onChangeComposer={(patch) => setComposer((prev) => ({ ...prev, ...patch }))}
+                    onSendReply={sendReply}
+                    onCancelComposer={() => setComposer(null)}
+                    onCopy={copyText}
+                    copied={copiedId === selected?.id}
+                    bodyState={selected ? bodyState[selected.id] : null}
+                    onLoadBody={() => ensureBody(selected)}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'sent' && (
+            <>
+              <MailToolbar
+                query={query}
+                setQuery={setQuery}
+                filter="all"
+                setFilter={() => {}}
+                sort="newest"
+                setSort={setSort}
+                inbox={[]}
+                searchRef={searchRef}
+                simple
+              />
+              <div className="mm-split">
+                <div className="mm-list">
+                  {loading ? (
+                    <SkeletonRows />
+                  ) : filteredSent.length === 0 ? (
+                    <EmptyBlock
+                      icon={Send}
+                      title={query ? 'No matches' : 'No sent mail yet'}
+                      description={
+                        query
+                          ? `No sent email matches “${query}”.`
+                          : 'Replies and follow-ups you send from MailMind appear here.'
+                      }
+                    />
+                  ) : (
+                    filteredSent.map((mail) => (
+                      <MailRow
+                        key={mail.id}
+                        mail={mail}
+                        selected={mail.id === selectedId}
+                        onOpen={() => openMail(mail)}
+                        onStar={(event) => handleStar(event, mail)}
+                        onArchive={(event) => handleArchive(event, mail)}
+                        onTrash={(event) => handleTrash(event, mail)}
+                      />
+                    ))
+                  )}
+                </div>
+
+                <div className={`mm-detail-col ${detailOpen ? 'is-open' : ''}`}>
+                  <ReadingPane
+                    mail={selected}
+                    summary={selected ? summaries[selected.id] : null}
+                    composer={composer && composer.mail?.id === selected?.id ? composer : null}
+                    onSummarize={() => summarize(selected)}
+                    onReply={() => startReply(selected)}
+                    onFollowUp={() => startFollowUp(selected)}
+                    onStar={(event) => handleStar(event, selected)}
+                    onArchive={(event) => handleArchive(event, selected)}
+                    onTrash={(event) => handleTrash(event, selected)}
+                    onClose={() => setDetailOpen(false)}
+                    onChangeComposer={(patch) => setComposer((prev) => ({ ...prev, ...patch }))}
+                    onSendReply={sendReply}
+                    onCancelComposer={() => setComposer(null)}
+                    onCopy={copyText}
+                    copied={copiedId === selected?.id}
+                    bodyState={selected ? bodyState[selected.id] : null}
+                    onLoadBody={() => ensureBody(selected)}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'updates' && (
+            <section>
+              <div className="mm-spread" style={{ marginBottom: 12 }}>
+                <p className="mm-muted" style={{ margin: 0, fontSize: 12 }}>
+                  Every recruiter signal MailMind found in your inbox. Open a card to read the email and reply.
+                </p>
+              </div>
+              <div className="mm-board">
+                {lanes.map((lane) => (
+                  <div className="mm-lane" key={lane.signal}>
+                    <header className="mm-lane-head">
+                      <span className="mm-lane-title">
+                        <span
+                          className="mm-pipe-dot"
+                          style={{ background: signalColor(lane.signal) }}
+                        />
+                        {lane.label}
+                      </span>
+                      <span className="mm-lane-count">{lane.mails.length}</span>
+                    </header>
+                    <div className="mm-lane-list">
+                      {lane.mails.length === 0 ? (
+                        <div className="mm-lane-empty">Nothing here yet</div>
+                      ) : (
+                        lane.mails.slice(0, 5).map((mail) => (
+                          <div key={mail.id} className="mm-lane-card" onClick={() => openMail(mail)}>
+                            <strong>{mail.company || senderLabel(mail)}</strong>
+                            <small>{mail.subject || '(No subject)'}</small>
+                            <small style={{ color: '#a0a29a' }}>{formatWhen(mail.receivedAt)}</small>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/*
+        The reading pane is rendered inside the Inbox/Sent tabs. On a narrow
+        screen it becomes a fixed sheet, so we also render it here when a mail
+        was opened from Overview/Job updates and the user is not on those tabs.
+      */}
+      {(tab === 'overview' || tab === 'updates') && detailOpen && selected && (
+        <div className="mm-overlay mm-sheet-overlay" onClick={() => setDetailOpen(false)}>
+          <div className="mm-sheet" onClick={(event) => event.stopPropagation()}>
+            <ReadingPane
+              mail={selected}
+              summary={summaries[selected.id]}
+              composer={composer && composer.mail?.id === selected.id ? composer : null}
+              onSummarize={() => summarize(selected)}
+              onReply={() => startReply(selected)}
+              onFollowUp={() => startFollowUp(selected)}
+              onStar={(event) => handleStar(event, selected)}
+              onArchive={(event) => handleArchive(event, selected)}
+              onTrash={(event) => handleTrash(event, selected)}
+              onClose={() => setDetailOpen(false)}
+              onChangeComposer={(patch) => setComposer((prev) => ({ ...prev, ...patch }))}
+              onSendReply={sendReply}
+              onCancelComposer={() => setComposer(null)}
+              onCopy={copyText}
+              copied={copiedId === selected.id}
+              bodyState={bodyState[selected.id]}
+              onLoadBody={() => ensureBody(selected)}
+            />
           </div>
         </div>
       )}
 
-      {/* Main Tab Bar - ONLY 3 TABS: Dashboard | Received Mails | Sent Mails */}
-      <div className="mail-tabs-bar">
-        {[
-          { id: 'dashboard', label: 'Dashboard Overview', icon: Inbox },
-          { id: 'received', label: `Received Mails ${receivedThreads.length > 0 ? `(${receivedThreads.length})` : ''}`, icon: Mail },
-          { id: 'sent', label: `Sent Mails ${sentThreads.length > 0 ? `(${sentThreads.length})` : ''}`, icon: Send }
-        ].map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`mail-tab-btn ${isActive ? 'active' : ''}`}
-            >
-              <Icon size={14} />
-              {tab.label}
-            </button>
-          );
-        })}
+      {ai && (
+        <div className="mm-overlay" onClick={() => setAi(null)}>
+          <div className="mm-drawer" onClick={(event) => event.stopPropagation()}>
+            <header className="mm-drawer-head">
+              <div className="mm-drawer-title">
+                <Sparkles size={15} /> Follow-up draft
+              </div>
+              <button type="button" className="mm-btn icon" onClick={() => setAi(null)} aria-label="Close">
+                <X size={16} />
+              </button>
+            </header>
+            <div className="mm-drawer-body">
+              <div className="mm-field">
+                <label>To</label>
+                <input className="mm-input" value={ai.mail.senderEmail || ''} readOnly />
+              </div>
+              <div className="mm-field">
+                <label>Subject</label>
+                <input
+                  className="mm-input"
+                  value={ai.subject}
+                  onChange={(event) => setAi((prev) => ({ ...prev, subject: event.target.value }))}
+                />
+              </div>
+              <div className="mm-field">
+                <label>Message</label>
+                {ai.loading ? (
+                  <div className="mm-hint">
+                    <Loader2 size={13} className="spin" /> Gemini is drafting…
+                  </div>
+                ) : (
+                  <textarea
+                    className="mm-textarea"
+                    value={ai.text}
+                    onChange={(event) => setAi((prev) => ({ ...prev, text: event.target.value }))}
+                  />
+                )}
+              </div>
+              {ai.error && <p className="mm-error">{ai.error}</p>}
+              {ai.note && (
+                <p className="mm-note">
+                  <AlertTriangle size={12} /> {ai.note}
+                </p>
+              )}
+            </div>
+            <footer className="mm-drawer-foot">
+              <button
+                type="button"
+                className="mm-btn"
+                onClick={() => copyText(`ai-${ai.mail.id}`, ai.text)}
+                disabled={!ai.text}
+              >
+                {copiedId === `ai-${ai.mail.id}` ? <Check size={14} /> : <Copy size={14} />} Copy
+              </button>
+              <button type="button" className="mm-btn" onClick={() => setAi(null)}>
+                Cancel
+              </button>
+              <button type="button" className="mm-btn primary" onClick={sendFollowUp} disabled={ai.sending || !ai.text}>
+                {ai.sending ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
+                {ai.sending ? 'Sending…' : 'Send follow-up'}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Presentational components                                          */
+/* ------------------------------------------------------------------ */
+
+function StatCard({ icon: Icon, value, label, foot, tone = 'neutral' }) {
+  return (
+    <div className={`mm-stat tone-${tone}`}>
+      <div className="mm-stat-top">
+        <span className="mm-stat-icon">
+          <Icon size={15} />
+        </span>
+      </div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+      {foot && <div className="mm-stat-foot">{foot}</div>}
+    </div>
+  );
+}
+
+function SignalChip({ signal }) {
+  const meta = SIGNAL_META[signal] || SIGNAL_META.OTHER;
+  return <span className={`mm-signal ${SIGNAL_TONE[signal] || SIGNAL_TONE.OTHER}`}>{meta.label}</span>;
+}
+
+function signalColor(signal) {
+  switch (signal) {
+    case 'OFFER':
+      return '#1f7a45';
+    case 'INTERVIEW':
+      return '#3b4fd8';
+    case 'ASSESSMENT':
+      return '#b45309';
+    case 'SHORTLISTED':
+      return '#1d63c9';
+    case 'RECRUITER':
+      return '#1d63c9';
+    case 'REJECTED':
+      return '#b42318';
+    default:
+      return '#8a8c86';
+  }
+}
+
+function Avatar({ mail }) {
+  const tone = SIGNAL_TONE[mail.signal] || SIGNAL_TONE.OTHER;
+  return <span className={`mm-avatar ${tone}`}>{initials(senderLabel(mail), mail.senderEmail)}</span>;
+}
+
+function SkeletonRows({ rows = 5 }) {
+  return (
+    <div className="mm-skeleton">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div className="mm-skeleton-row" key={index} />
+      ))}
+    </div>
+  );
+}
+
+function EmptyBlock({ icon: Icon, title, description, action }) {
+  return (
+    <div className="mm-empty">
+      <span className="mm-empty-icon">
+        <Icon size={20} />
+      </span>
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {action}
+    </div>
+  );
+}
+
+function ConnectPanel({ loading, onConnect }) {
+  return (
+    <section className="mm-card">
+      <div style={{ padding: '26px 24px', maxWidth: 620 }}>
+        <div className="mm-eyebrow">
+          <ShieldCheck size={12} /> Consent first
+        </div>
+        <h2 style={{ margin: '0 0 8px', fontSize: 19, fontWeight: 800, letterSpacing: '-.02em' }}>
+          Turn your inbox into a job pipeline
+        </h2>
+        <p style={{ margin: '0 0 16px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.6 }}>
+          MailMind reads recruiter threads, interviews, assessments and offers, then links them to your
+          applications. You keep full control: every reply is editable before it is sent, and you can
+          disconnect in one click.
+        </p>
+        <div className="mm-bars" style={{ marginBottom: 18 }}>
+          {[
+            'Sort job mail from newsletters automatically',
+            'Draft replies and follow-ups you can edit',
+            'Detect interview, assessment and offer signals',
+          ].map((item) => (
+            <div className="mm-row-line" key={item} style={{ fontSize: 12, color: '#3d403a' }}>
+              <CheckCircle2 size={14} color="#1f7a45" /> {item}
+            </div>
+          ))}
+        </div>
+        <div className="mm-row-line" style={{ flexWrap: 'wrap' }}>
+          <button type="button" className="mm-btn primary" onClick={onConnect} disabled={loading}>
+            <Mail size={14} /> Connect Gmail
+          </button>
+          <span className="mm-hint">
+            <ShieldCheck size={12} /> Standard Google OAuth. We never store your password.
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MailToolbar({ query, setQuery, filter, setFilter, sort, setSort, inbox, searchRef, simple = false }) {
+  return (
+    <div className="mm-toolbar">
+      <div className="mm-search">
+        <Search size={14} color="#8d9088" />
+        <input
+          ref={searchRef}
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={simple ? 'Search sent mail…' : 'Search sender, company, subject or content…'}
+          aria-label="Search mail"
+        />
+        <span className="mm-kbd">/</span>
+        {query && (
+          <button type="button" className="mm-btn icon" onClick={() => setQuery('')} aria-label="Clear search">
+            <X size={13} />
+          </button>
+        )}
       </div>
 
-      {/* TAB 1: DASHBOARD OVERVIEW */}
-      {activeTab === 'dashboard' && (
-        <div className="space-y-6">
-          {!gmailConnected ? (
-            <EmptyState
-              icon={Mail}
-              title="Gmail Not Connected"
-              description="Connect your Gmail account to manage job-search outreach, track received recruiter emails, and view sent applications."
-              actionLabel="Connect Gmail"
-              onAction={handleInitiateConnect}
-            />
-          ) : (
-            <>
-              {/* Stats Row */}
-              <div className="stats-grid compact">
-                <div className="mini-stat">
-                  <Inbox size={18} />
-                  <div>
-                    <strong>{receivedThreads.length}</strong>
-                    <span>Received Mails</span>
-                  </div>
-                </div>
-                <div className="mini-stat">
-                  <Send size={18} />
-                  <div>
-                    <strong>{sentThreads.length}</strong>
-                    <span>Sent Mails</span>
-                  </div>
-                </div>
-                <div className="mini-stat">
-                  <Clock size={18} />
-                  <div>
-                    <strong>{receivedThreads.filter(t => !t.isRead).length}</strong>
-                    <span>Unread Messages</span>
-                  </div>
-                </div>
-                <div className="mini-stat">
-                  <CheckCircle size={18} />
-                  <div>
-                    <strong>Connected</strong>
-                    <span>Gmail API Active</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Category Distribution Grid */}
-              <div className="li-card">
-                <div className="li-card-head">
-                  <h3>
-                    <Sparkles size={16} /> Received Email Categories
-                  </h3>
-                  <span className="text-xs font-bold text-gray-500">Auto-categorized</span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[
-                    { label: 'Job/Recruitment', count: categoryCounts['Job/Recruitment'], color: '#06b6d4', desc: 'Interview invitations & recruiter reachouts' },
-                    { label: 'Work/Professional', count: categoryCounts['Work/Professional'], color: '#3b82f6', desc: 'Hiring manager updates & follow-ups' },
-                    { label: 'Newsletters', count: categoryCounts['Newsletters'], color: '#a855f7', desc: 'Engineering & tech roundups' },
-                    { label: 'Notifications', count: categoryCounts['Notifications'], color: '#f97316', desc: 'System alerts & platform notices' }
-                  ].map(cat => (
-                    <div
-                      key={cat.label}
-                      onClick={() => {
-                        setSelectedCategory(cat.label);
-                        setActiveTab('received');
-                      }}
-                      className="p-4 rounded-xl bg-[#fafaf7] border border-[#e2e2df] flex items-center justify-between cursor-pointer hover:border-[#445cf5] transition-all"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
-                          <span className="font-bold text-sm text-[#171817]">{cat.label}</span>
-                        </div>
-                        <p className="text-xs text-gray-500">{cat.desc}</p>
-                      </div>
-                      <div className="text-right flex items-baseline gap-1">
-                        <span className="text-lg font-extrabold text-[#171817]">{cat.count}</span>
-                        <span className="text-xs font-semibold text-gray-500">Threads</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Recent Activity Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Recent Received */}
-                <div className="li-card">
-                  <div className="li-card-head">
-                    <h3>
-                      <Mail size={16} /> Recent Received Mails
-                    </h3>
-                    <button onClick={() => setActiveTab('received')} className="text-xs font-bold text-[#445cf5] hover:underline flex items-center gap-1">
-                      View All <ChevronRight size={12} />
-                    </button>
-                  </div>
-                  {receivedThreads.length === 0 ? (
-                    <div className="activity-empty">
-                      <p>No received emails found. Click "Sync Inbox" to pull latest messages.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {receivedThreads.slice(0, 4).map(t => (
-                        <div
-                          key={t.id}
-                          onClick={() => {
-                            setSelectedThread(t);
-                            setActiveTab('received');
-                          }}
-                          className="p-3 rounded-lg bg-white border border-[#e2e2df] flex items-center justify-between hover:bg-[#f8f9ff] cursor-pointer transition-all"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-7 h-7 rounded-full bg-indigo-50 text-indigo-600 font-bold flex items-center justify-center text-xs shrink-0 border border-indigo-200">
-                              {t.senders?.[0]?.name?.charAt(0) || 'R'}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-bold text-xs truncate text-[#171817]">{t.subject || '(No Subject)'}</div>
-                              <div className="text-[11px] text-gray-500 truncate">{t.senders?.[0]?.name || t.senderName}</div>
-                            </div>
-                          </div>
-                          <span className="text-[11px] font-bold text-gray-400 shrink-0 ml-2">{formatTime(t.receivedAt)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Recent Sent */}
-                <div className="li-card">
-                  <div className="li-card-head">
-                    <h3>
-                      <Send size={16} /> Recent Sent Mails
-                    </h3>
-                    <button onClick={() => setActiveTab('sent')} className="text-xs font-bold text-[#445cf5] hover:underline flex items-center gap-1">
-                      View All <ChevronRight size={12} />
-                    </button>
-                  </div>
-                  {sentThreads.length === 0 ? (
-                    <div className="activity-empty">
-                      <p>No sent emails logged yet.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {sentThreads.slice(0, 4).map(t => (
-                        <div
-                          key={t.id}
-                          onClick={() => {
-                            setSelectedSentEmail(t);
-                            setActiveTab('sent');
-                          }}
-                          className="p-3 rounded-lg bg-white border border-[#e2e2df] flex items-center justify-between hover:bg-[#f8f9ff] cursor-pointer transition-all"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-600 font-bold flex items-center justify-center text-xs shrink-0 border border-emerald-200">
-                              <Send size={11} />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-bold text-xs truncate text-[#171817]">{t.subject || '(No Subject)'}</div>
-                              <div className="text-[11px] text-gray-500 truncate">To: {t.senders?.[0]?.name || t.recipient || 'Recipient'}</div>
-                            </div>
-                          </div>
-                          <span className="text-[11px] font-bold text-gray-400 shrink-0 ml-2">{formatTime(t.receivedAt || t.sentAt)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
+      {!simple && (
+        <div className="mm-chips">
+          {FILTERS.map((item) => {
+            const count = item.key === 'all' ? inbox.length : inbox.filter((mail) => matchesFilter(mail, item.key)).length;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={`mm-chip ${filter === item.key ? 'active' : ''}`}
+                onClick={() => setFilter(item.key)}
+              >
+                {item.label}
+                {count > 0 && <span className="mm-chip-count">{count}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
 
-      {/* TAB 2: RECEIVED MAILS (INBOX) */}
-      {activeTab === 'received' && (
-        <div className="space-y-4">
-          {!gmailConnected ? (
-            <EmptyState
-              icon={Mail}
-              title="Gmail Not Connected"
-              description="Connect your Gmail account to view your received recruiter messages."
-              actionLabel="Connect Gmail"
-              onAction={handleInitiateConnect}
-            />
+      {!simple && (
+        <div className="mm-sort">
+          <ArrowDownUp size={12} />
+          <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort mail">
+            <option value="priority">Priority</option>
+            <option value="newest">Newest</option>
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MailRow({ mail, selected, onOpen, onStar, onArchive, onTrash }) {
+  return (
+    <article
+      className={`mm-row ${!mail.isRead ? 'is-unread' : ''} ${selected ? 'is-selected' : ''}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') onOpen();
+      }}
+    >
+      <Avatar mail={mail} />
+      <div className="mm-row-main">
+        <div className="mm-row-top">
+          <span className="mm-row-from">{senderLabel(mail)}</span>
+          {mail.isStarred && <Star size={12} className="mm-row-star" fill="currentColor" />}
+          {mail.mailbox === 'SENT' ? (
+            <span className="mm-signal tone-neutral">
+              <Send size={9} /> Sent
+            </span>
           ) : (
-            <>
-              {/* Search & Filter Toolbar */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-[#d9d9d2]">
-                <div className="search-box sm flex-1">
-                  <Search size={14} className="text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search received mails by sender, email, or subject..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                  />
-                  {searchQuery && (
-                    <button onClick={() => setSearchQuery('')} className="text-xs text-gray-400">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-
-                {/* Filter Category Chips */}
-                <div className="flex items-center gap-1.5 overflow-x-auto">
-                  {['All', 'Job/Recruitment', 'Work/Professional', 'Starred', 'Unread', 'Newsletters'].map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`chip ${selectedCategory === cat ? 'active' : ''}`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Received Threads List */}
-              <div className="li-conn-list">
-                {filteredReceived.length === 0 ? (
-                  <div className="empty-state">
-                    <Inbox size={36} className="empty-state-icon" />
-                    <h3>No received emails found</h3>
-                    <p>Click "Sync Inbox" to fetch your latest incoming messages.</p>
-                    <button onClick={handleSyncInbox} className="btn-accent mt-3" style={{ background: '#445cf5' }}>
-                      <RefreshCw size={14} /> Sync Inbox Now
-                    </button>
-                  </div>
-                ) : (
-                  filteredReceived.map(thread => {
-                    const isUnread = !thread.isRead;
-                    const sender = thread.senders?.[0] || { name: thread.senderName || 'Sender', email: thread.senderEmail || '' };
-
-                    return (
-                      <div
-                        key={thread.id}
-                        onClick={() => setSelectedThread(thread)}
-                        className={`li-conn-row cursor-pointer group ${isUnread ? 'bg-[#f4f6ff]' : ''}`}
-                      >
-                        {/* Avatar */}
-                        <div className="li-conn-avatar">
-                          {sender.name?.charAt(0) || 'R'}
-                        </div>
-
-                        {/* Thread Info */}
-                        <div className="li-conn-info">
-                          <div className="flex items-center gap-2">
-                            <span className={`li-conn-name ${isUnread ? 'font-extrabold' : ''}`}>
-                              {sender.name}
-                            </span>
-                            {thread.aiCategory && (
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CATEGORY_COLORS[thread.aiCategory] || CATEGORY_COLORS.Uncategorized}`}>
-                                {thread.aiCategory}
-                              </span>
-                            )}
-                          </div>
-                          <div className={`text-xs ${isUnread ? 'font-bold text-gray-900' : 'text-gray-700'} truncate mt-0.5`}>
-                            {thread.subject || '(No Subject)'}
-                          </div>
-                          <small className="text-gray-500 truncate">{thread.snippet || thread.aiSummary || ''}</small>
-                        </div>
-
-                        {/* Actions & Time */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button className="btn-ghost sm" onClick={(e) => openAiPanel(e, thread, 'summary')}>Summarize</button>
-                          <button className="btn-ghost sm" onClick={(e) => openAiPanel(e, thread, 'reply')}>Generate reply</button>
-                          <span className="text-xs text-gray-400 font-semibold">{formatTime(thread.receivedAt)}</span>
-                          <button
-                            onClick={(e) => handleToggleStar(e, thread.id)}
-                            className="p-1 hover:text-yellow-500 text-gray-400 transition-colors"
-                            title={thread.isStarred ? 'Unstar' : 'Star'}
-                          >
-                            <Star size={16} className={thread.isStarred ? 'fill-yellow-400 text-yellow-400' : ''} />
-                          </button>
-                          <button
-                            onClick={(e) => handleTrashThread(e, thread.id)}
-                            className="p-1 hover:text-red-500 text-gray-400 transition-colors"
-                            title="Move to Trash"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Full Received Thread Detail Modal */}
-              {selectedThread && (
-                <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white border border-[#d9d9d2] rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-                    {/* Modal Header */}
-                    <div className="p-4 border-b border-[#e2e2df] flex items-center justify-between bg-[#fafaf7]">
-                      <div className="flex items-center gap-2">
-                        {selectedThread.aiCategory && (
-                          <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${CATEGORY_COLORS[selectedThread.aiCategory] || CATEGORY_COLORS.Uncategorized}`}>
-                            {selectedThread.aiCategory}
-                          </span>
-                        )}
-                        <h3 className="font-bold text-sm text-[#171817] truncate max-w-md">{selectedThread.subject}</h3>
-                      </div>
-                      <button onClick={() => setSelectedThread(null)} className="p-1 text-gray-400 hover:text-gray-700">
-                        <X size={18} />
-                      </button>
-                    </div>
-
-                    {/* Modal Body */}
-                    <div className="p-6 overflow-y-auto space-y-4 flex-1">
-                      {(selectedThread.messages || [selectedThread]).map((msg, idx) => (
-                        <div key={msg.id || idx} className="p-4 rounded-xl border border-[#e2e2df] bg-white space-y-3">
-                          <div className="flex items-center justify-between border-b border-[#f0f0ec] pb-2">
-                            <div>
-                              <span className="font-bold text-sm text-[#171817]">{msg.senderName || selectedThread.senders?.[0]?.name || 'Sender'}</span>
-                              <span className="text-xs text-gray-500 block">{msg.senderEmail || selectedThread.senders?.[0]?.email || ''}</span>
-                            </div>
-                            <span className="text-xs text-gray-400">{formatTime(msg.receivedAt || selectedThread.receivedAt)}</span>
-                          </div>
-                          <div className="text-xs text-[#171817] leading-relaxed whitespace-pre-line">
-                            {msg.bodyText || selectedThread.snippet || ''}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Modal Footer */}
-                    <div className="p-4 border-t border-[#e2e2df] bg-[#fafaf7] flex justify-end gap-2">
-                      <button className="btn-ghost text-xs" onClick={(e) => openAiPanel(e, selectedThread, 'summary')}>Summarize</button>
-                      <button className="btn-accent text-xs" onClick={(e) => openAiPanel(e, selectedThread, 'reply')}>Generate reply</button>
-                      <button onClick={() => setSelectedThread(null)} className="btn-ghost text-xs">
-                        Close Window
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
+            <SignalChip signal={mail.signal} />
           )}
+        </div>
+        <div className="mm-row-subject">{mail.subject || '(No subject)'}</div>
+        <div className="mm-row-snippet">{mail.snippet || mail.bodyText || 'No preview available.'}</div>
+        <div className="mm-row-tags">
+          {mail.company && mail.isJobRelated && (
+            <span className="mm-mini-tag">
+              <Briefcase size={9} /> {mail.company}
+            </span>
+          )}
+          {mail.needsReply && (
+            <span className="mm-mini-tag">
+              <CornerUpLeft size={9} /> Needs reply
+            </span>
+          )}
+          {mail.hasAttachments && (
+            <span className="mm-mini-tag">
+              <Paperclip size={9} /> Attachment
+            </span>
+          )}
+          <span className="mm-mini-tag">
+            <Clock size={9} /> {formatWhen(mail.receivedAt)}
+          </span>
+        </div>
+      </div>
+      <div className="mm-row-side">
+        <span className="mm-row-time">{formatWhen(mail.receivedAt)}</span>
+        <div className="mm-row-actions">
+          <button
+            type="button"
+            className="mm-btn icon"
+            onClick={(event) => onStar(event)}
+            aria-label={mail.isStarred ? 'Unstar' : 'Star'}
+            title={mail.isStarred ? 'Unstar' : 'Star'}
+          >
+            <Star size={14} fill={mail.isStarred ? 'currentColor' : 'none'} color={mail.isStarred ? '#e0a800' : undefined} />
+          </button>
+          <button
+            type="button"
+            className="mm-btn icon"
+            onClick={(event) => onArchive(event)}
+            aria-label="Archive"
+            title="Archive"
+          >
+            <Archive size={14} />
+          </button>
+          <button
+            type="button"
+            className="mm-btn icon"
+            onClick={(event) => onTrash(event)}
+            aria-label="Move to trash"
+            title="Move to trash"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ReadingPane({
+  mail,
+  summary,
+  composer,
+  onSummarize,
+  onReply,
+  onFollowUp,
+  onStar,
+  onArchive,
+  onTrash,
+  onClose,
+  onChangeComposer,
+  onSendReply,
+  onCancelComposer,
+  onCopy,
+  copied,
+  bodyState,
+  onLoadBody,
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [mail?.id]);
+
+  if (!mail) {
+    return (
+      <div className="mm-detail">
+        <EmptyBlock
+          icon={Mail}
+          title="Select an email"
+          description="Open a message to read it, get an AI summary, or draft a reply."
+        />
+      </div>
+    );
+  }
+
+  const sender = senderLabel(mail);
+  const body = mail.bodyText || mail.snippet || '';
+  const isLong = body.length > 1400;
+
+  return (
+    <div className="mm-detail">
+      <header className="mm-detail-head">
+        <div className="mm-detail-head-main">
+          <div className="mm-row-line" style={{ flexWrap: 'wrap' }}>
+            {mail.mailbox === 'SENT' ? (
+              <span className="mm-signal tone-neutral">
+                <Send size={9} /> Sent
+              </span>
+            ) : (
+              <SignalChip signal={mail.signal} />
+            )}
+            {mail.needsReply && <span className="mm-mini-tag">Needs reply</span>}
+            {mail.company && mail.isJobRelated && (
+              <span className="mm-mini-tag">
+                <Briefcase size={9} /> {mail.company}
+              </span>
+            )}
+          </div>
+          <h2 className="mm-detail-subject">{mail.subject || '(No subject)'}</h2>
+        </div>
+        <button type="button" className="mm-btn icon" onClick={onClose} aria-label="Close email">
+          <X size={16} />
+        </button>
+      </header>
+
+      <div className="mm-detail-meta">
+        <Avatar mail={mail} />
+        <div className="mm-detail-sender">
+          <strong>{sender}</strong>
+          <small>
+            {mail.senderEmail || 'No address'}
+            {' · '}
+            {formatWhen(mail.receivedAt)}
+          </small>
+        </div>
+        <button
+          type="button"
+          className="mm-btn icon"
+          onClick={() => onCopy(mail.id, body)}
+          aria-label="Copy email body"
+          title="Copy email body"
+        >
+          {copied ? <Check size={15} /> : <Copy size={15} />}
+        </button>
+      </div>
+
+      <div className="mm-detail-actions">
+        <button type="button" className="mm-btn primary" onClick={onReply}>
+          <PenLine size={13} /> AI reply
+        </button>
+        <button type="button" className="mm-btn" onClick={onSummarize}>
+          <Sparkles size={13} /> Summarize
+        </button>
+        <button type="button" className="mm-btn" onClick={onFollowUp}>
+          <CornerUpLeft size={13} /> Follow-up
+        </button>
+        <button type="button" className="mm-btn icon" onClick={onStar} aria-label="Star" title="Star">
+          <Star size={15} fill={mail.isStarred ? 'currentColor' : 'none'} color={mail.isStarred ? '#e0a800' : undefined} />
+        </button>
+        <button type="button" className="mm-btn icon" onClick={onArchive} aria-label="Archive" title="Archive">
+          <Archive size={15} />
+        </button>
+        <button type="button" className="mm-btn icon" onClick={onTrash} aria-label="Trash" title="Trash">
+          <Trash2 size={15} />
+        </button>
+      </div>
+
+      {summary && (
+        <div className="mm-summary">
+          <div className="mm-summary-head">
+            <Sparkles size={12} /> {summary.note ? 'Email text' : 'AI summary'}
+          </div>
+          {summary.loading ? (
+            <p className="mm-hint">
+              <Loader2 size={12} className="spin" /> Reading the thread…
+            </p>
+          ) : summary.error ? (
+            <p className="mm-summary-error">{summary.error}</p>
+          ) : (
+            <p>{summary.text}</p>
+          )}
+          {summary.note && !summary.loading && <p className="mm-note">{summary.note}</p>}
         </div>
       )}
 
-      {/* TAB 3: SENT MAILS */}
-      {activeTab === 'sent' && (
-        <div className="space-y-4">
-          {!gmailConnected ? (
-            <EmptyState
-              icon={Send}
-              title="Gmail Not Connected"
-              description="Connect your Gmail account to view your sent emails."
-              actionLabel="Connect Gmail"
-              onAction={handleInitiateConnect}
-            />
-          ) : (
-            <>
-              {/* Search Bar */}
-              <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-[#d9d9d2]">
-                <div className="search-box sm flex-1">
-                  <Search size={14} className="text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search sent mails by recipient, email, or subject..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                  />
-                  {searchQuery && (
-                    <button onClick={() => setSearchQuery('')} className="text-xs text-gray-400">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
+      {mail.hasAttachments && (
+        <span className="mm-attachment">
+          <Paperclip size={13} /> This email has an attachment. Open it in Gmail to download.
+        </span>
+      )}
 
-              {/* Sent Mails List */}
-              <div className="li-conn-list">
-                {filteredSent.length === 0 ? (
-                  <div className="empty-state">
-                    <Send size={36} className="empty-state-icon" />
-                    <h3>No sent emails found</h3>
-                    <p>Sent job applications and outreach emails will appear here.</p>
-                  </div>
-                ) : (
-                  filteredSent.map(item => {
-                    const recipient = item.senders?.[0] || { name: item.recipient || 'Recipient', email: '' };
-
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => setSelectedSentEmail(item)}
-                        className="li-conn-row cursor-pointer group"
-                      >
-                        {/* Sent Icon Avatar */}
-                        <div className="li-conn-avatar" style={{ background: '#e5f5e9', color: '#22a65b' }}>
-                          <Send size={14} />
-                        </div>
-
-                        {/* Sent Mail Info */}
-                        <div className="li-conn-info">
-                          <div className="flex items-center gap-2">
-                            <span className="li-conn-name">To: {recipient.name}</span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-                              Sent
-                            </span>
-                          </div>
-                          <div className="text-xs font-bold text-gray-900 truncate mt-0.5">
-                            {item.subject || '(No Subject)'}
-                          </div>
-                          <small className="text-gray-500 truncate">{item.snippet || item.bodyText || ''}</small>
-                        </div>
-
-                        {/* Sent Timestamp */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button className="btn-ghost sm" onClick={(e) => openAiPanel(e, item, 'followup')}>Send follow-up</button>
-                          <span className="text-xs text-gray-400 font-semibold">{formatTime(item.receivedAt || item.sentAt)}</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Sent Email Viewer Modal */}
-              {selectedSentEmail && (
-                <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-                  <div className="bg-white border border-[#d9d9d2] rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-                    {/* Modal Header */}
-                    <div className="p-4 border-b border-[#e2e2df] flex items-center justify-between bg-[#fafaf7]">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-                          Sent Mail
-                        </span>
-                        <h3 className="font-bold text-sm text-[#171817] truncate max-w-md">{selectedSentEmail.subject}</h3>
-                      </div>
-                      <button onClick={() => setSelectedSentEmail(null)} className="p-1 text-gray-400 hover:text-gray-700">
-                        <X size={18} />
-                      </button>
-                    </div>
-
-                    {/* Modal Body */}
-                    <div className="p-6 overflow-y-auto space-y-4 flex-1">
-                      <div className="p-4 rounded-xl border border-[#e2e2df] bg-white space-y-3">
-                        <div className="flex items-center justify-between border-b border-[#f0f0ec] pb-2">
-                          <div>
-                            <span className="font-bold text-sm text-[#171817]">To: {selectedSentEmail.senders?.[0]?.name || selectedSentEmail.recipient || 'Recipient'}</span>
-                            <span className="text-xs text-gray-500 block">{selectedSentEmail.senders?.[0]?.email || ''}</span>
-                          </div>
-                          <span className="text-xs text-gray-400">{formatTime(selectedSentEmail.receivedAt || selectedSentEmail.sentAt)}</span>
-                        </div>
-                        <div className="text-xs text-[#171817] leading-relaxed whitespace-pre-line font-mono">
-                          {selectedSentEmail.bodyText || selectedSentEmail.snippet || ''}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Modal Footer */}
-                    <div className="p-4 border-t border-[#e2e2df] bg-[#fafaf7] flex justify-end gap-2">
-                      <button className="btn-accent text-xs" onClick={(e) => openAiPanel(e, selectedSentEmail, 'followup')}>Send follow-up</button>
-                      <button onClick={() => setSelectedSentEmail(null)} className="btn-ghost text-xs">
-                        Close Window
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+      <div className={`mm-detail-body ${isLong && !expanded ? 'is-clamped' : ''}`}>
+        {body || (bodyState === 'loading' ? '' : 'This message has no readable text body.')}
+      </div>
+      {!body && bodyState === 'loading' && (
+        <div className="mm-clamp-toggle mm-hint">
+          <Loader2 size={12} className="spin" /> Loading the full message…
+        </div>
+      )}
+      {!body && bodyState === 'error' && (
+        <div className="mm-clamp-toggle">
+          <button type="button" className="mm-link" onClick={onLoadBody}>
+            Could not load the body — retry
+          </button>
+        </div>
+      )}
+      {isLong && (
+        <div className="mm-clamp-toggle">
+          <button type="button" className="mm-link" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? 'Show less' : 'Show full email'} <ChevronRight size={12} style={{ transform: expanded ? 'rotate(-90deg)' : 'rotate(90deg)' }} />
+          </button>
         </div>
       )}
 
-      {aiPanel && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-[#d9d9d2] rounded-2xl max-w-xl w-full p-5 shadow-2xl space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-base">
-                {aiPanel.mode === 'summary' ? 'Summary' : aiPanel.mode === 'reply' ? 'Generated reply' : 'Follow-up message'}
-              </h3>
-              <button onClick={() => setAiPanel(null)} className="text-gray-400"><X size={18} /></button>
+      {composer && (
+        <div className="mm-composer">
+          <div className="mm-composer-head">
+            <div className="mm-composer-title">
+              <PenLine size={13} /> Reply to {composer.mail.senderEmail || sender}
             </div>
-            {aiPanel.loading ? (
-              <p className="text-sm text-gray-500">Gemini is writing this…</p>
+            <button type="button" className="mm-btn icon" onClick={onCancelComposer} aria-label="Cancel reply">
+              <X size={15} />
+            </button>
+          </div>
+
+          <div className="mm-field">
+            <label>Subject</label>
+            <input
+              className="mm-input"
+              value={composer.subject}
+              onChange={(event) => onChangeComposer({ subject: event.target.value })}
+            />
+          </div>
+          <div className="mm-field">
+            <label>Message</label>
+            {composer.loading ? (
+              <div className="mm-hint">
+                <Loader2 size={13} className="spin" /> Gemini is drafting a reply…
+              </div>
             ) : (
               <textarea
-                value={aiPanel.text}
-                onChange={(e) => setAiPanel((prev) => ({ ...prev, text: e.target.value }))}
-                readOnly={aiPanel.mode === 'summary'}
-                rows={10}
-                className="w-full p-3 rounded-lg border border-[#d9d9d2] text-sm"
+                className="mm-textarea"
+                value={composer.text}
+                onChange={(event) => onChangeComposer({ text: event.target.value })}
+                placeholder="Write your reply…"
               />
             )}
-            {aiPanel.error && <p className="text-sm text-red-600">{aiPanel.error}</p>}
-            <div className="flex justify-end gap-2">
-              <button className="btn-ghost" onClick={() => setAiPanel(null)}>Close</button>
-              {aiPanel.mode === 'followup' && !aiPanel.loading && (
-                <button className="btn-accent" disabled={aiPanel.sending} onClick={handleSendFollowUp}>
-                  {aiPanel.sending ? 'Sending…' : 'Send follow-up'}
-                </button>
-              )}
+          </div>
+          {composer.error && <p className="mm-error">{composer.error}</p>}
+          {composer.note && (
+            <p className="mm-note">
+              <AlertTriangle size={12} /> {composer.note}
+            </p>
+          )}
+
+          <div className="mm-composer-foot">
+            <span className="mm-hint">
+              <ShieldCheck size={12} /> Sends from your connected Gmail. Edit before sending.
+            </span>
+            <div className="mm-row-line">
+              <button type="button" className="mm-btn" onClick={onCancelComposer}>
+                Discard
+              </button>
+              <button
+                type="button"
+                className="mm-btn primary"
+                onClick={onSendReply}
+                disabled={composer.sending || composer.loading || !composer.text.trim()}
+              >
+                {composer.sending ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
+                {composer.sending ? 'Sending…' : 'Send reply'}
+              </button>
             </div>
           </div>
         </div>

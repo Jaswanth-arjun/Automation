@@ -1,13 +1,48 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Users, UserCheck, Eye, MessageCircle, Clock, Play, Square, RefreshCw, Search,
-  ExternalLink, Sparkles, Terminal, Plus, X, Radio, Activity, Zap, Target, KeyRound,
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  Building2,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Copy,
+  ExternalLink,
+  Eye,
+  Gauge,
+  Hourglass,
+  Info,
+  KeyRound,
+  Link2,
+  Loader2,
+  MessageCircle,
+  MessageSquare,
+  PauseCircle,
+  Play,
+  PlayCircle,
+  Plus,
+  Radio,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Square,
+  Target,
+  Terminal,
+  Timer,
+  TrendingUp,
+  UserCheck,
+  Users,
+  X,
+  Zap,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api, profileStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import ConnectedAccount from '../components/ConnectedAccount';
-import EmptyState from '../components/EmptyState';
+import './LinkedInAutomation.css';
 
 const LinkedinIcon = ({ size = 22 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -18,45 +53,182 @@ const LinkedinIcon = ({ size = 22 }) => (
 );
 
 const STATUS_META = {
-  idle: { label: 'Idle', cls: 'idle' },
-  running: { label: 'Running', cls: 'running' },
-  syncing: { label: 'Syncing', cls: 'running' },
-  requires_login: { label: 'Login Required', cls: 'warn' },
-  completed: { label: 'Completed', cls: 'completed' },
-  stopped: { label: 'Stopped', cls: 'stopped' },
+  idle: { label: 'Idle', tone: 'tone-neutral' },
+  running: { label: 'Running', tone: 'tone-warn' },
+  syncing: { label: 'Syncing', tone: 'tone-accent' },
+  requires_login: { label: 'Login required', tone: 'tone-danger' },
+  expired: { label: 'Session expired', tone: 'tone-danger' },
+  completed: { label: 'Completed', tone: 'tone-success' },
+  completed_sync: { label: 'Sync complete', tone: 'tone-success' },
+  stopped: { label: 'Stopped', tone: 'tone-neutral' },
 };
 
 const CONN_STATUS = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
-  { key: 'accepted', label: 'Accepted' },
   { key: 'seen', label: 'Seen' },
+  { key: 'accepted', label: 'Accepted' },
   { key: 'replied', label: 'Replied' },
   { key: 'declined', label: 'Declined' },
 ];
 
+const STATUS_LABEL = {
+  pending: 'Pending',
+  seen: 'Seen',
+  accepted: 'Accepted',
+  replied: 'Replied',
+  declined: 'Declined',
+};
+
 const DEFAULT_ROLES = ['Recruiter', 'Talent Acquisition', 'HR', 'Hiring Manager', 'Engineering Manager'];
+
+const LOG_LEVELS = [
+  { key: 'all', label: 'All' },
+  { key: 'success', label: 'Success' },
+  { key: 'warn', label: 'Warnings' },
+  { key: 'error', label: 'Errors' },
+];
+
+function levelOf(log) {
+  const level = String(log?.level || 'info').toLowerCase();
+  if (level === 'warning') return 'warn';
+  if (level === 'success' || level === 'error' || level === 'warn') return level;
+  return 'info';
+}
+
+function timeAgo(value) {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return '—';
+  const diff = Math.max(0, Date.now() - time);
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(time).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function fullDate(value) {
+  if (!value) return '—';
+  const time = new Date(value);
+  if (!Number.isFinite(time.getTime())) return '—';
+  return time.toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function initials(name) {
+  const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() || '').join('') || '?';
+}
+
+function percent(value, total) {
+  if (!total) return 0;
+  return Math.round((value / total) * 100);
+}
+
+function formatEstimate(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '< 1 min';
+  if (seconds < 60) return '< 1 min';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `~${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `~${hours}h ${rest}m` : `~${hours}h`;
+}
+
+function StatCard({ icon: Icon, value, label, foot, tone = 'neutral' }) {
+  return (
+    <div className={`liq-stat tone-${tone}`}>
+      <div className="liq-stat-top">
+        <span className="liq-stat-icon"><Icon size={15} /></span>
+      </div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+      {foot && <div className="liq-stat-foot">{foot}</div>}
+    </div>
+  );
+}
+
+const TONE_DOT = {
+  indigo: '#445cf5',
+  blue: '#1d63c9',
+  success: '#22a65b',
+  purple: '#8b3fd6',
+  amber: '#d4920a',
+  neutral: '#b5b8b0',
+};
+
+function FunnelRow({ label, value, total, tone, note }) {
+  const pct = percent(value, total);
+  const width = value > 0 ? Math.max(pct, 2) : 0;
+  return (
+    <div className="liq-funnel-row">
+      <div className="liq-funnel-top">
+        <span className="liq-funnel-label">
+          <i className={`liq-funnel-dot c-${tone}`} style={{ background: TONE_DOT[tone] }} />
+          {label}
+        </span>
+        <span className="liq-funnel-value">
+          {value}
+          <em>{pct}%</em>
+        </span>
+      </div>
+      <div className="liq-funnel-track">
+        <div className={`liq-funnel-fill c-${tone}`} style={{ width: `${width}%` }} />
+      </div>
+      {note && <div className="liq-funnel-note">{note}</div>}
+    </div>
+  );
+}
 
 export default function LinkedInAutomation() {
   const { user } = useAuth();
   const userId = user?.id || 'demo-user-1';
 
-  const [serverOnline, setServerOnline] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get('tab') || 'overview';
+
+  const setTab = (next) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'overview') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
+
+  const [serverOnline, setServerOnline] = useState(null);
   const [statusInfo, setStatusInfo] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [connections, setConnections] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  // Per-user LinkedIn account connect state
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [connError, setConnError] = useState('');
+  const [analyticsError, setAnalyticsError] = useState('');
+  const [wsLive, setWsLive] = useState(false);
+
+  // Per-user LinkedIn session
   const [liAccount, setLiAccount] = useState(null);
+  const [accountLoaded, setAccountLoaded] = useState(false);
+  const [accountError, setAccountError] = useState('');
   const [connectPending, setConnectPending] = useState(false);
   const [cookieMode, setCookieMode] = useState(false);
   const [liAt, setLiAt] = useState('');
   const [cookieBusy, setCookieBusy] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   // Campaign form
-  const [searchParams] = useSearchParams();
   const [company, setCompany] = useState(() => searchParams.get('company') || '');
   const [roles, setRoles] = useState(DEFAULT_ROLES);
   const [newRole, setNewRole] = useState('');
@@ -64,109 +236,145 @@ export default function LinkedInAutomation() {
   const [useAI, setUseAI] = useState(true);
   const [note, setNote] = useState('');
   const [starting, setStarting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
 
-  // Connections filter
+  // Tracker filters
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [companyScope, setCompanyScope] = useState('all');
+  const [visibleCount, setVisibleCount] = useState(60);
+
+  // Activity filters
+  const [logLevel, setLogLevel] = useState('all');
+  const [logQuery, setLogQuery] = useState('');
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   const logRef = useRef(null);
   const wsOkRef = useRef(false);
+  const flashTimer = useRef(null);
+  const copyTimer = useRef(null);
 
-  const isRunning = statusInfo?.status === 'running' || statusInfo?.status === 'syncing';
-  const progress = statusInfo?.progress;
-  const pct = progress?.stats?.totalTarget
-    ? Math.min(100, Math.round((progress.stats.sent / progress.stats.totalTarget) * 100))
-    : 0;
+  const notify = useCallback((type, text) => {
+    setActionMsg({ type, text });
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setActionMsg(null), 4500);
+  }, []);
 
-  const refreshData = useCallback(async () => {
+  useEffect(() => () => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+  }, []);
+
+  const refreshData = useCallback(async (initial = false) => {
+    if (initial) setLoading(true);
     try {
-      const [s, c, a] = await Promise.all([
-        api.getLinkedInStatus(),
+      const status = await api.getLinkedInStatus();
+      setServerOnline(true);
+      setLoadError('');
+      setStatusInfo(status);
+      if (status?.analytics) setAnalytics(status.analytics);
+
+      const [conns, stats] = await Promise.allSettled([
         api.getLinkedInConnections(),
         api.getLinkedInAnalytics(),
       ]);
-      setServerOnline(true);
-      setStatusInfo(s);
-      setConnections(Array.isArray(c) ? c : []);
-      setAnalytics(a);
-    } catch {
+
+      if (conns.status === 'fulfilled') {
+        setConnections(Array.isArray(conns.value) ? conns.value : []);
+        setConnError('');
+      } else {
+        setConnError(conns.reason?.message || 'Could not load the connection tracker.');
+      }
+
+      if (stats.status === 'fulfilled') {
+        setAnalytics(stats.value);
+        setAnalyticsError('');
+      } else {
+        setAnalyticsError(stats.reason?.message || 'Could not load campaign analytics.');
+      }
+    } catch (err) {
       setServerOnline(false);
+      if (initial) setLoadError(err?.message || 'Automation server is not reachable.');
+    } finally {
+      if (initial) setLoading(false);
     }
   }, []);
 
-  // Load this user's connected LinkedIn account once the server is reachable
   useEffect(() => {
-    if (!serverOnline) return undefined;
-    let alive = true;
-    api.getLinkedInAccount(userId)
-      .then((acc) => {
-        if (!alive) return;
-        setLiAccount(acc);
-        setConnectPending(acc.status === 'pending_login');
-      })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [serverOnline, userId]);
+    refreshData(true);
+  }, [refreshData]);
 
-  // Poll account state while a login window is open (fallback when WS missed)
+  const loadAccount = useCallback(async () => {
+    try {
+      const account = await api.getLinkedInAccount(userId);
+      setLiAccount(account);
+      setConnectPending(account?.status === 'pending_login');
+      setAccountError('');
+      return account;
+    } catch (err) {
+      setAccountError(err?.message || 'Could not load your LinkedIn session.');
+      return null;
+    } finally {
+      setAccountLoaded(true);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (serverOnline) loadAccount();
+  }, [serverOnline, loadAccount]);
+
+  useEffect(() => {
+    setAccountLoaded(false);
+  }, [userId]);
+
+  // Poll while a LinkedIn login window is open (fallback if a WS event is missed)
   useEffect(() => {
     if (!connectPending) return undefined;
-    const t = setInterval(async () => {
-      try {
-        const acc = await api.getLinkedInAccount(userId);
-        setLiAccount(acc);
-        setConnectPending(acc.status === 'pending_login');
-      } catch {}
+    const timer = setInterval(async () => {
+      const account = await loadAccount();
+      if (account && account.status !== 'pending_login') setConnectPending(false);
     }, 3000);
-    return () => clearInterval(t);
-  }, [connectPending, userId]);
+    return () => clearInterval(timer);
+  }, [connectPending, loadAccount]);
 
-  // Initial: check if automation server is reachable
-  useEffect(() => {
-    let alive = true;
-    api.getLinkedInStatus()
-      .then((d) => {
-        if (!alive) return;
-        setServerOnline(true);
-        setStatusInfo(d);
-        setLoading(false);
-        api.getLinkedInConnections().then((c) => alive && setConnections(Array.isArray(c) ? c : [])).catch(() => {});
-        api.getLinkedInAnalytics().then((a) => alive && setAnalytics(a)).catch(() => {});
-      })
-      .catch(() => {
-        if (!alive) return;
-        setServerOnline(false);
-        setLoading(false);
-      });
-    return () => { alive = false; };
-  }, []);
-
-  // WebSocket live updates
+  // WebSocket live updates with a REST polling fallback
   useEffect(() => {
     if (!serverOnline) return undefined;
-    let ws;
     let closed = false;
+    let socket = null;
+    let retry = null;
 
     const connect = () => {
       if (closed) return;
       try {
-        ws = new WebSocket(`ws://${window.location.host}/linkedin-api`);
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        socket = new WebSocket(`${protocol}://${window.location.host}/linkedin-api`);
       } catch {
         return;
       }
 
-      ws.onopen = () => { wsOkRef.current = true; };
-      ws.onmessage = (e) => {
-        let msg;
-        try { msg = JSON.parse(e.data); } catch { return; }
-        const { type, data } = msg;
+      socket.onopen = () => {
+        wsOkRef.current = true;
+        setWsLive(true);
+      };
+
+      socket.onmessage = (event) => {
+        let message;
+        try { message = JSON.parse(event.data); } catch { return; }
+        const { type, data } = message;
+
         if (type === 'init') {
-          setStatusInfo({ status: data.status, progress: data.progress });
-          setLogs(data.logs || []);
-          setConnections(data.connections || []);
-          setAnalytics(data.analytics);
-          const mine = (data.accounts || []).find((a) => a.userId === userId);
+          setStatusInfo((current) => ({
+            ...(current || {}),
+            status: data.status,
+            progress: data.progress,
+          }));
+          if (Array.isArray(data.logs)) setLogs(data.logs);
+          if (Array.isArray(data.connections)) setConnections(data.connections);
+          if (data.analytics) setAnalytics(data.analytics);
+          const mine = (data.accounts || []).find((account) => account.userId === userId);
           if (mine) {
             setLiAccount(mine);
             setConnectPending(mine.status === 'pending_login');
@@ -174,34 +382,45 @@ export default function LinkedInAutomation() {
         } else if (type === 'linkedin_account') {
           if (data.userId === userId) {
             setLiAccount(data.account);
-            setConnectPending(data.account.status === 'pending_login');
-            if (data.account.connected) {
-              flash(`LinkedIn connected as ${data.account.memberName || 'LinkedIn Member'}`, 'ok');
+            setConnectPending(data.account?.status === 'pending_login');
+            if (data.account?.connected) {
+              setStatusInfo((current) => (
+                current && (current.status === 'requires_login' || current.status === 'expired')
+                  ? { ...current, status: 'idle' }
+                  : current
+              ));
+              notify('ok', `LinkedIn connected as ${data.account.memberName || 'LinkedIn Member'}.`);
             }
           }
         } else if (type === 'log') {
-          setLogs((prev) => [...prev.slice(-199), data]);
+          setLogs((previous) => [...previous.slice(-499), data]);
         } else if (type === 'progress') {
-          setStatusInfo((s) => ({ ...(s || {}), progress: data }));
+          setStatusInfo((current) => ({ ...(current || {}), progress: data }));
         } else if (type === 'sent') {
-          setConnections((prev) => [data, ...prev.filter((c) => c.id !== data.id)]);
-          api.getLinkedInAnalytics().then(setAnalytics).catch(() => {});
+          setConnections((previous) => [data, ...previous.filter((item) => item.id !== data.id)]);
         } else if (type === 'status_change') {
-          setStatusInfo((s) => ({ ...(s || {}), status: data.status }));
+          setStatusInfo((current) => ({ ...(current || {}), status: data.status }));
+          if (data.error) notify('err', data.error);
         } else if (type === 'connections_updated') {
-          setConnections(data.connections || []);
-          setAnalytics(data.analytics);
+          if (Array.isArray(data.connections)) setConnections(data.connections);
+          if (data.analytics) setAnalytics(data.analytics);
         }
       };
-      ws.onclose = () => {
+
+      socket.onerror = () => {
         wsOkRef.current = false;
-        if (!closed) setTimeout(connect, 4000);
+        setWsLive(false);
+      };
+
+      socket.onclose = () => {
+        wsOkRef.current = false;
+        setWsLive(false);
+        if (!closed) retry = setTimeout(connect, 4000);
       };
     };
 
     connect();
 
-    // REST polling fallback when WS is not open
     const poll = setInterval(() => {
       if (!wsOkRef.current) refreshData().catch(() => {});
     }, 10000);
@@ -209,403 +428,1235 @@ export default function LinkedInAutomation() {
     return () => {
       closed = true;
       clearInterval(poll);
-      if (ws) { ws.onclose = null; ws.close(); }
+      if (retry) clearTimeout(retry);
+      if (socket) {
+        socket.onclose = null;
+        socket.onerror = null;
+        // Closing while the handshake is still pending logs a browser warning,
+        // so wait for the socket to open (or fail) before tearing it down.
+        if (socket.readyState === WebSocket.CONNECTING) {
+          socket.onopen = () => socket.close();
+        } else {
+          socket.close();
+        }
+      }
     };
-  }, [serverOnline, refreshData, userId]);
+  }, [serverOnline, refreshData, userId, notify]);
 
-  // Auto-scroll log feed
+  // Keep the log pinned to the newest event
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logs]);
+    if (autoScroll && logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logs, autoScroll, tab]);
 
-  const flash = (msg, type = 'ok') => {
-    setActionMsg({ msg, type });
-    setTimeout(() => setActionMsg(null), 4000);
-  };
+  // Bring the cookie panel into view when it opens from the session alert
+  useEffect(() => {
+    if (cookieMode) {
+      document.querySelector('.liq-cookie')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [cookieMode]);
+
+  // Drop a stale company scope when analytics changes
+  useEffect(() => {
+    if (companyScope !== 'all' && analytics && !analytics.byCompany?.[companyScope]) {
+      setCompanyScope('all');
+    }
+  }, [analytics, companyScope]);
+
+  useEffect(() => {
+    setVisibleCount(60);
+  }, [search, statusFilter, companyScope]);
+
+  const meta = STATUS_META[statusInfo?.status] || STATUS_META.idle;
+  const status = statusInfo?.status;
+  const isRunning = status === 'running' || status === 'syncing';
+  const isSyncing = status === 'syncing';
+  const progress = statusInfo?.progress;
+  const progressTarget = progress?.stats?.totalTarget || 0;
+  const progressSent = progress?.stats?.sent || 0;
+  const progressPct = progressTarget > 0 ? Math.min(100, Math.round((progressSent / progressTarget) * 100)) : 0;
+
+  const companies = useMemo(() => {
+    const map = analytics?.byCompany || {};
+    return Object.values(map)
+      .map((item) => ({
+        ...item,
+        engaged: (item.accepted || 0) + (item.seen || 0) + (item.replied || 0),
+      }))
+      .sort((a, b) => (b.sent || 0) - (a.sent || 0) || String(a.company).localeCompare(String(b.company)));
+  }, [analytics]);
+
+  const scoped = useMemo(() => {
+    if (!analytics) {
+      return { sent: 0, accepted: 0, seen: 0, replied: 0, pending: 0, declined: 0 };
+    }
+    if (companyScope !== 'all') {
+      const item = analytics.byCompany?.[companyScope];
+      return {
+        sent: item?.sent || 0,
+        accepted: item?.accepted || 0,
+        seen: item?.seen || 0,
+        replied: item?.replied || 0,
+        pending: item?.pending || 0,
+        declined: item?.declined || 0,
+      };
+    }
+    return {
+      sent: analytics.totalSent || 0,
+      accepted: analytics.accepted || 0,
+      seen: analytics.seen || 0,
+      replied: analytics.replied || 0,
+      pending: analytics.pending || 0,
+      declined: analytics.declined || 0,
+    };
+  }, [analytics, companyScope]);
+
+  const engaged = scoped.accepted + scoped.seen + scoped.replied;
+  const connectedCount = scoped.accepted + scoped.replied;
+  const engagementPct = percent(engaged, scoped.sent);
+  const acceptancePct = percent(connectedCount, scoped.sent);
+  const replyPct = percent(scoped.replied, scoped.sent);
+
+  const companyConnections = useMemo(
+    () => connections.filter((item) => companyScope === 'all' || item.company === companyScope),
+    [connections, companyScope],
+  );
+
+  const statusCounts = useMemo(() => {
+    const counts = { all: companyConnections.length, pending: 0, seen: 0, accepted: 0, replied: 0, declined: 0 };
+    companyConnections.forEach((item) => {
+      if (counts[item.status] !== undefined) counts[item.status] += 1;
+    });
+    return counts;
+  }, [companyConnections]);
+
+  const filteredConnections = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return companyConnections.filter((item) => {
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+      if (!query) return true;
+      return [item.name, item.company, item.headline, item.role, item.replyText]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [companyConnections, statusFilter, search]);
+
+  const visibleConnections = filteredConnections.slice(0, visibleCount);
+
+  const filteredLogs = useMemo(() => {
+    const query = logQuery.trim().toLowerCase();
+    return logs.filter((log) => {
+      if (logLevel !== 'all' && levelOf(log) !== logLevel) return false;
+      return !query || String(log.message || '').toLowerCase().includes(query);
+    });
+  }, [logs, logLevel, logQuery]);
+
+  const lastLog = logs[logs.length - 1];
+
+  const batchTotal = roles.length * perRole;
+  const estimateSeconds = batchTotal * 27.5 + Math.max(0, roles.length - 1) * 11.5;
+
+  const needsLogin = liAccount?.status === 'expired' || statusInfo?.status === 'requires_login';
+  const connected = Boolean(liAccount?.connected);
+  const pending = connectPending || liAccount?.status === 'pending_login';
+  // The account file is fetched separately from the campaign data, so avoid
+  // flashing "not connected" while that request is still in flight.
+  const accountLoading = !accountLoaded && !accountError;
+
+  const flash = (type, text) => notify(type, text);
 
   const handleConnect = async () => {
     try {
-      const res = await api.connectLinkedIn(userId);
-      if (res.status === 'connected') {
-        setLiAccount(res.account);
-        flash(`LinkedIn already connected as ${res.account?.memberName || 'LinkedIn Member'}`, 'ok');
+      const result = await api.connectLinkedIn(userId);
+      if (result.status === 'connected') {
+        setLiAccount(result.account);
+        setConnectPending(false);
+        flash('ok', `LinkedIn already connected as ${result.account?.memberName || 'LinkedIn Member'}.`);
       } else {
         setConnectPending(true);
-        flash('🌐 LinkedIn login window opened — log in with YOUR LinkedIn account (2FA supported)', 'ok');
+        flash('info', 'LinkedIn login window opened. Sign in with your own account — 2FA is supported.');
       }
     } catch (err) {
-      flash(err.message || 'Failed to open LinkedIn login window', 'err');
+      flash('err', err.message || 'Could not open the LinkedIn login window.');
+    }
+  };
+
+  // A stale session still looks "connected" to the account file, so the login
+  // flow would short-circuit. Clear the saved profile first, then open a fresh one.
+  const handleReconnect = async () => {
+    if (!window.confirm('Reconnect LinkedIn? This clears the saved session for this profile and opens a fresh login window.')) return;
+    try {
+      await api.disconnectLinkedIn(userId);
+      setLiAccount(null);
+      setConnectPending(false);
+      const result = await api.connectLinkedIn(userId);
+      if (result.status === 'connected') {
+        setLiAccount(result.account);
+        flash('ok', `LinkedIn connected as ${result.account?.memberName || 'LinkedIn Member'}.`);
+      } else {
+        setConnectPending(true);
+        flash('info', 'LinkedIn login window opened. Sign in with your own account — 2FA is supported.');
+      }
+    } catch (err) {
+      flash('err', err.message || 'Could not reconnect LinkedIn.');
+      await loadAccount();
     }
   };
 
   const handleCancelConnect = async () => {
-    try { await api.disconnectLinkedIn(userId); } catch {}
+    try { await api.disconnectLinkedIn(userId); } catch { /* best effort */ }
     setConnectPending(false);
-    api.getLinkedInAccount(userId).then(setLiAccount).catch(() => {});
+    await loadAccount();
+    flash('ok', 'Pending LinkedIn login cancelled.');
   };
 
   const handleDisconnect = async () => {
+    if (!window.confirm('Disconnect LinkedIn? The saved Chrome session for this profile will be deleted.')) return;
     try {
       await api.disconnectLinkedIn(userId);
       setLiAccount(null);
-      flash('LinkedIn account disconnected', 'ok');
+      setConnectPending(false);
+      setCookieMode(false);
+      flash('ok', 'LinkedIn session disconnected and deleted.');
     } catch (err) {
-      flash(err.message || 'Failed to disconnect', 'err');
+      flash('err', err.message || 'Could not disconnect LinkedIn.');
     }
   };
 
   const handleCookieConnect = async () => {
     const cookie = liAt.trim();
-    if (!cookie) { flash('Paste your li_at cookie first', 'err'); return; }
+    if (!cookie) {
+      flash('err', 'Paste your li_at cookie value first.');
+      return;
+    }
     setCookieBusy(true);
     try {
-      const res = await api.connectLinkedInCookie(userId, cookie);
-      setLiAccount(res.account);
-      setLiAt('');
+      const result = await api.connectLinkedInCookie(userId, cookie);
+      setLiAccount(result.account);
+      setConnectPending(false);
       setCookieMode(false);
-      flash(`LinkedIn connected as ${res.account?.memberName || 'LinkedIn Member'}`, 'ok');
+      setLiAt('');
+      setStatusInfo((current) => (
+        current && (current.status === 'requires_login' || current.status === 'expired')
+          ? { ...current, status: 'idle' }
+          : current
+      ));
+      flash('ok', `LinkedIn connected as ${result.account?.memberName || 'LinkedIn Member'}.`);
     } catch (err) {
-      flash(err.message || 'li_at cookie connect failed', 'err');
+      flash('err', err.message || 'The li_at cookie was rejected by LinkedIn.');
+    } finally {
+      setCookieBusy(false);
     }
-    setCookieBusy(false);
+  };
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    try {
+      const result = await api.verifyLinkedIn(userId);
+      const { verification, ...account } = result || {};
+      if (account && Object.keys(account).length) setLiAccount(account);
+      if (verification?.connected) {
+        setStatusInfo((current) => ({
+          ...(current || {}),
+          status: current?.status === 'running' || current?.status === 'syncing' ? current.status : 'idle',
+        }));
+        flash('ok', 'Session verified — LinkedIn is still signed in.');
+      } else if (verification?.verified === false) {
+        flash('err', 'Could not verify the session (Chrome was unavailable). Try again.');
+      } else {
+        flash('err', 'Session expired. Reconnect your LinkedIn account to continue.');
+      }
+    } catch (err) {
+      flash('err', err.message || 'Session verification failed.');
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const handleStart = async () => {
-    if (!roles.length) { flash('Add at least one role filter', 'err'); return; }
-    if (!liAccount?.connected) {
-      flash('Connect your LinkedIn account first (Connected Accounts → Connect)', 'err');
+    if (!connected) {
+      flash('err', 'Connect your LinkedIn account before starting a campaign.');
       return;
     }
+    if (!roles.length) {
+      flash('err', 'Add at least one role filter.');
+      return;
+    }
+    if (!company.trim()) {
+      flash('err', 'Enter a target company or LinkedIn company URL.');
+      return;
+    }
+    if (note.length > 200) {
+      flash('err', 'Keep the connection note under 200 characters (LinkedIn truncates longer notes).');
+      return;
+    }
+
     setStarting(true);
     try {
       await api.startLinkedIn({
         userId,
-        company,
+        company: company.trim(),
         roles,
         connectionsPerFilter: perRole,
-        connectionNote: note || undefined,
+        connectionNote: note.trim() || undefined,
         useAINotes: useAI,
         userProfile: profileStore.get() || {},
       });
-      flash('🚀 Campaign started! Chrome window will open.', 'ok');
-      setStatusInfo((s) => ({ ...(s || {}), status: 'running' }));
+      setLogs([]);
+      setStatusInfo((current) => ({ ...(current || {}), status: 'running' }));
+      flash('ok', 'Campaign started. A Chrome window will open and send requests one at a time.');
     } catch (err) {
-      flash(err.message || 'Failed to start campaign', 'err');
+      flash('err', err.message || 'Could not start the campaign.');
+    } finally {
+      setStarting(false);
     }
-    setStarting(false);
   };
 
   const handleStop = async () => {
     try {
       await api.stopLinkedIn();
-      flash('Stop signal sent', 'ok');
-      setStatusInfo((s) => ({ ...(s || {}), status: 'stopped' }));
+      setStatusInfo((current) => ({ ...(current || {}), status: 'stopped' }));
+      flash('ok', 'Stop signal sent.');
     } catch (err) {
-      flash(err.message || 'Failed to stop', 'err');
+      flash('err', err.message || 'Could not stop the campaign.');
     }
   };
 
   const handleSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
     try {
       await api.syncLinkedInStatus(userId);
-      flash('Background status sync started', 'ok');
+      flash('ok', 'Background status sync started. Accepted/served states will update as it runs.');
     } catch (err) {
-      flash(err.message || 'Sync failed', 'err');
+      flash('err', err.message || 'Could not start the status sync.');
+    } finally {
+      setSyncing(false);
     }
   };
 
   const addRole = () => {
-    const r = newRole.trim();
-    if (r && !roles.includes(r)) setRoles([...roles, r]);
+    const role = newRole.trim();
+    if (role && !roles.includes(role)) setRoles([...roles, role]);
     setNewRole('');
   };
 
-  const filteredConnections = connections.filter((c) => {
-    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        (c.name || '').toLowerCase().includes(q) ||
-        (c.company || '').toLowerCase().includes(q) ||
-        (c.headline || '').toLowerCase().includes(q) ||
-        (c.role || '').toLowerCase().includes(q)
-      );
+  const handleCopyLogs = async () => {
+    try {
+      const text = filteredLogs
+        .map((log) => `[${log.timestamp || ''}] ${log.message || ''}`)
+        .join('\n');
+      await navigator.clipboard.writeText(text || 'No log events to copy.');
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1800);
+    } catch {
+      flash('err', 'Clipboard access was blocked by the browser.');
     }
-    return true;
-  });
+  };
+
+  const scopeCompany = companyScope !== 'all' ? analytics?.byCompany?.[companyScope] : null;
+  const scopeEngaged = scopeCompany
+    ? (scopeCompany.accepted || 0) + (scopeCompany.seen || 0) + (scopeCompany.replied || 0)
+    : 0;
 
   if (loading) {
     return (
-      <div className="page-linkedin">
-        <header className="page-header"><h1>LinkedIn Automation</h1></header>
-        <div className="loading-screen inline"><div className="loading-spinner" /><p>Checking connection…</p></div>
+      <div className="liq-page">
+        <header className="liq-head">
+          <div>
+            <div className="liq-eyebrow"><LinkedinIcon size={12} /> LinkedIn outreach</div>
+            <h1>LinkedIn Automation</h1>
+            <p>Checking your automation server and LinkedIn session…</p>
+          </div>
+        </header>
+        <div className="liq-loading">
+          <Loader2 className="spin" size={26} />
+          <span>Checking connection…</span>
+        </div>
       </div>
     );
   }
 
-  const meta = STATUS_META[statusInfo?.status] || STATUS_META.idle;
-
   return (
-    <div className="page-linkedin">
-      <header className="page-header">
+    <div className="liq-page">
+      <header className="liq-head">
         <div>
+          <div className="liq-eyebrow"><LinkedinIcon size={12} /> LinkedIn outreach</div>
           <h1>LinkedIn Automation</h1>
-          <p>Launch targeted outreach campaigns and track every connection in real time.</p>
+          <p>
+            Launch consent-first connection requests from your own LinkedIn session and see exactly
+            how every invite progressed.
+          </p>
         </div>
-        <div className="header-actions">
+        <div className="liq-head-actions">
           {serverOnline && (
             <>
-              <button className="btn-ghost" onClick={handleSync} title="Sync connection statuses from LinkedIn">
-                <RefreshCw size={14} /> Sync Status
+              <span className={`liq-live ${wsLive ? '' : 'is-polling'}`}>
+                <i /> {wsLive ? 'Live' : 'Polling'}
+              </span>
+              <button
+                type="button"
+                className="liq-btn"
+                onClick={handleSync}
+                disabled={syncing || isRunning}
+                title={isRunning ? 'Stop the running automation before syncing again.' : 'Sync connection statuses from LinkedIn'}
+              >
+                <RefreshCw size={13} className={syncing ? 'spin' : ''} />
+                {syncing ? 'Syncing…' : 'Sync status'}
               </button>
-              <span className={`status-pill ${meta.cls}`}><Radio size={12} /> Server {meta.label}</span>
             </>
           )}
+          <span className={`liq-pill ${serverOnline ? meta.tone : 'tone-danger'}`}>
+            <Radio size={11} /> {serverOnline ? meta.label : 'Server offline'}
+          </span>
         </div>
       </header>
 
-      <section className="dash-section">
-        <h2>Connected Accounts</h2>
-        <ConnectedAccount
-          name="LinkedIn"
-          icon={LinkedinIcon}
-          connected={serverOnline && !!liAccount?.connected}
-          email={
-            serverOnline && liAccount?.connected
-              ? `${liAccount.memberName}${liAccount.headline ? ` · ${liAccount.headline}` : ''} · session saved`
-              : serverOnline
-                ? 'No LinkedIn account connected for your profile — click Connect and log in with your LinkedIn'
-                : ''
-          }
-          pending={serverOnline && connectPending}
-          error={!serverOnline ? 'Automation server offline — start it and Retry below' : undefined}
-          onConnect={handleConnect}
-          onReconnect={handleConnect}
-          onDisconnect={serverOnline ? handleDisconnect : undefined}
-          onCancel={handleCancelConnect}
-        />
-        {serverOnline && !liAccount?.connected && !connectPending && !cookieMode && (
-          <button className="btn-ghost sm" style={{ marginTop: 8 }} onClick={() => setCookieMode(true)}>
-            <KeyRound size={13} /> Connect using li_at cookie instead
-          </button>
-        )}
-        {serverOnline && !liAccount?.connected && cookieMode && (
-          <div className="li-cookie-connect">
-            <label>Connect with li_at cookie</label>
-            <div className="li-cookie-row">
-              <input
-                value={liAt}
-                onChange={(e) => setLiAt(e.target.value)}
-                placeholder="Paste li_at cookie value…"
-                disabled={cookieBusy}
-              />
-              <button className="btn-accent" onClick={handleCookieConnect} disabled={cookieBusy}>
-                {cookieBusy ? 'Verifying…' : 'Connect'}
-              </button>
-              <button className="btn-ghost sm" onClick={() => { setCookieMode(false); setLiAt(''); }}>
-                <X size={13} />
-              </button>
+      {serverOnline === false && (
+        <>
+          <div className="liq-alert" role="alert">
+            <div className="liq-alert-icon"><AlertTriangle size={18} /></div>
+            <div className="liq-alert-body">
+              <strong>Automation server is not reachable</strong>
+              <p>
+                {loadError || 'The dashboard could not reach the LinkedIn automation backend on port 3000.'}
+                {' '}Start it with <b>node server.js</b> from the project root, then retry.
+              </p>
             </div>
-            <div className="li-cookie-hint">
-              Open <code>linkedin.com</code> while logged in → DevTools → Application → Cookies → copy the <code>li_at</code> value and paste it here.
-              Your LinkedIn password is never shared with this app.
+            <div className="liq-alert-actions">
+              <button type="button" className="liq-btn primary" onClick={() => refreshData(true)}>
+                <RefreshCw size={13} /> Retry connection
+              </button>
             </div>
           </div>
-        )}
-        {actionMsg && (
-          <div className={`li-flash ${actionMsg.type === 'err' ? 'err' : 'ok'}`}>{actionMsg.msg}</div>
-        )}
-      </section>
+          <section className="liq-card">
+            <div className="liq-empty">
+              <div className="liq-empty-icon"><LinkedinIcon size={20} /></div>
+              <strong>Campaign data is unavailable while the backend is offline</strong>
+              <p>Your saved connection history stays on disk and will reappear as soon as the server answers.</p>
+            </div>
+          </section>
+        </>
+      )}
 
-      {!serverOnline ? (
-        <EmptyState
-          icon={LinkedinIcon}
-          title="Automation server not running"
-          description="Start the LinkedIn automation backend to launch campaigns. Run: cd D:\\Automation && node server.js — it listens on http://localhost:3000."
-          actionLabel="Retry Connection"
-          onAction={() => { setLoading(true); window.location.reload(); }}
-        />
-      ) : (
+      {serverOnline && (
         <>
-          {/* Analytics */}
-          <section className="dash-section">
-            <h2>Campaign Analytics</h2>
-            <div className="li-analytics-grid">
-              <div className="li-stat c-blue"><Users size={18} /><div><strong>{analytics?.totalSent ?? 0}</strong><span>Requests Sent</span></div></div>
-              <div className="li-stat c-green"><UserCheck size={18} /><div><strong>{analytics?.accepted ?? 0}</strong><span>Accepted</span></div></div>
-              <div className="li-stat c-purple"><Eye size={18} /><div><strong>{analytics?.seen ?? 0}</strong><span>Seen</span></div></div>
-              <div className="li-stat c-orange"><MessageCircle size={18} /><div><strong>{analytics?.replied ?? 0}</strong><span>Replied</span></div></div>
-              <div className="li-stat c-yellow"><Clock size={18} /><div><strong>{analytics?.pending ?? 0}</strong><span>Pending</span></div></div>
-              <div className="li-stat c-pink"><Zap size={18} /><div><strong>{analytics?.acceptanceRate ?? 0}%</strong><span>Acceptance Rate</span></div></div>
+          {connected && needsLogin && (
+            <div className="liq-alert" role="alert">
+              <div className="liq-alert-icon"><ShieldAlert size={18} /></div>
+              <div className="liq-alert-body">
+                <strong>LinkedIn is asking for a fresh sign-in</strong>
+                <p>
+                  The last background sync hit a login wall. Reconnect your session before launching a
+                  campaign so requests are not spent on a stale login.
+                </p>
+              </div>
+              <div className="liq-alert-actions">
+                <button type="button" className="liq-btn primary" onClick={handleReconnect} disabled={pending}>
+                  <Link2 size={13} /> Reconnect LinkedIn
+                </button>
+                <button type="button" className="liq-btn" onClick={() => setCookieMode(true)}>
+                  <KeyRound size={13} /> Use li_at
+                </button>
+              </div>
+            </div>
+          )}
+
+          <section className={`liq-session ${accountLoading ? 'is-checking' : connected ? 'is-on' : pending ? 'is-warn' : 'is-off'}`}>
+            <div className="liq-session-icon">
+              {accountLoading ? <Loader2 className="spin" size={20} /> : connected ? <CheckCircle2 size={20} /> : pending ? <Loader2 className="spin" size={20} /> : <Link2 size={20} />}
+            </div>
+            <div className="liq-session-body">
+              {accountLoading ? (
+                <>
+                  <strong>Checking your LinkedIn session…</strong>
+                  <small>Reading the saved session for this profile.</small>
+                </>
+              ) : connected ? (
+                <>
+                  <strong>Connected as {liAccount?.memberName || 'LinkedIn Member'}</strong>
+                  <small>
+                    Requests run inside your own saved Chrome profile. Nothing is posted on your behalf
+                    beyond the invites you launch here.
+                  </small>
+                  <div className="liq-session-meta">
+                    <span><ShieldCheck size={11} /> <b>{liAccount?.method === 'li_at' ? 'li_at cookie' : 'Login window'}</b></span>
+                    <span><Clock size={11} /> Connected <b>{timeAgo(liAccount?.connectedAt)}</b></span>
+                    <span><RefreshCw size={11} /> Verified <b>{timeAgo(liAccount?.lastVerified)}</b></span>
+                    {liAccount?.headline && <span>{liAccount.headline}</span>}
+                  </div>
+                </>
+              ) : pending ? (
+                <>
+                  <strong>Finish signing in to LinkedIn</strong>
+                  <small>
+                    A Chrome window is open. Log in with your own account — 2FA is supported and your
+                    password never reaches this dashboard.
+                  </small>
+                  <div className="liq-session-meta">
+                    <span><Loader2 className="spin" size={11} /> Waiting for the login window</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <strong>No LinkedIn session connected</strong>
+                  <small>
+                    Connect your own account to launch campaigns. The session is stored locally per user,
+                    and you can disconnect it at any time.
+                  </small>
+                  {accountError && <small className="liq-error-text">{accountError}</small>}
+                </>
+              )}
+            </div>
+            <div className="liq-session-actions">
+              {accountLoading ? null : connected ? (
+                <>
+                  <button type="button" className="liq-btn" onClick={handleVerify} disabled={verifying || isRunning}>
+                    <ShieldCheck size={13} className={verifying ? 'spin' : ''} />
+                    {verifying ? 'Verifying…' : 'Verify session'}
+                  </button>
+                  <button type="button" className="liq-btn danger" onClick={handleDisconnect} disabled={isRunning}>
+                    Disconnect
+                  </button>
+                </>
+              ) : pending ? (
+                <>
+                  <button type="button" className="liq-btn" onClick={handleConnect}>
+                    <ExternalLink size={13} /> Reopen window
+                  </button>
+                  <button type="button" className="liq-btn subtle" onClick={handleCancelConnect}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="liq-btn primary" onClick={handleConnect}>
+                    <Link2 size={13} /> Connect LinkedIn
+                  </button>
+                  <button type="button" className="liq-btn" onClick={() => setCookieMode((value) => !value)}>
+                    <KeyRound size={13} /> li_at cookie
+                  </button>
+                </>
+              )}
             </div>
           </section>
 
-          <div className="li-grid">
-            {/* Campaign Launcher */}
-            <section className="dash-section li-launcher">
-              <div className="li-card">
-                <div className="li-card-head">
-                  <h3><Target size={16} /> Campaign Launcher</h3>
-                  <span className={`status-pill ${meta.cls}`}>{meta.label}</span>
-                </div>
-
-                <div className="li-field">
-                  <label>Target Company</label>
-                  <input
-                    value={company}
-                    onChange={(e) => setCompany(e.target.value)}
-                    placeholder="e.g. Google, Microsoft, Meta or LinkedIn URL"
-                    disabled={isRunning}
-                  />
-                </div>
-
-                <div className="li-field">
-                  <label>Role Filters</label>
-                  <div className="li-chips">
-                    {roles.map((r) => (
-                      <span key={r} className="li-chip">
-                        {r}
-                        {!isRunning && (
-                          <button onClick={() => setRoles(roles.filter((x) => x !== r))}><X size={11} /></button>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                  {!isRunning && (
-                    <div className="li-role-add">
-                      <input
-                        value={newRole}
-                        onChange={(e) => setNewRole(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && addRole()}
-                        placeholder="Add role (e.g. Engineering Manager)"
-                      />
-                      <button className="btn-ghost sm" onClick={addRole}><Plus size={13} /> Add</button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="li-row2">
-                  <div className="li-field">
-                    <label>Connections / Role</label>
-                    <input type="number" min="1" max="40" value={perRole} onChange={(e) => setPerRole(Number(e.target.value) || 10)} disabled={isRunning} />
-                  </div>
-                  <div className="li-field">
-                    <label>AI Personalized Notes</label>
-                    <button className={`li-toggle ${useAI ? 'on' : ''}`} onClick={() => setUseAI(!useAI)} disabled={isRunning}>
-                      <Sparkles size={13} /> {useAI ? 'Gemini AI On' : 'Template Notes'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="li-field">
-                  <label>Custom Note Template <em>(optional — {useAI ? 'used as fallback' : 'used for everyone'})</em></label>
-                  <textarea
-                    rows={3}
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Hi {name}, I'd love to connect and learn more about opportunities at your company!"
-                    disabled={isRunning}
-                  />
-                </div>
-
-                {progress?.stats?.totalTarget > 0 && (
-                  <div className="li-progress-wrap">
-                    <div className="li-progress-top">
-                      <span><Activity size={13} /> {progress.currentRole ? `Filtering: ${progress.currentRole}` : 'Campaign progress'}</span>
-                      <strong>{progress.stats.sent}/{progress.stats.totalTarget}</strong>
-                    </div>
-                    <div className="li-progress"><div className="li-progress-bar" style={{ width: `${pct}%` }} /></div>
-                    <div className="li-progress-meta">
-                      <span>✅ {progress.stats.sent} sent</span>
-                      <span>⏭️ {progress.stats.skipped} skipped</span>
-                      <span>⚠️ {progress.stats.failed} failed</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="li-actions">
-                  {isRunning ? (
-                    <button className="btn-ghost danger" onClick={handleStop}><Square size={14} /> Stop Campaign</button>
-                  ) : (
-                    <button
-                      className="btn-accent"
-                      onClick={handleStart}
-                      disabled={starting || !liAccount?.connected}
-                      title={!liAccount?.connected ? 'Connect your LinkedIn account first' : ''}
-                    >
-                      <Play size={14} /> {starting ? 'Starting…' : liAccount?.connected ? `Start Campaign (${roles.length * perRole} requests)` : 'Connect LinkedIn to Start'}
-                    </button>
-                  )}
-                </div>
+          {cookieMode && (
+            <section className="liq-cookie">
+              <label>Connect with an li_at cookie</label>
+              <div className="liq-cookie-row">
+                <input
+                  value={liAt}
+                  onChange={(event) => setLiAt(event.target.value)}
+                  placeholder="Paste the li_at cookie value…"
+                  disabled={cookieBusy}
+                  spellCheck={false}
+                />
+                <button type="button" className="liq-btn primary" onClick={handleCookieConnect} disabled={cookieBusy || !liAt.trim()}>
+                  {cookieBusy ? <Loader2 className="spin" size={13} /> : <KeyRound size={13} />}
+                  {cookieBusy ? 'Verifying…' : 'Connect'}
+                </button>
+                <button
+                  type="button"
+                  className="liq-btn subtle"
+                  onClick={() => { setCookieMode(false); setLiAt(''); }}
+                  aria-label="Close cookie connect"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="liq-cookie-hint">
+                Open <code>linkedin.com</code> while signed in → DevTools → Application → Cookies → copy
+                the <code>li_at</code> value. This is the same session-sync method used by tools like
+                Waalaxy. Your password is never shared with this app. Connecting replaces the saved
+                session for this profile.
               </div>
             </section>
+          )}
 
-            {/* Live Activity */}
-            <section className="dash-section li-activity">
-              <div className="li-card">
-                <div className="li-card-head">
-                  <h3><Terminal size={16} /> Live Activity</h3>
-                  <span className="li-live-dot"><span /> Live</span>
-                </div>
-                <div className="li-log-feed" ref={logRef}>
-                  {logs.length === 0 && <div className="li-log-empty">Waiting for automation events…</div>}
-                  {logs.map((l, i) => (
-                    <div key={i} className={`li-log-line ${l.level || 'info'}`}>
-                      <span className="li-log-time">{l.timestamp}</span>
-                      <span className="li-log-msg">{l.message}</span>
-                    </div>
-                  ))}
-                </div>
+          {actionMsg && (
+            <div className={`liq-flash ${actionMsg.type}`} role="status">
+              {actionMsg.type === 'err' ? <AlertTriangle size={14} /> : actionMsg.type === 'info' ? <Info size={14} /> : <CheckCircle2 size={14} />}
+              {actionMsg.text}
+            </div>
+          )}
+
+          {(connError || analyticsError) && (
+            <div className="liq-alert" role="alert">
+              <div className="liq-alert-icon"><AlertTriangle size={18} /></div>
+              <div className="liq-alert-body">
+                <strong>Some campaign data could not be refreshed</strong>
+                <p>{[analyticsError, connError].filter(Boolean).join(' ')}</p>
               </div>
-            </section>
-          </div>
-
-          {/* Connections Tracker */}
-          <section className="dash-section">
-            <div className="section-header">
-              <h2>Connections Tracker <span className="li-count">{filteredConnections.length}</span></h2>
-              <div className="li-filters">
-                <div className="search-box sm">
-                  <Search size={14} />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, company, role…" />
-                </div>
-                <div className="li-status-chips">
-                  {CONN_STATUS.map((s) => (
-                    <button
-                      key={s.key}
-                      className={`chip ${statusFilter === s.key ? 'active' : ''}`}
-                      onClick={() => setStatusFilter(s.key)}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="liq-alert-actions">
+                <button type="button" className="liq-btn" onClick={() => refreshData()}>
+                  <RefreshCw size={13} /> Retry
+                </button>
               </div>
             </div>
+          )}
 
-            {filteredConnections.length === 0 ? (
-              <div className="activity-timeline">
-                <div className="activity-empty">
-                  <p>No connections yet. Launch a campaign to start sending personalized requests!</p>
-                </div>
-              </div>
-            ) : (
-              <div className="li-conn-list">
-                {filteredConnections.slice(0, 60).map((c) => (
-                  <div key={c.id} className="li-conn-row">
-                    <div className="li-conn-avatar">{(c.name || 'U')[0].toUpperCase()}</div>
-                    <div className="li-conn-info">
-                      <a href={c.profileUrl || '#'} target="_blank" rel="noreferrer" className="li-conn-name">
-                        {c.name} <ExternalLink size={11} />
-                      </a>
-                      <small>{c.headline || c.role || 'LinkedIn member'}{c.company ? ` · ${c.company}` : ''}</small>
-                    </div>
-                    <span className={`li-conn-status s-${c.status}`}>{c.status}</span>
-                  </div>
-                ))}
-              </div>
+          <section className="liq-stats" aria-label={`Invitation stats${companyScope !== 'all' ? ` for ${companyScope}` : ''}`}>
+            <StatCard icon={Users} value={scoped.sent} label="Requests sent" foot="Personalized invites" tone="accent" />
+            <StatCard icon={Zap} value={engaged} label="Engaged" foot={`${engagementPct}% of sent · any signal`} tone="blue" />
+            <StatCard icon={UserCheck} value={connectedCount} label="Accepted invite" foot={`${acceptancePct}% acceptance · replies included`} tone="success" />
+            <StatCard icon={MessageCircle} value={scoped.replied} label="Replied" foot={`${replyPct}% reply rate`} tone="purple" />
+            <StatCard icon={Eye} value={scoped.seen} label="Seen, not accepted" foot="Opened the note while pending" tone="warn" />
+            <StatCard icon={Clock} value={scoped.pending} label="Pending" foot="No signal yet" tone="neutral" />
+            {scoped.declined > 0 && (
+              <StatCard icon={AlertTriangle} value={scoped.declined} label="Declined" foot="Invite declined or withdrawn" tone="danger" />
             )}
           </section>
+
+          {companyScope !== 'all' && scopeCompany && (
+            <div className="liq-scope">
+              <Building2 size={13} />
+              Showing <strong>{companyScope}</strong> · {scopeCompany.sent} sent · {percent(scopeEngaged, scopeCompany.sent)}% engaged
+              <button type="button" className="liq-link" onClick={() => setTab('connections')}>
+                Open tracker <ArrowRight size={11} />
+              </button>
+              <button type="button" className="liq-link" onClick={() => setCompanyScope('all')}>
+                Clear scope <X size={11} />
+              </button>
+            </div>
+          )}
+
+          <div className="liq-tabs" role="tablist" aria-label="LinkedIn views">
+            {[
+              { key: 'overview', label: 'Overview', icon: TrendingUp },
+              { key: 'campaign', label: 'Campaign', icon: Target },
+              { key: 'connections', label: 'Connections', icon: Users, count: connections.length },
+              { key: 'activity', label: 'Activity', icon: Terminal, count: logs.length },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === item.key}
+                  className={`liq-tab ${tab === item.key ? 'active' : ''}`}
+                  onClick={() => setTab(item.key)}
+                >
+                  <Icon size={13} /> {item.label}
+                  {typeof item.count === 'number' && <span className="liq-tab-count">{item.count}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {tab === 'overview' && (
+            <>
+              <div className="liq-grid">
+                <div className="liq-stack">
+                  <section className="liq-card">
+                    <header className="liq-card-head">
+                      <div className="liq-card-title"><TrendingUp size={14} /> Invitation funnel</div>
+                      <span className={`liq-pill ${engagementPct >= 20 ? 'tone-success' : 'tone-neutral'}`}>
+                        {engagementPct}% engaged
+                      </span>
+                    </header>
+                    <div className="liq-card-body">
+                      <div className="liq-funnel">
+                        <FunnelRow
+                          label="Requests sent"
+                          value={scoped.sent}
+                          total={scoped.sent}
+                          tone="indigo"
+                          note="Every personalized invite recorded by the automation."
+                        />
+                        <FunnelRow
+                          label="Any signal"
+                          value={engaged}
+                          total={scoped.sent}
+                          tone="blue"
+                          note="Viewed the note, accepted the invite, or replied."
+                        />
+                        <FunnelRow
+                          label="Accepted invite"
+                          value={connectedCount}
+                          total={scoped.sent}
+                          tone="success"
+                          note="Accepted connections — includes people who later replied."
+                        />
+                        <FunnelRow
+                          label="Replied"
+                          value={scoped.replied}
+                          total={scoped.sent}
+                          tone="purple"
+                          note="A real message came back — the strongest signal."
+                        />
+                      </div>
+                      <div className="liq-funnel-foot">
+                        <Clock size={12} />
+                        {scoped.pending} still waiting · {scoped.seen} viewed without accepting
+                        {scoped.declined > 0 ? ` · ${scoped.declined} declined` : ''}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="liq-card">
+                    <header className="liq-card-head">
+                      <div className="liq-card-title"><Building2 size={14} /> Companies</div>
+                      <span className="liq-muted" style={{ fontSize: 10.5, fontWeight: 700 }}>
+                        {companies.length} tracked
+                      </span>
+                    </header>
+                    {companies.length === 0 ? (
+                      <div className="liq-empty">
+                        <div className="liq-empty-icon"><Building2 size={18} /></div>
+                        <strong>No companies tracked yet</strong>
+                        <p>Company-level stats appear after the first campaign records an invite.</p>
+                      </div>
+                    ) : (
+                      <div className="liq-cos">
+                        {companies.map((item) => {
+                          const share = percent(item.engaged || 0, item.sent || 0);
+                          return (
+                            <button
+                              key={item.company}
+                              type="button"
+                              className={`liq-cos-row ${companyScope === item.company ? 'is-active' : ''}`}
+                              onClick={() => setCompanyScope(companyScope === item.company ? 'all' : item.company)}
+                              title={`Focus ${item.company}`}
+                            >
+                              <div className="liq-cos-name">
+                                {item.company}
+                                <small>{item.engaged} of {item.sent} showed a signal</small>
+                              </div>
+                              <div className="liq-cos-metrics">
+                                <span><b>{item.sent}</b> sent</span>
+                                <span>{share}%</span>
+                                <ChevronRight size={12} />
+                              </div>
+                              <div className="liq-cos-bar">
+                                <span style={{ width: `${item.engaged ? Math.max(share, 2) : 0}%` }} />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                <div className="liq-stack">
+                  <section className="liq-card">
+                    <header className="liq-card-head">
+                      <div className="liq-card-title"><Activity size={14} /> Current run</div>
+                      <span className={`liq-pill ${isRunning ? 'tone-warn' : meta.tone}`}>
+                        {isSyncing ? 'Syncing' : isRunning ? 'Live' : meta.label}
+                      </span>
+                    </header>
+                    <div className="liq-card-body">
+                      {progressTarget > 0 ? (
+                        <div className="liq-run">
+                          <div className="liq-run-top">
+                            <h4>{progress?.currentRole ? `Filtering: ${progress.currentRole}` : 'Sending requests'}</h4>
+                            <span className="liq-muted" style={{ fontSize: 10.5, fontWeight: 700 }}>
+                              {progressPct}%
+                            </span>
+                          </div>
+                          <div className="liq-progress"><span style={{ width: `${progressPct}%` }} /></div>
+                          <div className="liq-run-meta">
+                            <span><b>{progressSent}</b> of {progressTarget} requests</span>
+                            <span>Target {progress?.targetPerRole || 0} per role</span>
+                          </div>
+                          <div className="liq-run-counters">
+                            <div className="liq-run-counter"><b>{progress?.stats?.sent || 0}</b><span>Sent</span></div>
+                            <div className="liq-run-counter"><b>{progress?.stats?.skipped || 0}</b><span>Skipped</span></div>
+                            <div className="liq-run-counter"><b>{progress?.stats?.failed || 0}</b><span>Failed</span></div>
+                          </div>
+                          {isRunning && (
+                            <button type="button" className="liq-btn danger" onClick={handleStop}>
+                              <Square size={13} /> {isSyncing ? 'Stop sync' : 'Stop campaign'}
+                            </button>
+                          )}
+                        </div>
+                      ) : isSyncing ? (
+                        <div className="liq-run-empty">
+                          <strong>Syncing invite statuses</strong>
+                          <p style={{ margin: '0 0 12px' }}>
+                            A background tracker is checking pending invites. No campaign requests are being sent.
+                          </p>
+                          <button type="button" className="liq-btn danger sm" onClick={handleStop}>
+                            <Square size={12} /> Stop sync
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="liq-run-empty">
+                          <strong>No campaign in progress</strong>
+                          <p style={{ margin: '0 0 12px' }}>
+                            {lastLog ? `Last automation event at ${lastLog.timestamp}.` : 'Configure a campaign to start sending invites.'}
+                          </p>
+                          <button type="button" className="liq-btn primary sm" onClick={() => setTab('campaign')}>
+                            <Target size={13} /> Configure campaign
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="liq-card">
+                    <header className="liq-card-head">
+                      <div className="liq-card-title"><Terminal size={14} /> Recent activity</div>
+                      <button type="button" className="liq-link" onClick={() => setTab('activity')}>
+                        All logs <ChevronRight size={11} />
+                      </button>
+                    </header>
+                    <div className="liq-feed">
+                      {logs.length === 0 ? (
+                        <div className="liq-feed-empty">Waiting for automation events…</div>
+                      ) : (
+                        logs.slice(-5).reverse().map((log, index) => (
+                          <div key={`${log.timestamp || ''}-${index}`} className={`liq-feed-row is-${levelOf(log)}`}>
+                            <i className="liq-feed-dot" />
+                            <span className="liq-feed-msg">{log.message}</span>
+                            <span className="liq-feed-time">{log.timestamp}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="liq-card">
+                    <header className="liq-card-head">
+                      <div className="liq-card-title"><ShieldCheck size={14} /> Safety</div>
+                      <button type="button" className="liq-link" onClick={() => setTab('campaign')}>
+                        Details <ChevronRight size={11} />
+                      </button>
+                    </header>
+                    <div className="liq-card-body">
+                      <div className="liq-safety">
+                        <div className="liq-safety-item">
+                          <Clock size={13} />
+                          <div><strong>Human-paced sending</strong><span>20–35s between requests and 8–15s between role filters.</span></div>
+                        </div>
+                        <div className="liq-safety-item">
+                          <ShieldCheck size={13} />
+                          <div><strong>Your own session</strong><span>Runs inside your saved Chrome profile, not a shared bot farm.</span></div>
+                        </div>
+                        <div className="liq-safety-item">
+                          <KeyRound size={13} />
+                          <div><strong>No password storage</strong><span>Sign-in happens in LinkedIn's window; this app never stores your password.</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'campaign' && (
+            <div className="liq-campaign">
+              <section className="liq-card">
+                <header className="liq-card-head">
+                  <div className="liq-card-title"><Target size={14} /> Campaign launcher</div>
+                  <span className={`liq-pill ${isRunning ? 'tone-warn' : meta.tone}`}>
+                    {isSyncing ? 'Syncing' : isRunning ? 'Running' : meta.label}
+                  </span>
+                </header>
+                <div className="liq-card-body">
+                  <div className="liq-field">
+                    <label className="liq-label" htmlFor="liq-company">Target company or LinkedIn URL</label>
+                    <input
+                      id="liq-company"
+                      className="liq-input"
+                      value={company}
+                      onChange={(event) => setCompany(event.target.value)}
+                      placeholder="e.g. Google, Microsoft or https://linkedin.com/company/…"
+                      disabled={isRunning}
+                    />
+                  </div>
+
+                  <div className="liq-field">
+                    <div className="liq-label">Role filters <em>{roles.length} selected</em></div>
+                    <div className="liq-chips">
+                      {roles.map((role) => (
+                        <span key={role} className="liq-chip">
+                          {role}
+                          {!isRunning && (
+                            <button type="button" onClick={() => setRoles(roles.filter((item) => item !== role))} aria-label={`Remove ${role}`}>
+                              <X size={10} />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                      {roles.length === 0 && <span className="liq-muted" style={{ fontSize: 11.5 }}>Add at least one role below.</span>}
+                    </div>
+                    {!isRunning && (
+                      <div className="liq-role-add">
+                        <input
+                          value={newRole}
+                          onChange={(event) => setNewRole(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              addRole();
+                            }
+                          }}
+                          placeholder="Add a role, e.g. Engineering Manager"
+                        />
+                        <button type="button" className="liq-btn sm" onClick={addRole} disabled={!newRole.trim()}>
+                          <Plus size={12} /> Add
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="liq-row2">
+                    <div className="liq-field">
+                      <label className="liq-label" htmlFor="liq-per-role">Requests per role</label>
+                      <input
+                        id="liq-per-role"
+                        className="liq-input"
+                        type="number"
+                        min="1"
+                        max="40"
+                        value={perRole}
+                        onChange={(event) => {
+                          const next = Number(event.target.value) || 1;
+                          setPerRole(Math.max(1, Math.min(40, next)));
+                        }}
+                        disabled={isRunning}
+                      />
+                    </div>
+                    <div className="liq-field">
+                      <div className="liq-label">Note style</div>
+                      <button
+                        type="button"
+                        className={`liq-toggle ${useAI ? 'on' : ''}`}
+                        onClick={() => setUseAI((value) => !value)}
+                        disabled={isRunning}
+                      >
+                        <Sparkles size={13} /> {useAI ? 'Gemini AI + template fallback' : 'Template note only'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="liq-field">
+                    <label className="liq-label" htmlFor="liq-note">
+                      Custom note template <em>{useAI ? 'used as the fallback' : 'used for everyone'}</em>
+                    </label>
+                    <textarea
+                      id="liq-note"
+                      className="liq-textarea"
+                      rows={3}
+                      maxLength={200}
+                      value={note}
+                      onChange={(event) => setNote(event.target.value)}
+                      placeholder="Hi {name}, I'd love to connect and learn more about opportunities at your company!"
+                      disabled={isRunning}
+                    />
+                    <div className="liq-note-meta">
+                      <span>Supports {'{name}'}. LinkedIn allows up to 200 characters.</span>
+                      <span className={note.length > 190 ? 'is-over' : ''}>{note.length}/200</span>
+                    </div>
+                  </div>
+
+                  <div className="liq-estimate">
+                    <span><b>{batchTotal}</b> requests across <b>{roles.length}</b> role filters</span>
+                    <span><Hourglass size={12} /> {formatEstimate(estimateSeconds)} at human pace</span>
+                  </div>
+
+                  <div className="liq-actions">
+                    {isRunning ? (
+                      <button type="button" className="liq-btn danger" onClick={handleStop}>
+                        <Square size={14} /> {isSyncing ? 'Stop sync' : 'Stop campaign'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="liq-btn primary"
+                        onClick={handleStart}
+                        disabled={starting || !connected || roles.length === 0}
+                      >
+                        <Play size={14} />
+                        {starting
+                          ? 'Starting…'
+                          : accountLoading
+                            ? 'Checking LinkedIn session…'
+                            : !connected
+                              ? 'Connect LinkedIn to start'
+                              : `Start campaign · ${batchTotal} requests`}
+                      </button>
+                    )}
+                  </div>
+                  <div className={`liq-start-hint ${!connected && !accountLoading ? 'is-block' : ''}`}>
+                    {accountLoading
+                      ? 'Checking the saved LinkedIn session for this profile…'
+                      : !connected
+                        ? 'Connect your LinkedIn session above before starting.'
+                        : !roles.length
+                          ? 'Add at least one role filter to build the queue.'
+                          : isSyncing
+                            ? 'A background status sync is running. Stop it before launching a campaign.'
+                            : needsLogin
+                              ? 'The last sync hit a login wall. Reconnect above if this run cannot send.'
+                              : 'A Chrome window opens and sends requests one at a time. Stop halts the queue between requests.'}
+                  </div>
+                </div>
+              </section>
+
+              <div className="liq-stack">
+                <section className="liq-card">
+                  <header className="liq-card-head">
+                    <div className="liq-card-title"><Timer size={14} /> How this run is paced</div>
+                  </header>
+                  <div className="liq-card-body">
+                    <div className="liq-safety">
+                      <div className="liq-safety-item">
+                        <Clock size={13} />
+                        <div><strong>20–35 seconds between requests</strong><span>Randomized human-like delay enforced by the bot engine.</span></div>
+                      </div>
+                      <div className="liq-safety-item">
+                        <Timer size={13} />
+                        <div><strong>8–15 seconds between role filters</strong><span>The queue pauses when it switches search filters.</span></div>
+                      </div>
+                      <div className="liq-safety-item">
+                        <Gauge size={13} />
+                        <div><strong>Up to 40 requests per role</strong><span>This is the maximum this dashboard will request in one filter.</span></div>
+                      </div>
+                      <div className="liq-safety-item warn">
+                        <MessageSquare size={13} />
+                        <div><strong>200-character note limit</strong><span>LinkedIn truncates longer connection notes, so the form caps them.</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="liq-card">
+                  <header className="liq-card-head">
+                    <div className="liq-card-title"><ShieldCheck size={14} /> Consent &amp; guardrails</div>
+                  </header>
+                  <div className="liq-card-body">
+                    <div className="liq-safety">
+                      <div className="liq-guard">
+                        <CheckCircle2 size={13} />
+                        <span><strong>Consent-first:</strong> you connect your own account and start every campaign yourself.</span>
+                      </div>
+                      <div className="liq-guard">
+                        <ShieldCheck size={13} />
+                        <span><strong>Per-user session:</strong> the Chrome profile lives under <code>sessions/&lt;user&gt;</code> on this machine.</span>
+                      </div>
+                      <div className="liq-guard">
+                        <KeyRound size={13} />
+                        <span><strong>No credentials:</strong> LinkedIn passwords are never requested, sent, or stored by the dashboard.</span>
+                      </div>
+                      <div className="liq-guard">
+                        <AlertTriangle size={13} />
+                        <span><strong>Honest limits:</strong> this is not a bulk scraper. It sends the queue you define, then stops.</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          )}
+
+          {tab === 'connections' && (
+            <>
+              {companyScope !== 'all' && scopeCompany && (
+                <div className="liq-scope">
+                  <Building2 size={13} />
+                  Showing <strong>{companyScope}</strong> · {scopeCompany.sent} sent
+                  <button type="button" className="liq-link" onClick={() => setCompanyScope('all')}>
+                    Clear scope <X size={11} />
+                  </button>
+                </div>
+              )}
+
+              <section className="liq-conn-card">
+                <header className="liq-card-head">
+                  <div className="liq-card-title"><Users size={14} /> Connection tracker</div>
+                  <span className="liq-muted" style={{ fontSize: 10.5, fontWeight: 700 }}>
+                    {filteredConnections.length} of {companyConnections.length}
+                  </span>
+                </header>
+
+                <div className="liq-toolbar">
+                  <div className="liq-search">
+                    <Search size={14} />
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search name, company, role or reply…"
+                    />
+                    {search && (
+                      <button type="button" className="liq-btn icon" onClick={() => setSearch('')} aria-label="Clear search">
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    className="liq-select"
+                    style={{ maxWidth: 200 }}
+                    value={companyScope}
+                    onChange={(event) => setCompanyScope(event.target.value)}
+                    aria-label="Filter by company"
+                  >
+                    <option value="all">All companies</option>
+                    {companies.map((item) => (
+                      <option key={item.company} value={item.company}>{item.company}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="liq-toolbar">
+                  <div className="liq-filters">
+                    {CONN_STATUS.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`liq-filter ${statusFilter === item.key ? 'active' : ''}`}
+                        onClick={() => setStatusFilter(item.key)}
+                      >
+                        {item.label} {statusCounts[item.key] || 0}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {filteredConnections.length === 0 ? (
+                  <div className="liq-empty">
+                    <div className="liq-empty-icon"><Users size={18} /></div>
+                    <strong>{connections.length ? 'No connections match these filters' : 'No connections yet'}</strong>
+                    <p>
+                      {connections.length
+                        ? 'Try clearing the search, status or company filters.'
+                        : 'Launch a campaign to start sending personalized requests. Results land here as the tracker syncs.'}
+                    </p>
+                    {connections.length > 0 ? (
+                      <button
+                        type="button"
+                        className="liq-btn"
+                        onClick={() => { setSearch(''); setStatusFilter('all'); setCompanyScope('all'); }}
+                      >
+                        Clear filters
+                      </button>
+                    ) : (
+                      <button type="button" className="liq-btn primary" onClick={() => setTab('campaign')}>
+                        <Target size={13} /> Configure a campaign
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      {visibleConnections.map((item) => (
+                        <div key={item.id} className="liq-conn-row">
+                          <div className="liq-avatar">{initials(item.name)}</div>
+                          <div className="liq-conn-main">
+                            {item.profileUrl ? (
+                              <a href={item.profileUrl} target="_blank" rel="noreferrer" className="liq-conn-name">
+                                {item.name || 'LinkedIn member'} <ExternalLink size={10} />
+                              </a>
+                            ) : (
+                              <span className="liq-conn-name">{item.name || 'LinkedIn member'}</span>
+                            )}
+                            <span className="liq-conn-sub">
+                              {[item.headline || item.role, item.company].filter(Boolean).join(' · ') || 'LinkedIn member'}
+                            </span>
+                            {item.status === 'replied' && item.replyText && (
+                              <p className="liq-conn-reply">“{item.replyText}”</p>
+                            )}
+                          </div>
+                          <div className="liq-conn-side">
+                            <span className="liq-conn-time">{timeAgo(item.sentDate || item.lastChecked)}</span>
+                            <span className={`liq-status s-${item.status || 'pending'}`}>
+                              {STATUS_LABEL[item.status] || item.status || 'Pending'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {visibleCount < filteredConnections.length && (
+                      <div className="liq-loadmore">
+                        <button type="button" className="liq-btn" onClick={() => setVisibleCount((count) => count + 120)}>
+                          Show {Math.min(120, filteredConnections.length - visibleCount)} more
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            </>
+          )}
+
+          {tab === 'activity' && (
+            <section className="liq-card">
+              <header className="liq-card-head">
+                <div className="liq-card-title"><Terminal size={14} /> Automation log</div>
+                <span className={`liq-pill ${wsLive ? 'tone-success' : 'tone-neutral'}`}>
+                  {wsLive ? 'Streaming live' : 'Polling every 10s'}
+                </span>
+              </header>
+
+              <div className="liq-toolbar">
+                <div className="liq-search">
+                  <Search size={14} />
+                  <input
+                    value={logQuery}
+                    onChange={(event) => setLogQuery(event.target.value)}
+                    placeholder="Filter log messages…"
+                  />
+                  {logQuery && (
+                    <button type="button" className="liq-btn icon" onClick={() => setLogQuery('')} aria-label="Clear log search">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                <div className="liq-filters">
+                  {LOG_LEVELS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`liq-filter ${logLevel === item.key ? 'active' : ''}`}
+                      onClick={() => setLogLevel(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className={`liq-btn sm ${autoScroll ? '' : 'subtle'}`}
+                  onClick={() => setAutoScroll((value) => !value)}
+                  title={autoScroll ? 'Pause auto-scroll' : 'Resume auto-scroll'}
+                >
+                  {autoScroll ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
+                  {autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
+                </button>
+                <button type="button" className="liq-btn sm" onClick={handleCopyLogs}>
+                  {copied ? <Check size={13} /> : <Copy size={13} />}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+
+              <div className="liq-log" ref={logRef}>
+                {filteredLogs.length === 0 ? (
+                  <div className="liq-log-empty">
+                    {logs.length === 0 ? 'Waiting for automation events…' : 'No log lines match this filter.'}
+                  </div>
+                ) : (
+                  filteredLogs.map((log, index) => (
+                    <div key={`${log.timestamp || ''}-${index}`} className={`liq-log-row is-${levelOf(log)}`}>
+                      <span className="liq-log-time">{log.timestamp}</span>
+                      <span className="liq-log-msg">{log.message}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="liq-log-foot">
+                <span><Radio size={11} /> {filteredLogs.length} of {logs.length} events shown</span>
+                <span>The server keeps the last 500 events</span>
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>

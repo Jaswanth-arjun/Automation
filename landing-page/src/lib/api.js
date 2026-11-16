@@ -13,7 +13,19 @@ async function apiFetch(baseUrl, path, options = {}) {
     ...(options.headers || {}),
   };
   const res = await fetch(`${baseUrl}${path}`, { ...options, headers });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const text = await res.text();
+    let message = `Request failed (${res.status})`;
+    try {
+      const parsed = JSON.parse(text);
+      message = parsed.error || parsed.message || message;
+    } catch {
+      if (text) message = text.slice(0, 300);
+    }
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
+  }
   const text = await res.text();
   return text ? JSON.parse(text) : {};
 }
@@ -32,19 +44,22 @@ export const api = {
   generateMailReply: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/reply', { method: 'POST', body: JSON.stringify(mail) }),
   generateFollowUp: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/followup', { method: 'POST', body: JSON.stringify(mail) }),
   sendFollowUp: (payload) => apiFetch(MAILMIND_API, '/api/ai/mail/followup/send', { method: 'POST', body: JSON.stringify(payload) }),
-  getEmails: (page = 0, size = 20, category = '', mailbox = '', label = '') => {
+  getEmails: (page = 0, size = 20, category = '', mailbox = '', label = '', q = '') => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (category) params.set('category', category);
     if (mailbox) params.set('mailbox', mailbox);
     if (label) params.set('label', label);
+    if (q) params.set('q', q);
     return apiFetch(MAILMIND_API, `/api/emails?${params}`);
   },
   getEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}`),
   getThread: (threadId) => apiFetch(MAILMIND_API, `/api/threads/${threadId}`),
   toggleStar: (id, starred) => apiFetch(MAILMIND_API, `/api/emails/${id}/star?starred=${starred}`, { method: 'POST' }),
+  markRead: (id, read = true) => apiFetch(MAILMIND_API, `/api/emails/${id}/read?read=${read}`, { method: 'POST' }),
   trashEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}/trash`, { method: 'POST' }),
   snoozeEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}/snooze`, { method: 'POST' }),
   archiveEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}/archive`, { method: 'POST' }),
+  disconnectGmail: () => apiFetch(MAILMIND_API, '/api/gmail/disconnect', { method: 'POST' }),
   summarizeEmail: (emailId) => apiFetch(MAILMIND_API, `/api/ai/summarize/email/${emailId}`, { method: 'POST' }),
   summarizeThread: (threadId) => apiFetch(MAILMIND_API, `/api/ai/summarize/thread/${threadId}`, { method: 'POST' }),
   generateDraft: (prompt, recipientEmails = [], subject = '') =>
@@ -55,6 +70,7 @@ export const api = {
     apiFetch(MAILMIND_API, '/api/reply/generate', { method: 'POST', body: JSON.stringify({ emailId, threadId, instruction }) }),
   sendReply: (draftId, subject, bodyText, recipientEmails) =>
     apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify({ draftId, subject, bodyText, recipientEmails }) }),
+  replySend: (payload) => apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
   chatMail: (question, sessionId = '', threadId = '') =>
     apiFetch(MAILMIND_API, '/api/chat/query', { method: 'POST', body: JSON.stringify({ question, sessionId, threadId }) }),
 
@@ -64,7 +80,12 @@ export const api = {
     const params = new URLSearchParams(filter);
     return apiFetch(LINKEDIN_API, `/api/connections?${params}`);
   },
-  getLinkedInAnalytics: () => apiFetch(LINKEDIN_API, '/api/analytics'),
+  getLinkedInAnalytics: (company = 'all') => {
+    const params = new URLSearchParams();
+    if (company && company !== 'all') params.set('company', company);
+    const query = params.toString();
+    return apiFetch(LINKEDIN_API, `/api/analytics${query ? `?${query}` : ''}`);
+  },
   getLinkedInLogs: () => apiFetch(LINKEDIN_API, '/api/logs'),
   startLinkedIn: (config) => apiFetch(LINKEDIN_API, '/api/start', { method: 'POST', body: JSON.stringify(config) }),
   stopLinkedIn: () => apiFetch(LINKEDIN_API, '/api/stop', { method: 'POST' }),

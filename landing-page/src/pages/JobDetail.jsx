@@ -165,6 +165,17 @@ export default function JobDetail() {
             )}
           </div>
 
+          {isAdmin && job.sourceUrl && (
+            <a
+              className="job-source-link"
+              href={job.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={13} /> View the original posting
+            </a>
+          )}
+
           {/* Must have / Good to have skills header (for admin jobs) */}
           {isAdmin && (
             <div style={{ margin: '16px 0', padding: '16px', background: '#fafaf7', borderRadius: '10px', border: '1px solid #eee' }}>

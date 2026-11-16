@@ -23,6 +23,7 @@ import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, renderResumePdf, resumePlainText } from './lib/resume-pdf.js';
 import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, validateTailoredResume } from './lib/job-analysis.js';
+import { buildJobDraft } from './lib/job-import.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -153,8 +154,77 @@ app.post('/api/jobs/upload-logo', uploadLogo.single('logo'), (req, res) => {
   res.json({ path: `/uploads/${req.file.filename}` });
 });
 
+// Read a public job link and return a ready-to-review listing for the admin panel.
+app.post('/api/jobs/import', async (req, res) => {
+  const jobUrl = publicJobUrl(req.body?.url);
+  if (!jobUrl) {
+    return res.status(400).json({ error: 'Enter the complete public job link, starting with https://' });
+  }
+  try {
+    const fetched = await fetchJobText(jobUrl.toString());
+    const draft = buildJobDraft({
+      // Use the line-preserving page text so the description can be formatted.
+      posting: { ...fetched.posting, description: fetched.rawText || fetched.posting?.description || '' },
+      meta: fetched.meta,
+      openUrl: fetched.openUrl,
+      applyUrl: fetched.applyUrl,
+    });
+    if (!draft.description) {
+      return res.status(422).json({ error: 'The description on that page could not be read. Paste it manually instead.' });
+    }
+    const titleText = draft.title.trim();
+    const genericTitle = /^(?:careers?|jobs?|job\s*(?:search|board|openings?)|home|open\s+positions?|search\s+results?)$/i.test(titleText)
+      || /\b(?:careers?|jobs?|job\s*board|open\s+positions?|job\s*search)$/i.test(titleText)
+      || /\bcareers?\b/i.test(titleText);
+    const sectionSignals = (draft.description.match(/responsibilit|requirement|qualification|what\s+you(?:'|’)?ll\s+do|about\s+the\s+(?:role|job)|job\s+description|skills/i) || []).length;
+    if (genericTitle || sectionSignals === 0) {
+      return res.status(422).json({
+        error: 'That link opened a careers listing rather than a single job. Open the job and copy its own address (the one with the job title).',
+      });
+    }
+    res.json({ job: draft, sourceUrl: jobUrl.toString(), fetchedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(422).json({ error: err.message || 'That job link could not be read.' });
+  }
+});
+
+function cleanOwner(value) {
+  if (!value || typeof value !== 'object') return null;
+  const id = String(value.id || '').trim();
+  const email = String(value.email || '').trim();
+  const name = String(value.name || value.displayName || '').trim();
+  if (!id && !email) return null;
+  return { id, email, name };
+}
+
+app.put('/api/jobs/:id', (req, res) => {
+  const jobs = readJobs();
+  const id = decodeURIComponent(req.params.id || '').trim();
+  const idx = jobs.findIndex((job) => String(job.id) === id);
+  if (idx === -1) return res.status(404).json({ error: 'Job not found.' });
+
+  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description, sourceUrl, postedBy } = req.body || {};
+  const job = jobs[idx];
+  jobs[idx] = {
+    ...job,
+    ...(logo !== undefined ? { logo: logo || '' } : {}),
+    ...(role ? { role } : {}),
+    ...(company ? { company } : {}),
+    ...(filters ? { filters } : {}),
+    ...(Array.isArray(mustHaveSkills) ? { mustHaveSkills } : {}),
+    ...(Array.isArray(goodToHaveSkills) ? { goodToHaveSkills } : {}),
+    ...(applyLink ? { applyLink } : {}),
+    ...(description ? { description } : {}),
+    ...(sourceUrl !== undefined ? { sourceUrl: String(sourceUrl || '') } : {}),
+    ...(cleanOwner(postedBy) ? { postedBy: cleanOwner(postedBy) } : {}),
+    updatedAt: new Date().toISOString(),
+  };
+  writeJobs(jobs);
+  res.json({ message: 'Job updated successfully!', job: jobs[idx] });
+});
+
 app.post('/api/jobs', (req, res) => {
-  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description } = req.body || {};
+  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description, sourceUrl, postedBy } = req.body || {};
   if (!role || !company || !applyLink || !description) {
     return res.status(400).json({ error: 'role, company, applyLink, and description are required.' });
   }
@@ -169,6 +239,8 @@ app.post('/api/jobs', (req, res) => {
     goodToHaveSkills: Array.isArray(goodToHaveSkills) ? goodToHaveSkills : [],
     applyLink,
     description,
+    ...(sourceUrl ? { sourceUrl: String(sourceUrl) } : {}),
+    ...(cleanOwner(postedBy) ? { postedBy: cleanOwner(postedBy) } : {}),
     postedAt: new Date().toISOString(),
   };
 
@@ -842,16 +914,140 @@ function parseMailboxAddress(raw) {
   return { name: match[1].replace(/"/g, '').trim() || match[2].trim(), email: match[2].trim() };
 }
 
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'aol.com',
+  'mail.com', 'zoho.com', 'rediffmail.com', 'yandex.com', 'gmx.com', 'fastmail.com',
+]);
+
+// Applicant tracking systems send on behalf of many companies, so their domain
+// must not be used as the company name.
+const ATS_EMAIL_DOMAINS = new Set([
+  'greenhouse.io', 'greenhouse-mail.io', 'lever.co', 'workday.com', 'myworkdayjobs.com',
+  'smartrecruiters.com', 'icims.com', 'taleo.net', 'successfactors.com', 'ashbyhq.com',
+  'hackerrank.com', 'codility.com', 'hirevue.com', 'naukri.com', 'unstop.com',
+  'linkedin.com', 'indeed.com', 'glassdoor.com', 'wellfound.com', 'internshala.com',
+  'superset.com', 'mynexthire.com', 'jobvite.com', 'bamboohr.com', 'recruitee.com',
+  'freshteam.com', 'zohorecruit.com', 'keka.com', 'darwinbox.com', 'rippling.com',
+]);
+
+// Consumer/tech platforms that appear in every inbox but are not employers.
+const SUPPRESS_COMPANY_DOMAINS = new Set([
+  'google.com', 'microsoft.com', 'apple.com', 'github.com', 'openai.com', 'chatgpt.com',
+  'anthropic.com', 'notion.so', 'slack.com', 'zoom.us', 'dropbox.com', 'amazon.com',
+  'cloudflare.com', 'adobe.com', 'atlassian.com', 'meta.com', 'facebook.com',
+  'instagram.com', 'twitter.com', 'x.com', 'youtube.com', 'vercel.com', 'netlify.com',
+]);
+
+function domainMatches(domain, domains) {
+  if (!domain) return false;
+  for (const known of domains) {
+    if (domain === known || domain.endsWith(`.${known}`)) return true;
+  }
+  return false;
+}
+
+const SUBJECT_COMPANY_STOPWORDS = new Set([
+  'connected', 'account', 'accounts', 'application', 'applications', 'interview',
+  'interviews', 'referral', 'referrals', 'your', 'our', 'my', 'the', 'this',
+  'that', 'thanks', 'thank', 'you', 'team', 'role', 'position', 'job', 'opportunity',
+  'hiring', 'careers', 'career', 'company', 'recruiter', 'senior', 'junior',
+  'internship', 'intern', 'remote', 'us', 'me', 'all', 'a', 'an',
+]);
+
+const MAIL_SIGNAL_META = {
+  OFFER: { label: 'Offer', priority: 100, needsReply: true, job: true },
+  INTERVIEW: { label: 'Interview', priority: 92, needsReply: true, job: true },
+  ASSESSMENT: { label: 'Assessment', priority: 84, needsReply: true, job: true },
+  SHORTLISTED: { label: 'Shortlisted', priority: 74, needsReply: true, job: true },
+  RECRUITER: { label: 'Recruiter', priority: 62, needsReply: true, job: true },
+  REJECTED: { label: 'Update', priority: 45, needsReply: false, job: true },
+  APPLIED: { label: 'Applied', priority: 55, needsReply: false, job: true },
+  NEWSLETTER: { label: 'Newsletter', priority: 6, needsReply: false, job: false },
+  OTHER: { label: 'General', priority: 20, needsReply: false, job: false },
+};
+
 function categorizeMail(subject, snippet) {
-  const text = `${subject} ${snippet}`.toLowerCase();
-  if (/interview|recruiter|hiring|job|application|referral|career|opening/.test(text)) return 'Job/Recruitment';
-  if (/newsletter|unsubscribe|digest|roundup/.test(text)) return 'Newsletters';
-  if (/notification|alert|security|no-reply|noreply|verification/.test(text)) return 'Notifications';
-  if (/meeting|project|invoice|update|follow/.test(text)) return 'Work/Professional';
+  const text = `${subject || ''} ${snippet || ''}`.toLowerCase();
+  if (/unsubscribe|newsletter|digest|roundup|weekly update/.test(text)) return 'Newsletters';
+  if (/interview|recruiter|hiring|job|application|referral|career|opening|position|role/.test(text)) return 'Job/Recruitment';
+  if (/notification|alert|security|no-reply|noreply|verification|receipt|invoice/.test(text)) return 'Notifications';
+  if (/meeting|project|update|follow/.test(text)) return 'Work/Professional';
   return 'Uncategorized';
 }
 
-async function gmailApi(pathAndQuery) {
+// Deterministic, explainable signal. Never calls an LLM, so it runs for every
+// message and gives the UI an honest label instead of a black-box guess.
+function detectMailSignal(subject, snippet, bodyText = '') {
+  const text = `${subject || ''} ${snippet || ''} ${String(bodyText || '').slice(0, 2500)}`.toLowerCase();
+
+  if (/offer letter|offer of employment|pleased to offer|delighted to offer|we are offering you/.test(text)) return 'OFFER';
+  if (/\bregret\b|unfortunately|not (?:be )?(?:moving forward|selected|progressing)|unsuccessful|we have decided not|cannot offer|position has been filled/.test(text)) return 'REJECTED';
+  if (/interview|technical round|hr round|schedule (?:a|your) call|hiring manager (?:would like|wants) to (?:speak|talk)|panel discussion/.test(text)) return 'INTERVIEW';
+  if (/assessment|online test|coding (?:test|challenge|assignment)|hackerrank|codility|take[- ]home|aptitude test|\boa\b/.test(text)) return 'ASSESSMENT';
+  if (/shortlist|selected for (?:the )?next|next round|move(?:d)? forward/.test(text)) return 'SHORTLISTED';
+  if (/application (?:received|submitted)|thanks? for applying|we received your application|successfully applied/.test(text)) return 'APPLIED';
+  if (/recruiter|talent acquisition|hiring manager|referral|opportunit|open role|job opening|position at/.test(text)) return 'RECRUITER';
+  return 'OTHER';
+}
+
+function extractCompanyFromEmail(fromEmail, subject = '') {
+  const email = String(fromEmail || '').trim().toLowerCase();
+  const domain = email.includes('@') ? email.split('@').pop() : '';
+
+  if (!domain || domainMatches(domain, PUBLIC_EMAIL_DOMAINS) || domainMatches(domain, SUPPRESS_COMPANY_DOMAINS)) {
+    const match = String(subject || '').match(/\b(?:at|with|from|to)\s+([A-Z][A-Za-z0-9&.\-]{2,32})/);
+    if (!match) return '';
+    const candidate = match[1].replace(/[.,].*$/, '').trim();
+    // Filter out common English words that follow "from/at" in ordinary prose
+    // ("from Connected Account", "at Your Earliest").
+    if (SUBJECT_COMPANY_STOPWORDS.has(candidate.toLowerCase())) return '';
+    return candidate;
+  }
+  if (domainMatches(domain, ATS_EMAIL_DOMAINS)) return '';
+
+  const skip = new Set([
+    'mail', 'email', 'careers', 'career', 'jobs', 'job', 'recruiting', 'recruitment',
+    'talent', 'hr', 'no-reply', 'noreply', 'notifications', 'notify', 'hello', 'team',
+    'info', 'support', 'accounts', 'account', 'security', 'noreply-mail',
+  ]);
+  const labels = domain.split('.');
+  let pick = labels[0];
+  if (skip.has(pick) && labels.length > 2) pick = labels[1];
+  if (!pick) return '';
+  return pick
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function analyzeMailSignal({ subject, snippet, bodyText, fromEmail, mailbox = 'INBOX', receivedAt }) {
+  const signal = detectMailSignal(subject, snippet, bodyText);
+  const meta = MAIL_SIGNAL_META[signal] || MAIL_SIGNAL_META.OTHER;
+  const company = extractCompanyFromEmail(fromEmail, subject);
+  const ageHours = receivedAt ? Math.max(0, (Date.now() - new Date(receivedAt).getTime()) / 3600000) : 0;
+  const recencyBoost = ageHours <= 24 ? 8 : ageHours <= 72 ? 4 : 0;
+  const isOutbound = mailbox === 'SENT';
+
+  return {
+    signal,
+    signalLabel: meta.label,
+    company,
+    isJobRelated: meta.job || Boolean(company),
+    needsReply: !isOutbound && meta.needsReply,
+    priority: Math.max(1, Math.min(100, meta.priority + recencyBoost)),
+    tags: isOutbound ? ['Sent'] : [meta.label, company].filter(Boolean),
+  };
+}
+
+function findAttachmentPart(part) {
+  if (!part) return false;
+  if (part.filename) return true;
+  return (part.parts || []).some(findAttachmentPart);
+}
+
+async function gmailApi(pathAndQuery, options = {}) {
   const token = await getValidAccessToken();
   if (!token) {
     const error = new Error('Connect Gmail on the Mail page first.');
@@ -859,7 +1055,13 @@ async function gmailApi(pathAndQuery) {
     throw error;
   }
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${pathAndQuery}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await res.json();
   if (!res.ok) {
@@ -872,7 +1074,7 @@ async function gmailApi(pathAndQuery) {
 
 // Dispatches emails over standard HTTPS via the official Gmail REST API
 // Avoids fragile SMTP socket connection drops ("Connection closed unexpectedly")
-async function sendEmailViaGmailRestApi(accessToken, { from, to, subject, text, html, attachments = [] }) {
+async function sendEmailViaGmailRestApi(accessToken, { from, to, subject, text, html, attachments = [], threadId, inReplyTo, references }) {
   const transport = nodemailer.createTransport({
     streamTransport: true,
     buffer: true,
@@ -886,6 +1088,9 @@ async function sendEmailViaGmailRestApi(accessToken, { from, to, subject, text, 
     html,
     attachments,
   };
+  // Keep replies inside the original Gmail thread instead of starting a new one.
+  if (inReplyTo) mailOptions.inReplyTo = inReplyTo;
+  if (references) mailOptions.references = references;
 
   const compiled = await transport.sendMail(mailOptions);
   const raw = compiled.message.toString('base64url');
@@ -896,7 +1101,7 @@ async function sendEmailViaGmailRestApi(accessToken, { from, to, subject, text, 
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ raw }),
+    body: JSON.stringify({ raw, ...(threadId ? { threadId } : {}) }),
   });
 
   const data = await res.json();
@@ -906,59 +1111,222 @@ async function sendEmailViaGmailRestApi(accessToken, { from, to, subject, text, 
   return data;
 }
 
-async function listMailbox(mailbox, size = 20) {
-  const query = mailbox === 'SENT' ? 'in:sent' : 'in:inbox';
-  const list = await gmailApi(`messages?maxResults=${Math.min(size, 30)}&q=${encodeURIComponent(query)}`);
+// Small in-memory cache so a mount + a sync + a retry do not each spend the
+// Gmail per-minute quota re-reading the same messages.
+const gmailListCache = new Map();
+const GMAIL_LIST_TTL_MS = 60 * 1000;
+
+function friendlyGmailError(err) {
+  const message = String(err?.message || '');
+  if (/quota/i.test(message)) {
+    return 'Gmail rate limit reached. Wait a minute, then retry — MailMind caches results so the next load is cheap.';
+  }
+  if (/invalid_grant|invalid credentials/i.test(message)) {
+    return 'The Gmail connection expired. Reconnect the account to continue.';
+  }
+  return message || 'Gmail request failed.';
+}
+
+function invalidateMailCache() {
+  gmailListCache.clear();
+}
+
+// Patch cached rows in place so a star/read does not force a full Gmail refetch,
+// while archive/trash can drop the row immediately.
+function patchMailCache(id, patch) {
+  for (const entry of gmailListCache.values()) {
+    entry.emails = entry.emails.map((email) => (email.id === id ? { ...email, ...patch } : email));
+  }
+}
+
+function dropFromMailCache(id) {
+  for (const entry of gmailListCache.values()) {
+    entry.emails = entry.emails.filter((email) => email.id !== id);
+  }
+}
+
+async function listMailbox(mailbox, size = 20, search = '') {
+  const wanted = Math.min(Math.max(size, 1), 50);
+  const extra = String(search || '').trim();
+  const cacheKey = `${mailbox}|${wanted}|${extra}`;
+  const cached = gmailListCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < GMAIL_LIST_TTL_MS) {
+    return cached.emails.map((email) => ({ ...email }));
+  }
+
+  const baseQuery = mailbox === 'SENT' ? 'in:sent' : 'in:inbox';
+  const query = extra ? `${baseQuery} ${extra}` : baseQuery;
+  const list = await gmailApi(`messages?maxResults=${wanted}&q=${encodeURIComponent(query)}`);
   const ids = list.messages || [];
+
+  // Metadata only: the list needs a subject and a sender, not the whole body.
+  // Bodies are fetched lazily by GET /api/emails/:id when a message is opened.
+  const headers = ['Subject', 'From', 'To', 'Message-ID', 'References']
+    .map((name) => `metadataHeaders=${encodeURIComponent(name)}`)
+    .join('&');
+
   const emails = [];
   for (let i = 0; i < ids.length; i += 5) {
     const chunk = ids.slice(i, i + 5);
-    const messages = await Promise.all(chunk.map((item) => gmailApi(`messages/${item.id}?format=full`)));
+    const messages = await Promise.all(
+      chunk.map((item) => gmailApi(`messages/${item.id}?format=metadata&${headers}`)),
+    );
     messages.forEach((message) => {
       const payload = message.payload || {};
       const subject = gmailHeader(payload, 'Subject') || '(No Subject)';
       const from = parseMailboxAddress(gmailHeader(payload, 'From'));
       const to = parseMailboxAddress(gmailHeader(payload, 'To'));
       const person = mailbox === 'SENT' ? to : from;
-      const bodyText = decodeGmailBody(payload).slice(0, 8000);
       const labels = message.labelIds || [];
+      const receivedAt = new Date(Number(message.internalDate || Date.now())).toISOString();
+      const signalInfo = analyzeMailSignal({
+        subject,
+        snippet: message.snippet || '',
+        bodyText: '',
+        fromEmail: from.email,
+        mailbox,
+        receivedAt,
+      });
+
       emails.push({
         id: message.id,
         threadId: message.threadId,
         subject,
         snippet: message.snippet || '',
-        bodyText,
+        bodyText: '',
         isRead: !labels.includes('UNREAD'),
         isStarred: labels.includes('STARRED'),
         aiCategory: categorizeMail(subject, message.snippet || ''),
-        receivedAt: new Date(Number(message.internalDate || Date.now())).toISOString(),
-        sentAt: new Date(Number(message.internalDate || Date.now())).toISOString(),
+        ...signalInfo,
+        hasAttachments: findAttachmentPart(payload),
+        messageIdHeader: gmailHeader(payload, 'Message-ID'),
+        referencesHeader: gmailHeader(payload, 'References'),
+        direction: mailbox === 'SENT' ? 'SENT' : 'INBOX',
+        receivedAt,
+        sentAt: receivedAt,
         senders: [person],
         senderName: person.name,
         senderEmail: person.email,
       });
     });
   }
-  return emails;
+
+  gmailListCache.set(cacheKey, { at: Date.now(), emails });
+  return emails.map((email) => ({ ...email }));
 }
+
+// Full message body, loaded only when the user opens a message.
+app.get('/api/emails/:id', async (req, res) => {
+  try {
+    const id = validGmailId(req.params.id);
+    const message = await gmailApi(`messages/${id}?format=full`);
+    const payload = message.payload || {};
+    res.json({
+      id: message.id,
+      threadId: message.threadId,
+      bodyText: decodeGmailBody(payload).slice(0, 20000),
+      hasAttachments: findAttachmentPart(payload),
+      messageIdHeader: gmailHeader(payload, 'Message-ID'),
+      referencesHeader: gmailHeader(payload, 'References'),
+      isRead: !(message.labelIds || []).includes('UNREAD'),
+      isStarred: (message.labelIds || []).includes('STARRED'),
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: friendlyGmailError(err) });
+  }
+});
 
 app.get('/api/emails', async (req, res) => {
   try {
     const mailbox = String(req.query.mailbox || 'INBOX').toUpperCase() === 'SENT' ? 'SENT' : 'INBOX';
     const size = parseInt(req.query.size, 10) || 20;
-    const emails = await listMailbox(mailbox, size);
+    const category = String(req.query.category || '').trim();
+    const search = String(req.query.q || '').trim();
+    let emails = await listMailbox(mailbox, size, search);
+    if (category && category !== 'All') {
+      emails = emails.filter((email) => email.aiCategory === category);
+    }
     res.json({ emails, total: emails.length, mailbox });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message || 'Could not load Gmail messages.' });
+    res.status(err.status || 500).json({ error: friendlyGmailError(err) });
+  }
+});
+
+// ─── Mail actions (star / read / archive / trash) ───
+// These were previously called by the UI but never implemented, so the page
+// showed a success toast while nothing changed in Gmail.
+function validGmailId(raw) {
+  const id = String(raw || '');
+  if (!/^[A-Za-z0-9_-]{5,}$/.test(id)) {
+    const error = new Error('Invalid Gmail message id.');
+    error.status = 400;
+    throw error;
+  }
+  return id;
+}
+
+app.post('/api/emails/:id/star', async (req, res) => {
+  try {
+    const id = validGmailId(req.params.id);
+    const starred = String(req.query.starred ?? req.body?.starred ?? 'true') === 'true';
+    await gmailApi(`messages/${id}/modify`, {
+      method: 'POST',
+      body: starred ? { addLabelIds: ['STARRED'] } : { removeLabelIds: ['STARRED'] },
+    });
+    patchMailCache(id, { isStarred: starred });
+    res.json({ ok: true, id, starred });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Could not update the star.' });
+  }
+});
+
+app.post('/api/emails/:id/read', async (req, res) => {
+  try {
+    const id = validGmailId(req.params.id);
+    const read = String(req.query.read ?? req.body?.read ?? 'true') === 'true';
+    await gmailApi(`messages/${id}/modify`, {
+      method: 'POST',
+      body: read ? { removeLabelIds: ['UNREAD'] } : { addLabelIds: ['UNREAD'] },
+    });
+    patchMailCache(id, { isRead: read });
+    res.json({ ok: true, id, read });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Could not update the read state.' });
+  }
+});
+
+app.post('/api/emails/:id/archive', async (req, res) => {
+  try {
+    const id = validGmailId(req.params.id);
+    await gmailApi(`messages/${id}/modify`, {
+      method: 'POST',
+      body: { removeLabelIds: ['INBOX'] },
+    });
+    dropFromMailCache(id);
+    res.json({ ok: true, id, archived: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Could not archive the email.' });
+  }
+});
+
+app.post('/api/emails/:id/trash', async (req, res) => {
+  try {
+    const id = validGmailId(req.params.id);
+    await gmailApi(`messages/${id}/trash`, { method: 'POST' });
+    dropFromMailCache(id);
+    res.json({ ok: true, id, trashed: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Could not trash the email.' });
   }
 });
 
 app.post('/api/gmail/sync', async (req, res) => {
   try {
+    invalidateMailCache();
     const [inbox, sent] = await Promise.all([listMailbox('INBOX', 20), listMailbox('SENT', 20)]);
     res.json({ ok: true, received: inbox.length, sent: sent.length });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message || 'Could not sync Gmail.' });
+    res.status(err.status || 500).json({ error: friendlyGmailError(err) });
   }
 });
 
@@ -967,34 +1335,88 @@ app.post('/api/ai/mail/summarize', async (req, res) => {
     const { subject, from, body } = req.body || {};
     const textBody = String(body || '').trim();
     if (!textBody || textBody.length < 100) {
-      return res.json({ text: textBody });
+      return res.json({ text: textBody, fallback: true, note: 'This email is short, so the full text is shown.' });
     }
     const text = await askGemini(`Summarize this received email in 4 short bullet points. Mention who it is from, what they want, and any deadline or next step.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${textBody.slice(0, 6000)}`);
     res.json({ text });
   } catch (err) {
     const textBody = String(req.body?.body || '').trim();
     const fallback = textBody.split(/\r?\n/).filter(Boolean).slice(0, 3).join(' ') || textBody;
-    res.json({ text: fallback });
+    res.json({ text: fallback, fallback: true, note: 'AI is unavailable — showing the email text instead of a summary.' });
   }
 });
 
+// Deterministic drafts. Used when every AI provider is unavailable so the
+// composer still opens with something editable instead of a dead end. They
+// deliberately make no claims about the email's content.
+function firstNameOf(raw, email) {
+  const clean = String(raw || '').replace(/<.*?>/g, '').replace(/["']/g, '').trim();
+  const companyish = /recruit|career|talent|hiring|team|support|help|admin|info|hello|jobs?|notif|no-?reply|mail|inc\b|labs?\b|technolog|solutions?|systems?|university|college|test|hamzo|linkedin|indeed|glassdoor/i;
+  const words = clean.split(/\s+/).filter(Boolean);
+
+  // Only trust a display name that looks like a person's name.
+  if (words.length >= 2 && words.length <= 3 && !companyish.test(clean) && !/[@\d]/.test(clean)) {
+    return words[0].replace(/^./, (char) => char.toUpperCase());
+  }
+
+  // Otherwise fall back to a person-shaped address like jane.doe@ or jane_doe@.
+  const local = String(email || '').split('@')[0] || '';
+  const parts = local.split(/[._-]/).filter(Boolean);
+  if (parts.length === 2 && /^[a-z]{2,}$/i.test(parts[0]) && /^[a-z]{2,}$/i.test(parts[1])) {
+    return parts[0].replace(/^./, (char) => char.toUpperCase());
+  }
+
+  return 'there';
+}
+
+function templateReply({ subject, from, email }) {
+  const topic = String(subject || '').replace(/^re:\s*/i, '').trim();
+  return [
+    `Hi ${firstNameOf(from, email)},`,
+    '',
+    topic
+      ? `Thanks for your email about "${topic}". I'd like to make sure I have the details right before I respond properly.`
+      : `Thanks for your email. I'd like to make sure I have the details right before I respond properly.`,
+    '',
+    'Could you confirm any next steps or deadlines I should be aware of?',
+    '',
+    'Best regards,',
+  ].join('\n');
+}
+
+function templateFollowUp({ subject }) {
+  const topic = String(subject || '').replace(/^(re|following up):\s*/i, '').trim();
+  return [
+    'Hi,',
+    '',
+    topic
+      ? `I wanted to follow up on my earlier email about "${topic}".`
+      : 'I wanted to follow up on my earlier email.',
+    '',
+    "I know you're busy — if it's easier, just let me know the best next step and I'll take it from there.",
+    '',
+    'Best regards,',
+  ].join('\n');
+}
+
 app.post('/api/ai/mail/reply', async (req, res) => {
+  const { subject, from, email, body } = req.body || {};
   try {
-    const { subject, from, body } = req.body || {};
     const text = await askGemini(`Write a polite, concise email reply the user can send. Do not invent facts that are not in the email. Keep it under 140 words.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${String(body || '').slice(0, 6000)}`);
     res.json({ text });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Could not generate a reply.' });
+    res.json({ text: templateReply({ subject, from, email }), fallback: true, note: 'AI is unavailable — this is an editable template.' });
   }
 });
 
 app.post('/api/ai/mail/followup', async (req, res) => {
+  const { subject, to, body } = req.body || {};
+  const nextSubject = subject?.toLowerCase().startsWith('follow') ? subject : `Following up: ${subject || 'my last email'}`;
   try {
-    const { subject, to, body } = req.body || {};
     const text = await askGemini(`Write a short, polite follow-up email to someone the user already emailed. Reference the earlier message without repeating it. Keep it under 120 words.\nTo: ${to || 'there'}\nEarlier subject: ${subject || ''}\n\nEarlier message:\n${String(body || '').slice(0, 6000)}`);
-    res.json({ text, subject: subject?.toLowerCase().startsWith('follow') ? subject : `Following up: ${subject || 'my last email'}` });
+    res.json({ text, subject: nextSubject });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Could not write a follow-up.' });
+    res.json({ text: templateFollowUp({ subject }), subject: nextSubject, fallback: true, note: 'AI is unavailable — this is an editable template.' });
   }
 });
 
@@ -1015,9 +1437,42 @@ app.post('/api/ai/mail/followup/send', async (req, res) => {
       text: body,
       html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">${String(body || '').replace(/\n/g, '<br/>')}</div>`,
     });
+    invalidateMailCache();
     res.json({ ok: true, id: sendResult.id });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not send the follow-up.' });
+  }
+});
+
+app.post('/api/reply/send', async (req, res) => {
+  try {
+    const { to, subject, body, threadId, inReplyTo, references } = req.body || {};
+    if (!to || !body) return res.status(400).json({ error: 'A recipient and message are required.' });
+    const tokens = readGmailTokens();
+    const fromEmail = tokens.email;
+    const accessToken = await getValidAccessToken();
+    if (!fromEmail || !accessToken) {
+      return res.status(401).json({ error: 'Connect Gmail on the Mail page before sending a reply.' });
+    }
+    const safeBody = String(body)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br/>');
+    const result = await sendEmailViaGmailRestApi(accessToken, {
+      from: `"${(tokens.displayName || fromEmail.split('@')[0]).replace(/"/g, '')}" <${fromEmail}>`,
+      to,
+      subject: subject || 'Re: your message',
+      text: body,
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111;">${safeBody}</div>`,
+      threadId,
+      inReplyTo,
+      references,
+    });
+    invalidateMailCache();
+    res.json({ ok: true, id: result.id, threadId: result.threadId });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not send the reply.' });
   }
 });
 
@@ -1297,15 +1752,34 @@ async function fetchJobText(url) {
     }
   };
 
+  // Keep the block structure of the page: the admin panel formats the posting
+  // into headings and bullets, which is impossible once everything is one line.
+  const htmlToLines = (source) => String(source || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n• ')
+    .replace(/<\/(p|div|li|h[1-6]|tr|section|article|ul|ol|table)>/gi, '\n')
+    .replace(/<h([1-6])[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&#x27;|&rsquo;|&lsquo;/gi, "'")
+    .replace(/&mdash;/gi, '—')
+    .replace(/&ndash;/gi, '–')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#\d+;/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/[ \t\u00a0]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+
   const parse = ({ html, text, finalUrl }) => {
     if (isJobErrorPage(finalUrl || url, html)) throw new Error('That link opened an error page instead of the job. Paste the job posting address from the browser address bar.');
     const jsonLd = extractJobPostingJsonLd(html);
-    const plainText = String(text || html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' '))
-      .replace(/\s+/g, ' ')
-      .trim()
+    const plainText = (text ? String(text) : htmlToLines(html))
       .slice(0, 30000);
     const meta = extractJobMetadata(html, finalUrl || url, plainText);
     const posting = validateJobDescription({
@@ -1313,7 +1787,14 @@ async function fetchJobText(url) {
       company: jsonLd?.company || meta.company,
       description: jsonLd?.description || plainText,
     });
-    return { text: posting.description, posting, openUrl: finalUrl || url, applyUrl: extractApplyUrl(html, finalUrl || url), meta };
+    return {
+      text: posting.description,
+      rawText: plainText,
+      posting,
+      openUrl: finalUrl || url,
+      applyUrl: extractApplyUrl(html, finalUrl || url),
+      meta,
+    };
   };
 
   let fetchError;

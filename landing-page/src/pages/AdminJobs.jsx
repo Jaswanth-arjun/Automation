@@ -1,9 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Edit3, Upload, X, Eye, Briefcase, Building, MapPin, Clock, Link2, Image, FileText, ChevronDown } from 'lucide-react';
 import { adminJobStore } from '../lib/adminJobStore';
-import AdminEmployees from '../components/AdminEmployees';
+import { useAuth } from '../lib/auth';
+import { jobOwner, manageableJobs, isAdminUser } from '../lib/jobOwnership';
 
 const CATEGORY_OPTIONS = ['Freshers', 'Confidential', 'Remote', 'Full time Permanent Position'];
+
+const LOCATION_OPTIONS = [
+  'Remote',
+  'Hybrid',
+  'On-site',
+  'India',
+  'Bengaluru, India',
+  'Hyderabad, India',
+  'Mumbai, India',
+  'Pune, India',
+  'Delhi, India',
+  'Chennai, India',
+];
 
 const EMPTY_JOB = {
   title: '',
@@ -23,6 +37,8 @@ const EMPTY_JOB = {
 };
 
 export default function AdminJobs() {
+  const { user } = useAuth();
+  const owner = jobOwner(user);
   const [jobs, setJobs] = useState(() => adminJobStore.getAll());
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -31,6 +47,10 @@ export default function AdminJobs() {
   const [prefSkillInput, setPrefSkillInput] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
+  const [importError, setImportError] = useState('');
   const logoInputRef = useRef(null);
 
   useEffect(() => {
@@ -38,6 +58,26 @@ export default function AdminJobs() {
     window.addEventListener('admin_jobs_updated', refresh);
     return () => window.removeEventListener('admin_jobs_updated', refresh);
   }, []);
+
+  // Postings created before ownership existed are claimed by this account once,
+  // so the recruiter keeps control of the jobs they posted.
+  useEffect(() => {
+    if (!owner) return;
+    const flag = `hamzo_claimed_jobs_${owner.id || owner.email}`;
+    if (localStorage.getItem(flag)) return;
+    localStorage.setItem(flag, '1');
+    adminJobStore.claimOwnerless(owner).then(() => setJobs(adminJobStore.getAll()));
+  }, [owner?.id, owner?.email]);
+
+  const myJobs = manageableJobs(jobs, user);
+
+  // A new post starts from the link box: that is the whole posting flow.
+  useEffect(() => {
+    if (formOpen && !editingId) {
+      const input = document.querySelector('.admin-import-row input');
+      input?.focus();
+    }
+  }, [formOpen, editingId]);
 
   const setField = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -75,13 +115,40 @@ export default function AdminJobs() {
     ...f, preferredSkills: f.preferredSkills.filter(x => x !== s),
   }));
 
+  const handleImport = async () => {
+    const url = importUrl.trim();
+    if (!url) {
+      setImportError('Paste the public job link first.');
+      return;
+    }
+    setImporting(true);
+    setImportError('');
+    setImportMsg('');
+    try {
+      const data = await adminJobStore.importFromLink(url);
+      const job = data.job || {};
+      setForm((current) => ({
+        ...current,
+        ...job,
+        skills: job.skills?.length ? job.skills : [...(job.requiredSkills || []), ...(job.preferredSkills || [])],
+      }));
+      let host = '';
+      try { host = new URL(data.sourceUrl || url).hostname.replace(/^www\./, ''); } catch {}
+      setImportMsg(`Details imported from ${host || 'the link'} — review the fields below, then publish.`);
+    } catch (err) {
+      setImportError(err.message || 'That job link could not be read.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleSubmit = () => {
     if (!form.title.trim() || !form.company.trim()) return;
 
     if (editingId) {
       adminJobStore.update(editingId, form);
     } else {
-      adminJobStore.add(form);
+      adminJobStore.add({ ...form, postedBy: owner });
     }
 
     setJobs(adminJobStore.getAll());
@@ -129,7 +196,11 @@ export default function AdminJobs() {
       <header className="page-header">
         <div>
           <h1>Post Jobs</h1>
-          <p>Create and manage job listings visible to all users.</p>
+          <p>
+            {isAdminUser(user)
+              ? 'All job listings — as an administrator you can edit or delete any of them.'
+              : 'Paste a link from a company career portal to post a job. Only you and the administrator can edit or delete your postings.'}
+          </p>
         </div>
         <div className="header-actions">
           {savedMsg && <span className="save-indicator">✓ {savedMsg}</span>}
@@ -147,6 +218,30 @@ export default function AdminJobs() {
           <div className="section-header" style={{ marginBottom: '20px' }}>
             <h2>{editingId ? 'Edit Job Post' : 'Create New Job Post'}</h2>
             <button className="btn-ghost sm" onClick={handleCancel}><X size={14} /> Cancel</button>
+          </div>
+
+          {/* Import straight from a public job link */}
+          <div className="admin-import-card">
+            <div className="admin-import-head">
+              <Link2 size={16} />
+              <div>
+                <strong>Import from a job link</strong>
+                <p>Paste the public job posting URL — role, company, logo, location, skills and the formatted description are filled in automatically.</p>
+              </div>
+            </div>
+            <div className="admin-import-row">
+              <input
+                value={importUrl}
+                onChange={(event) => setImportUrl(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleImport(); } }}
+                placeholder="https://careers.company.com/jobs/backend-developer-intern"
+              />
+              <button type="button" className="btn-accent" onClick={handleImport} disabled={importing}>
+                {importing ? 'Reading link…' : 'Fetch details'}
+              </button>
+            </div>
+            {importMsg && <p className="admin-import-ok">{importMsg}</p>}
+            {importError && <p className="admin-import-error">{importError}</p>}
           </div>
 
           {/* Company logo + basic info row */}
@@ -202,14 +297,10 @@ export default function AdminJobs() {
               <label>Work Mode</label>
               <div style={{ position: 'relative' }}>
                 <select value={form.location} onChange={e => setField('location', e.target.value)} className="admin-select">
-                  <option value="Remote">Remote</option>
-                  <option value="India">India</option>
-                  <option value="Bengaluru, India">Bengaluru, India</option>
-                  <option value="Hyderabad, India">Hyderabad, India</option>
-                  <option value="Mumbai, India">Mumbai, India</option>
-                  <option value="Pune, India">Pune, India</option>
-                  <option value="Delhi, India">Delhi, India</option>
-                  <option value="Chennai, India">Chennai, India</option>
+                  {![...LOCATION_OPTIONS].includes(form.location) && form.location && (
+                    <option value={form.location}>{form.location}</option>
+                  )}
+                  {LOCATION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
                 <ChevronDown size={14} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#888' }} />
               </div>
@@ -323,17 +414,19 @@ export default function AdminJobs() {
       {/* POSTED JOBS LIST */}
       <section>
         <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '16px', color: '#171817' }}>
-          Your Posted Jobs ({jobs.length})
+          Your Posted Jobs ({myJobs.length})
         </h2>
 
-        {jobs.length === 0 ? (
+        {myJobs.length === 0 ? (
           <div className="profile-section" style={{ textAlign: 'center', padding: '40px 20px' }}>
             <Briefcase size={40} style={{ color: '#ccc', marginBottom: '12px' }} />
-            <p style={{ color: '#888', fontSize: '14px' }}>No jobs posted yet. Click <strong>"New Job Post"</strong> to create your first listing.</p>
+            <p style={{ color: '#888', fontSize: '14px' }}>
+              You haven't posted a job yet. Click <strong>"New Job Post"</strong>, paste the job's link from the company career portal and it is ready to publish.
+            </p>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {jobs.map(job => (
+            {myJobs.map(job => (
               <div key={job.id} className="profile-section" style={{ padding: '20px 24px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -373,7 +466,6 @@ export default function AdminJobs() {
         )}
       </section>
 
-      <AdminEmployees />
     </div>
   );
 }

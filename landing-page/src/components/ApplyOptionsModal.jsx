@@ -1,9 +1,25 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Sparkles, ExternalLink, Briefcase, Building, CheckCircle2, ArrowRight } from 'lucide-react';
+import { X, Sparkles, ExternalLink, Briefcase, Building, CheckCircle2, ArrowRight, Mail } from 'lucide-react';
 
 export default function ApplyOptionsModal({ job, isOpen, onClose }) {
   const navigate = useNavigate();
+  const [contacts, setContacts] = useState([]);
+
+  // Contacts are maintained in the admin panel; a candidate only sees the ones
+  // saved for the company of the job they are applying to.
+  useEffect(() => {
+    if (!isOpen || !job?.company) {
+      setContacts([]);
+      return undefined;
+    }
+    let active = true;
+    fetch(`/api/employees?company=${encodeURIComponent(job.company)}&autoDiscover=false`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows) => { if (active) setContacts(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setContacts([]); });
+    return () => { active = false; };
+  }, [isOpen, job?.company]);
 
   if (!isOpen || !job) return null;
 
@@ -105,6 +121,60 @@ export default function ApplyOptionsModal({ job, isOpen, onClose }) {
             <X size={16} />
           </button>
         </div>
+
+        {contacts.length > 0 && (
+          <div
+            style={{
+              border: '1px solid #e5e5e0',
+              background: '#fafaf7',
+              borderRadius: '14px',
+              padding: '14px 16px',
+              marginBottom: '6px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <Mail size={14} color="#445cf5" />
+              <strong style={{ fontSize: '13px', color: '#171817' }}>
+                {job.company} contacts ({contacts.length})
+              </strong>
+            </div>
+            <p style={{ fontSize: '11.5px', color: '#777', margin: '0 0 10px' }}>
+              Reach out for a referral or to follow up on your application.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {contacts.slice(0, 5).map((contact) => (
+                <div
+                  key={contact.id || contact.email}
+                  style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#171817' }}>{contact.name}</div>
+                    <div style={{ fontSize: '11.5px', color: '#777', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {[contact.role, contact.email].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  <a
+                    href={`mailto:${contact.email}?subject=${encodeURIComponent(`Application for ${job.title} at ${job.company}`)}`}
+                    onClick={(event) => event.stopPropagation()}
+                    style={{
+                      flexShrink: 0,
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      color: '#445cf5',
+                      textDecoration: 'none',
+                      border: '1px solid #d8dcff',
+                      borderRadius: '8px',
+                      padding: '5px 10px',
+                      background: '#fff',
+                    }}
+                  >
+                    Email
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Options List */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', margin: '20px 0 10px' }}>
