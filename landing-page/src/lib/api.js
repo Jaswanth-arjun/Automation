@@ -16,14 +16,19 @@ async function apiFetch(baseUrl, path, options = {}) {
   if (!res.ok) {
     const text = await res.text();
     let message = `Request failed (${res.status})`;
+    let payload = null;
     try {
-      const parsed = JSON.parse(text);
-      message = parsed.error || parsed.message || message;
+      payload = JSON.parse(text);
+      message = payload.error || payload.message || message;
     } catch {
       if (text) message = text.slice(0, 300);
     }
     const error = new Error(message);
     error.status = res.status;
+    if (payload) {
+      error.code = payload.code || '';
+      error.uncertain = Boolean(payload.uncertain);
+    }
     throw error;
   }
   const text = await res.text();
@@ -92,6 +97,15 @@ export const api = {
   stopLinkedIn: () => apiFetch(LINKEDIN_API, '/api/stop', { method: 'POST' }),
   syncLinkedInStatus: (userId) => apiFetch(LINKEDIN_API, '/api/sync-status', { method: 'POST', body: JSON.stringify({ userId }) }),
 
+  // Multi-stage referral campaign (persistent, backend-executed)
+  listCampaigns: () => apiFetch(LINKEDIN_API, '/api/campaigns'),
+  getActiveCampaign: () => apiFetch(LINKEDIN_API, '/api/campaigns/active'),
+  getCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}`),
+  startCampaign: (payload) => apiFetch(LINKEDIN_API, '/api/campaigns', { method: 'POST', body: JSON.stringify(payload) }),
+  pauseCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/pause`, { method: 'POST' }),
+  resumeCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+  stopCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+
   // Per-user LinkedIn account connect
   getLinkedInAccount: (userId) => apiFetch(LINKEDIN_API, `/api/linkedin-account?userId=${encodeURIComponent(userId || 'default')}`),
   connectLinkedIn: (userId) => apiFetch(LINKEDIN_API, '/api/linkedin/connect', { method: 'POST', body: JSON.stringify({ userId }) }),
@@ -149,6 +163,26 @@ export const profileStore = {
     localStorage.setItem('wayin_profile', JSON.stringify({ ...profile, updatedAt: new Date().toISOString() }));
     window.dispatchEvent(new Event('profile_updated'));
     return profile;
+  },
+};
+
+// LinkedIn campaign form values, shared so the Apply tab and the LinkedIn
+// Automation page always launch with the same company / role / filters.
+const CAMPAIGN_PREFS_KEY = 'wayin_linkedin_campaign_prefs';
+export const campaignPrefsStore = {
+  get() {
+    try {
+      const raw = localStorage.getItem(CAMPAIGN_PREFS_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  },
+  save(prefs) {
+    const next = { ...(this.get() || {}), ...prefs, updatedAt: new Date().toISOString() };
+    localStorage.setItem(CAMPAIGN_PREFS_KEY, JSON.stringify(next));
+    window.dispatchEvent(new Event('campaign_prefs_updated'));
+    return next;
   },
 };
 

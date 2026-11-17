@@ -5,6 +5,7 @@ import {
   X, RefreshCw, AlertCircle, Sparkles, Search, ExternalLink,
 } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
+import CampaignStatus from '../components/CampaignStatus';
 import {
   buildTrackerEntries, fetchTrackerSources, matchesTrackerFilter,
   TRACKER_FILTERS, TRACKER_STATUS_META, STAGE_ORDER, STAGE_LABELS,
@@ -176,6 +177,7 @@ export default function Applications() {
           <p>Every job you tailored a resume for, with outreach and replies in one place.</p>
         </div>
       </header>
+      <CampaignStatus variant="compact" onNavigate={() => navigate('/dashboard/linkedin?tab=campaign')} showLog={false} />
 
       <section className="jt-hero">
         <div className="jt-hero-main">

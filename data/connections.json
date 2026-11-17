@@ -1636,5 +1636,19 @@
     "status": "pending",
     "lastChecked": "2026-11-13T23:19:26.142Z",
     "replyText": ""
+  },
+  {
+    "id": "https://www.linkedin.com/in/soniabarnabas",
+    "name": "Sonia B",
+    "company": "Amazon",
+    "role": "Recruiter",
+    "profileUrl": "https://www.linkedin.com/in/soniabarnabas",
+    "headline": "Recruiter at Amazon",
+    "note": "Hi Sonia, I'm exploring Software Engineering internship opportunities at Amazon. As a recruiter in this space, your perspective would be invaluable. Happy to connect!",
+    "sentDate": "2026-11-17T12:31:21.889Z",
+    "timestamp": "6:01:21 pm",
+    "status": "seen",
+    "lastChecked": "2026-11-17T14:46:06.022Z",
+    "replyText": ""
   }
 ]

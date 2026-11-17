@@ -26,6 +26,8 @@ import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calcu
 import { buildJobDraft } from './lib/job-import.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
+import { campaignStore } from './lib/campaign-store.js';
+import { ReferralCampaignEngine } from './lib/referral-campaign-engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1617,7 +1619,7 @@ app.get('/api/contact/thread', async (req, res) => {
  */
 app.post('/api/linkedin/thread', async (req, res) => {
   try {
-    const { personName } = req.body || {};
+    const { personName, profileUrl } = req.body || {};
     const name = String(personName || '').trim();
     if (!name) return res.status(400).json({ error: 'A contact name is required.' });
 
@@ -1627,11 +1629,20 @@ app.post('/api/linkedin/thread', async (req, res) => {
     }
     setLiveSearchSessionDir(sessionManager.getSessionDir(userId));
 
-    const existingBrowser = activeBotInstance && activeBotInstance.isRunning && activeBotInstance.browser
-      ? activeBotInstance.browser
-      : null;
+    // Whichever engine already owns the Chrome profile must hand over its
+    // browser. Launching a second Chrome on the same profile fails with a
+    // locked-profile error, and a stale reference dies mid-read.
+    const existingBrowser = liveBrowserForReuse();
+    if (!existingBrowser && liveProfileOwner()) {
+      return res.status(409).json({
+        error: 'LinkedIn is busy with a running sync. Wait for it to finish, or stop it, then try again.',
+      });
+    }
 
-    const result = await readLinkedInThread(name, existingBrowser);
+    const result = await readLinkedInThread(name, existingBrowser, String(profileUrl || ''));
+    if (result.code === 'no_thread') {
+      return res.json({ messages: [], noThread: true, notice: result.error });
+    }
     if (result.error) return res.status(502).json({ error: result.error });
     res.json({ messages: result.messages || [] });
   } catch (err) {
@@ -1644,7 +1655,7 @@ app.post('/api/linkedin/thread', async (req, res) => {
  */
 app.post('/api/linkedin/send-message', async (req, res) => {
   try {
-    const { personName, message } = req.body || {};
+    const { personName, message, profileUrl } = req.body || {};
     const name = String(personName || '').trim();
     const body = String(message || '').trim();
     if (!name) return res.status(400).json({ error: 'A contact name is required.' });
@@ -1656,12 +1667,13 @@ app.post('/api/linkedin/send-message', async (req, res) => {
     }
     setLiveSearchSessionDir(sessionManager.getSessionDir(userId));
 
-    if (activeBotInstance && activeBotInstance.isRunning) {
-      return res.status(400).json({ error: 'A LinkedIn campaign is running. Stop it before sending a message.' });
+    const existingBrowser = liveBrowserForReuse();
+    if (!existingBrowser && liveProfileOwner()) {
+      return res.status(409).json({ error: 'LinkedIn is busy with a running sync. Wait for it to finish, then send this reply.' });
     }
 
-    const result = await sendLinkedInMessage(name, body);
-    if (!result.ok) return res.status(502).json({ error: result.error || 'LinkedIn did not accept the message.' });
+    const result = await sendLinkedInMessage(name, body, existingBrowser, String(profileUrl || ''));
+    if (!result.ok) return res.status(502).json({ error: result.error || 'LinkedIn did not accept the message.', uncertain: Boolean(result.uncertain) });
     res.json({ ok: true, sent: result.sent, warning: result.warning || '' });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not send the LinkedIn message.' });
@@ -3065,6 +3077,24 @@ app.post('/api/send-email', async (req, res) => {
 // Application State
 let activeBotInstance = null;
 let activeTrackerInstance = null;
+
+// The Chrome profile can only be owned by one process at a time. Every
+// automation engine (campaign, status sync, legacy bot) may hold it, so live
+// reads and replies must borrow whichever browser is already open instead of
+// launching a second Chrome.
+function liveBrowserForReuse() {
+  for (const engine of [activeCampaignEngine, activeTrackerInstance, activeBotInstance]) {
+    if (engine && engine.isRunning && engine.browser && !engine.browser.disconnected) {
+      return engine.browser;
+    }
+  }
+  return null;
+}
+
+function liveProfileOwner() {
+  return [activeCampaignEngine, activeTrackerInstance, activeBotInstance]
+    .find((engine) => engine && engine.isRunning) || null;
+}
 let currentStatus = 'idle'; // 'idle', 'running', 'syncing', 'requires_login', 'completed', 'stopped'
 const logBuffer = [];
 let currentProgress = {
@@ -3117,6 +3147,7 @@ wss.on('connection', (ws) => {
         connections: allConns,
         analytics,
         accounts: sessionManager.listAccounts(),
+        campaign: campaignStore.findActive(),
       },
     })
   );
@@ -3245,7 +3276,17 @@ async function triggerStatusSync(isAuto = false) {
     return false;
   }
 
-  const existingBrowser = (activeBotInstance && activeBotInstance.isRunning && activeBotInstance.browser) ? activeBotInstance.browser : null;
+  // A live referral campaign owns the Chrome profile. Reusing its browser keeps
+  // the profile lock free; launching a second Chrome would fail the launch.
+  const campaignBrowser = (activeCampaignEngine && activeCampaignEngine.isRunning && activeCampaignEngine.browser)
+    ? activeCampaignEngine.browser
+    : null;
+  if (isAuto && activeCampaignEngine && activeCampaignEngine.isRunning && !campaignBrowser) {
+    return false;
+  }
+
+  const existingBrowser = campaignBrowser
+    || ((activeBotInstance && activeBotInstance.isRunning && activeBotInstance.browser) ? activeBotInstance.browser : null);
 
   // Resolve the connected account first: without it the tracker would create a
   // fresh legacy profile with no LinkedIn cookies and hit a login wall even
@@ -3342,7 +3383,6 @@ setInterval(() => {
   console.log('⏰ Triggering 24/7 periodic background status check...');
   triggerStatusSync(true).catch(() => {});
 }, AUTO_SYNC_INTERVAL_MS);
-
 // Trigger initial background sync 15s after boot
 setTimeout(() => {
   console.log('🚀 Triggering initial startup background status check...');
@@ -3436,6 +3476,220 @@ app.post('/api/stop', async (req, res) => {
   broadcast('status_change', { status: 'stopped' });
   res.json({ message: 'Stop signal sent successfully.' });
 });
+
+// ─── Persistent multi-stage referral campaign ──────────────────
+// One campaign record lives in data/campaigns.json and drives BOTH the
+// LinkedIn Automation card and the Job Tracker banner. Execution runs in the
+// backend engine, so navigation never stops a campaign.
+
+let activeCampaignEngine = null;
+
+function broadcastCampaign(campaign) {
+  if (!campaign) return;
+  broadcast('campaign_update', campaign);
+}
+
+// Company/role matching has to survive encoding noise (– vs —, curly quotes,
+// stray punctuation), otherwise the same job starts a second campaign and
+// messages the same people twice.
+function campaignKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[\u2018\u2019\u201c\u201d]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function sameCampaignTarget(a, b) {
+  const left = campaignKey(a);
+  const right = campaignKey(b);
+  return Boolean(left && right && left === right);
+}
+
+function attachCampaignEngine(engine) {  engine.on('log', (entry) => pushLog(entry));
+  engine.on('update', (campaign) => broadcastCampaign(campaign));
+  engine.on('status_change', ({ status }) => {
+    if (status === 'requires_login' && engine.campaignId) {
+      campaignStore.update(engine.campaignId, {
+        status: 'needs_attention',
+        error: 'LinkedIn asked for a sign-in during the campaign. Reconnect and resume.',
+      });
+    }
+  });
+  return engine;
+}
+
+app.get('/api/campaigns', (req, res) => {
+  res.json({ campaigns: campaignStore.list(), active: campaignStore.findActive() });
+});
+
+app.get('/api/campaigns/active', (req, res) => {
+  const active = campaignStore.findActive();
+  res.json({ active, running: Boolean(activeCampaignEngine && activeCampaignEngine.isRunning) });
+});
+
+app.get('/api/campaigns/:id', (req, res) => {
+  const campaign = campaignStore.get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+  res.json({ campaign, running: Boolean(activeCampaignEngine && activeCampaignEngine.isRunning && activeCampaignEngine.campaignId === campaign.id) });
+});
+
+app.post('/api/campaigns', async (req, res) => {
+  try {
+    const { userId, company, role, roles, perRole, sendInvites, useAINotes, connectionNote, userProfile } = req.body || {};
+    if (!company || !String(company).trim()) {
+      return res.status(400).json({ error: 'A target company is required.' });
+    }
+    if (!role || !String(role).trim()) {
+      return res.status(400).json({ error: 'A target job role is required.' });
+    }
+    if (activeCampaignEngine && activeCampaignEngine.isRunning) {
+      // Pressing Start again with the same company + role is not a new campaign:
+      // hand back the running one so both pages attach to the same record.
+      const existing = campaignStore.get(activeCampaignEngine.campaignId);
+      const same = existing
+        && sameCampaignTarget(existing.company, company)
+        && sameCampaignTarget(existing.role, role);
+      if (same) {
+        return res.json({
+          message: 'This campaign is already running — attached to it.',
+          campaign: existing,
+          reused: true,
+        });
+      }
+      return res.status(400).json({ error: 'A referral campaign is already running. Pause or stop it first.' });
+    }
+    if (activeBotInstance && activeBotInstance.isRunning) {
+      return res.status(400).json({ error: 'The connection-request campaign is running. Stop it before starting a referral campaign.' });
+    }
+
+    // A paused or recovery-paused campaign for the exact same company + role is
+    // the same job: resume it instead of starting a duplicate that would message
+    // the same people twice.
+    const resumable = campaignStore.list().find((item) => (
+      ['paused', 'needs_attention'].includes(item.status)
+      && sameCampaignTarget(item.company, company)
+      && sameCampaignTarget(item.role, role)
+    ));
+    if (resumable && resumable.people?.length) {
+      const resumed = campaignStore.update(resumable.id, {
+        status: 'queued',
+        error: '',
+        errorStage: '',
+        lastActivity: 'Resuming the existing campaign for this job…',
+      });
+      activeCampaignEngine = attachCampaignEngine(new ReferralCampaignEngine(resumed));
+      broadcastCampaign(resumed);
+      activeCampaignEngine.start().catch((err) => {
+        pushLog({ timestamp: new Date().toLocaleTimeString('en-IN', { hour12: true }), message: `Campaign error: ${err.message}`, level: 'error' });
+      });
+      return res.json({
+        message: 'Resumed the existing campaign for this job instead of starting a duplicate.',
+        campaign: resumed,
+        reused: true,
+      });
+    }
+
+    let sessionDir = '';
+    if (userId) {
+      const account = sessionManager.getAccount(userId);
+      if (!account.connected) {
+        return res.status(400).json({ error: 'Connect your LinkedIn account first (Connected Accounts → Connect).' });
+      }
+      if (sessionManager.isLoginPending(userId)) {
+        return res.status(400).json({ error: 'Complete or cancel the pending LinkedIn login window first.' });
+      }
+      sessionManager.setActiveUser(userId);
+      sessionDir = sessionManager.getSessionDir(userId);
+      setLiveSearchSessionDir(sessionDir);
+    }
+
+    const campaign = campaignStore.create({
+      name: `${company} · ${role} referral campaign`,
+      company: String(company).trim(),
+      role: String(role).trim(),
+      userId: userId || null,
+      config: {
+        roles: Array.isArray(roles) ? roles.filter(Boolean) : [],
+        perRole: parseInt(perRole, 10) || 10,
+        sendInvites: sendInvites !== false,
+        useAINotes: useAINotes !== false,
+        connectionNote: connectionNote || '',
+        userProfile: userProfile || {},
+        sessionDir,
+      },
+    });
+
+    activeCampaignEngine = attachCampaignEngine(new ReferralCampaignEngine(campaign));
+    broadcastCampaign(campaign);
+    activeCampaignEngine.start().catch((err) => {
+      pushLog({ timestamp: new Date().toLocaleTimeString('en-IN', { hour12: true }), message: `Campaign error: ${err.message}`, level: 'error' });
+    });
+
+    res.json({ message: 'Referral campaign started.', campaign });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not start the campaign.' });
+  }
+});
+
+app.post('/api/campaigns/:id/pause', async (req, res) => {
+  const campaign = campaignStore.get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+  if (activeCampaignEngine && activeCampaignEngine.campaignId === campaign.id) {
+    await activeCampaignEngine.pause();
+  } else {
+    campaignStore.update(campaign.id, { status: 'paused', lastActivity: 'Paused by user.' });
+  }
+  const updated = campaignStore.get(campaign.id);
+  broadcastCampaign(updated);
+  res.json({ campaign: updated });
+});
+
+app.post('/api/campaigns/:id/resume', async (req, res) => {
+  const campaign = campaignStore.get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+  if (['completed'].includes(campaign.status)) {
+    return res.status(400).json({ error: 'This campaign already completed. Start a new one instead.' });
+  }
+  if (activeCampaignEngine && activeCampaignEngine.isRunning && activeCampaignEngine.campaignId === campaign.id) {
+    await activeCampaignEngine.resume();
+  } else {
+    if (activeBotInstance && activeBotInstance.isRunning) {
+      return res.status(400).json({ error: 'The connection-request campaign is running. Stop it before resuming.' });
+    }
+    const resumed = campaignStore.update(campaign.id, {
+      status: 'queued',
+      error: '',
+      errorStage: '',
+      lastActivity: 'Resuming from saved progress…',
+    });
+    activeCampaignEngine = attachCampaignEngine(new ReferralCampaignEngine(resumed));
+    broadcastCampaign(resumed);
+    activeCampaignEngine.start().catch((err) => {
+      pushLog({ timestamp: new Date().toLocaleTimeString('en-IN', { hour12: true }), message: `Campaign error: ${err.message}`, level: 'error' });
+    });
+  }
+  res.json({ campaign: campaignStore.get(campaign.id) });
+});
+
+app.post('/api/campaigns/:id/stop', async (req, res) => {
+  const campaign = campaignStore.get(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found.' });
+  if (activeCampaignEngine && activeCampaignEngine.campaignId === campaign.id) {
+    await activeCampaignEngine.stop();
+    activeCampaignEngine = null;
+  } else {
+    campaignStore.update(campaign.id, { status: 'paused', lastActivity: 'Stopped by user.' });
+  }
+  const updated = campaignStore.get(campaign.id);
+  broadcastCampaign(updated);
+  res.json({ campaign: updated });
+});
+
+// A server restart kills any in-flight campaign; mark it paused so the UI can
+// offer an honest "resume from saved progress" instead of showing "Running".
+campaignStore.reconcileAfterRestart();
 
 // ─── Vault / Answer Sync API (used by Hamzo Apply extension) ───
 

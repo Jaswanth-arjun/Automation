@@ -82,43 +82,51 @@ export const adminJobStore = {
 
   /** Fetch jobs from backend /api/jobs and sync with local store (including deletions) */
   async syncWithBackend() {
-    try {
-      const res = await fetch('/api/jobs');
-      if (!res.ok) return;
-      const apiJobs = await res.json();
-      if (!Array.isArray(apiJobs)) return;
+    // Several pages and the background poll all call this. Without a guard a
+    // single page load fired dozens of identical /api/jobs requests at once.
+    if (this._syncing) return this._syncing;
+    this._syncing = (async () => {
+      try {
+        const res = await fetch('/api/jobs');
+        if (!res.ok) return;
+        const apiJobs = await res.json();
+        if (!Array.isArray(apiJobs)) return;
 
-      const serverJobs = apiJobs.map((j) => this.normalizeBackendJob(j));
-      const currentLocal = this.getAll();
+        const serverJobs = apiJobs.map((j) => this.normalizeBackendJob(j));
+        const currentLocal = this.getAll();
 
-      // Signature catches added/deleted jobs AND edits (e.g. cleaned
-      // descriptions) that keep the same ids — so stale local copies heal.
-      const signature = (jobs) => jobs
-        .map((j) => `${j.id}:${String(j.description || '').length}:${j.applyLink || ''}`)
-        .join('|');
-      const hasChanged = signature(serverJobs) !== signature(currentLocal);
-      const serverIds = new Set(serverJobs.map((j) => String(j.id)));
+        // Signature catches added/deleted jobs AND edits (e.g. cleaned
+        // descriptions) that keep the same ids — so stale local copies heal.
+        const signature = (jobs) => jobs
+          .map((j) => `${j.id}:${String(j.description || '').length}:${j.applyLink || ''}`)
+          .join('|');
+        const hasChanged = signature(serverJobs) !== signature(currentLocal);
+        const serverIds = new Set(serverJobs.map((j) => String(j.id)));
 
-      if (hasChanged) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(serverJobs));
-        window.dispatchEvent(new Event('admin_jobs_updated'));
+        if (hasChanged) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(serverJobs));
+          window.dispatchEvent(new Event('admin_jobs_updated'));
 
-        // Prune deleted jobs from saved jobs if needed
-        try {
-          const savedKey = 'wayin_saved_jobs';
-          const saved = JSON.parse(localStorage.getItem(savedKey) || '[]');
-          const pruned = saved.filter((id) => serverIds.has(String(id)));
-          if (pruned.length !== saved.length) {
-            localStorage.setItem(savedKey, JSON.stringify(pruned));
-            window.dispatchEvent(new CustomEvent('saved_jobs_updated', { detail: pruned }));
-          }
-        } catch {}
+          // Prune deleted jobs from saved jobs if needed
+          try {
+            const savedKey = 'wayin_saved_jobs';
+            const saved = JSON.parse(localStorage.getItem(savedKey) || '[]');
+            const pruned = saved.filter((id) => serverIds.has(String(id)));
+            if (pruned.length !== saved.length) {
+              localStorage.setItem(savedKey, JSON.stringify(pruned));
+              window.dispatchEvent(new CustomEvent('saved_jobs_updated', { detail: pruned }));
+            }
+          } catch {}
+        }
+
+        return serverJobs;
+      } catch (err) {
+        console.warn('Backend sync failed:', err.message);
+      } finally {
+        this._syncing = null;
       }
-
-      return serverJobs;
-    } catch (err) {
-      console.warn('Backend sync failed:', err.message);
-    }
+    })();
+    return this._syncing;
   },
 
   async add(job) {
@@ -326,6 +334,7 @@ if (typeof window !== 'undefined') {
   });
 
   setInterval(() => {
+    if (document.hidden) return;
     adminJobStore.syncWithBackend();
   }, 3000);
 }

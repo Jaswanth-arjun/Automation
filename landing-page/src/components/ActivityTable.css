@@ -1654,6 +1654,45 @@
   text-align: center;
 }
 
+.atd-thread-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px auto;
+  padding: 10px 12px;
+  max-width: 520px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.atd-thread-notice span {
+  flex: 1;
+}
+
+.atd-thread-notice.error {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+.atd-thread-retry {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.atd-thread-retry:hover {
+  background: rgba(154, 52, 18, 0.08);
+}
+
 .atd-bubble p {
   max-height: none;
 }

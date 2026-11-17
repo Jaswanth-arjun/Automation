@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Loader2,
+  AlertCircle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Info, Loader2,
   Mail, RefreshCw, Send, Sparkles, X,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -67,10 +67,13 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   const [threadNonce, setThreadNonce] = useState(0);
   const [liMessages, setLiMessages] = useState([]);
   const [liLoading, setLiLoading] = useState(false);
+  const [liThreadError, setLiThreadError] = useState('');
+  const [liThreadNote, setLiThreadNote] = useState('');
   const [liSending, setLiSending] = useState(false);
   const [liReplyText, setLiReplyText] = useState('');
   const [liAiLoading, setLiAiLoading] = useState(false);
   const [liNonce, setLiNonce] = useState(0);
+  const [liForceLive, setLiForceLive] = useState(false);
   const noticeTimer = useRef(null);
   const threadEndRef = useRef(null);
 
@@ -124,6 +127,9 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     setError('');
     setEmailThread([]);
     setLiMessages([]);
+    setLiThreadError('');
+    setLiThreadNote('');
+    setLiForceLive(false);
     setLiReplyText('');
   }, [row?.id]);
 
@@ -153,6 +159,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     setReplySubject(`Re: ${clean}`.trim());
     setReplyText('');
     setError('');
+    setLiForceLive(false);
   }, [selectedContact?.id, row?.role]);
 
   /* Load the whole Gmail thread for the selected email contact. */
@@ -180,6 +187,22 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   useEffect(() => {
     if (!isLinkedIn || !selectedContact?.linkedin) {
       setLiMessages([]);
+      setLiThreadNote('');
+      setLiThreadError('');
+      return undefined;
+    }
+    // A pending invitation has no thread yet, and scanning the inbox for one
+    // costs tens of seconds. Say so immediately instead of making the user wait.
+    const liStatus = String(selectedContact.linkedin.status || '').toLowerCase();
+    if (!liForceLive && ['pending', 'seen', 'declined'].includes(liStatus)) {
+      setLiMessages([]);
+      setLiThreadError('');
+      setLiLoading(false);
+      setLiThreadNote(
+        liStatus === 'declined'
+          ? `${selectedContact.name} declined the invitation, so there is no conversation to open.`
+          : `Your invitation to ${selectedContact.name} is still pending. Messaging opens once they accept — the note you sent is shown below.`,
+      );
       return undefined;
     }
     let alive = true;
@@ -189,18 +212,22 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       profileUrl: selectedContact.linkedin.profileUrl,
     })
       .then((result) => {
-        if (alive) setLiMessages(Array.isArray(result?.messages) ? result.messages : []);
+        if (!alive) return;
+        setLiMessages(Array.isArray(result?.messages) ? result.messages : []);
+        setLiThreadNote(result?.noThread ? (result.notice || 'No LinkedIn conversation yet.') : '');
+        setLiThreadError('');
       })
       .catch((err) => {
         if (!alive) return;
         setLiMessages([]);
-        setError(err?.message || 'Could not read the LinkedIn conversation.');
+        setLiThreadNote('');
+        setLiThreadError(err?.message || 'Could not read the LinkedIn conversation.');
       })
       .finally(() => {
         if (alive) setLiLoading(false);
       });
     return () => { alive = false; };
-  }, [isLinkedIn, selectedContact?.id, selectedContact?.linkedin?.profileUrl, liNonce]);
+  }, [isLinkedIn, selectedContact?.id, selectedContact?.linkedin?.profileUrl, selectedContact?.linkedin?.status, liNonce, liForceLive]);
 
   const shouldShowSummary = Boolean(
     activeReply?.body &&
@@ -357,6 +384,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     try {
       const result = await api.sendLinkedInMessage({
         personName: selectedContact.name,
+        profileUrl: selectedContact.linkedin?.profileUrl || '',
         message: text,
       });
       setLiMessages((current) => [
@@ -367,7 +395,15 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       onChanged?.();
       showNotice(result?.warning || 'Message sent from your LinkedIn account.');
     } catch (err) {
-      setError(err?.message || 'Could not send the LinkedIn message.');
+      if (err?.uncertain) {
+        // The message may have gone out before the tab died — say so and let
+        // the user check the real thread rather than inviting a blind resend.
+        setLiThreadError('');
+        showNotice(err.message);
+        setLiNonce((value) => value + 1);
+      } else {
+        setError(err?.message || 'Could not send the LinkedIn message.');
+      }
     } finally {
       setLiSending(false);
     }
@@ -547,18 +583,44 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                   {isLinkedIn ? (
                     liLoading ? (
                       <div className="atd-thread-loading"><Loader2 size={16} className="spin" /> Loading your LinkedIn conversation…</div>
-                    ) : liHistory.length === 0 ? (
-                      <p className="atd-thread-empty">No messages in this LinkedIn conversation yet.</p>
                     ) : (
-                      liHistory.map((message, index) => (
-                        <div key={`${message.at}-${index}`} className={`atd-bubble ${message.direction === 'out' ? 'out' : 'in'}`}>
-                          <header>
-                            <span>{message.author}</span>
-                            <time>{formatDateTime(message.at) || ''}</time>
-                          </header>
-                          <p>{message.text}</p>
-                        </div>
-                      ))
+                      <>
+                        {liThreadError ? (
+                          <div className="atd-thread-notice error">
+                            <AlertCircle size={14} />
+                            <span>{liThreadError}</span>
+                            <button className="atd-thread-retry" onClick={() => setLiNonce((value) => value + 1)}>
+                              Try again
+                            </button>
+                          </div>
+                        ) : liThreadNote ? (
+                          <div className="atd-thread-notice">
+                            <Info size={14} />
+                            <span>{liThreadNote}</span>
+                            {!liForceLive && ['pending', 'seen', 'declined'].includes(String(selectedContact.linkedin?.status || '').toLowerCase()) && (
+                              <button className="atd-thread-retry" onClick={() => setLiForceLive(true)}>
+                                Check LinkedIn
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+
+                        {liHistory.length === 0 ? (
+                          liThreadError || liThreadNote ? null : (
+                            <p className="atd-thread-empty">No messages in this LinkedIn conversation yet.</p>
+                          )
+                        ) : (
+                          liHistory.map((message, index) => (
+                            <div key={`${message.at}-${index}`} className={`atd-bubble ${message.direction === 'out' ? 'out' : 'in'}`}>
+                              <header>
+                                <span>{message.author}</span>
+                                <time>{formatDateTime(message.at) || ''}</time>
+                              </header>
+                              <p>{message.text}</p>
+                            </div>
+                          ))
+                        )}
+                      </>
                     )
                   ) : threadLoading && emailHistory.length === 0 ? (
                     <div className="atd-thread-loading"><Loader2 size={16} className="spin" /> Loading the email thread…</div>

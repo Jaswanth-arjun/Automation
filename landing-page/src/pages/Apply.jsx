@@ -8,10 +8,11 @@ import {
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore } from '../lib/api';
+import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore } from '../lib/api';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
+import CampaignStatus from '../components/CampaignStatus';
 import { ResumeRichEditor } from '../components/JobAnalyzerModal';
 import { keywordAudit, scoreValue, scoreLabel, mapProfileForBackend, extractProfilePdf } from '../components/JobAnalyzerModal.helpers';
 
@@ -182,6 +183,7 @@ export default function Apply() {
   // Campaign Launcher state (embedded in Tab 2 when connected)
   const DEFAULT_ROLES = ['Recruiter', 'Talent Acquisition', 'HR', 'Hiring Manager', 'Engineering Manager'];
   const [liCompany, setLiCompany] = useState(job?.company || '');
+  const [liJobRole, setLiJobRole] = useState(job?.title || '');
   const [liRoles, setLiRoles] = useState(DEFAULT_ROLES);
   const [liNewRole, setLiNewRole] = useState('');
   const [liPerRole, setLiPerRole] = useState(10);
@@ -190,6 +192,7 @@ export default function Apply() {
   const [liStarting, setLiStarting] = useState(false);
   const [liCampaignMsg, setLiCampaignMsg] = useState(null);
   const [liIsRunning, setLiIsRunning] = useState(false);
+  const [liCampaign, setLiCampaign] = useState(null);
 
   // Check LinkedIn connection on mount
   useEffect(() => {
@@ -270,7 +273,29 @@ export default function Apply() {
   // Auto-set company when job changes
   useEffect(() => {
     if (job?.company) setLiCompany(job.company);
-  }, [job?.company]);
+    if (job?.title) setLiJobRole(job.title);
+  }, [job?.company, job?.title]);
+
+  // Reuse whatever was configured last (either here or in LinkedIn Automation)
+  useEffect(() => {
+    const prefs = campaignPrefsStore.get();
+    if (!prefs) return;
+    if (Array.isArray(prefs.roles) && prefs.roles.length) setLiRoles(prefs.roles);
+    if (typeof prefs.perRole === 'number' && prefs.perRole > 0) setLiPerRole(prefs.perRole);
+    if (typeof prefs.useAI === 'boolean') setLiUseAI(prefs.useAI);
+    if (typeof prefs.note === 'string') setLiNote(prefs.note);
+  }, []);
+
+  // Mirror the live campaign's own settings so re-opening a job shows exactly
+  // what is running rather than stale form values.
+  useEffect(() => {
+    if (!liCampaign) return;
+    const config = liCampaign.config || {};
+    if (Array.isArray(config.roles) && config.roles.length) setLiRoles(config.roles);
+    if (typeof config.perRole === 'number' && config.perRole > 0) setLiPerRole(config.perRole);
+    if (typeof config.useAINotes === 'boolean') setLiUseAI(config.useAINotes);
+    if (typeof config.connectionNote === 'string') setLiNote(config.connectionNote);
+  }, [liCampaign?.id]);
 
   const liAddRole = () => {
     const r = liNewRole.trim();
@@ -284,20 +309,38 @@ export default function Apply() {
   };
 
   const handleLiStartCampaign = async () => {
-    if (!liRoles.length) { liFlash('Add at least one role filter', 'err'); return; }
     if (!liConnected) { liFlash('Connect your LinkedIn account first', 'err'); return; }
+    if (!liCompany.trim()) { liFlash('Enter the target company', 'err'); return; }
+    const role = liJobRole.trim();
+    if (!role) { liFlash('Enter the target job role so messages can be written for it.', 'err'); return; }
     setLiStarting(true);
     try {
-      await api.startLinkedIn({
-        userId: liUserId,
-        company: liCompany,
+      campaignPrefsStore.save({
+        company: liCompany.trim(),
+        role: liJobRole.trim(),
         roles: liRoles,
-        connectionsPerFilter: liPerRole,
-        connectionNote: liNote || undefined,
+        perRole: liPerRole,
+        useAI: liUseAI,
+        note: liNote,
+      });
+      const res = await api.startCampaign({
+        userId: liUserId,
+        company: liCompany.trim(),
+        role,
+        roles: liRoles,
+        perRole: liPerRole,
+        sendInvites: true,
         useAINotes: liUseAI,
+        connectionNote: liNote.trim(),
         userProfile: profileStore.get() || {},
       });
-      liFlash('🚀 Campaign started! Chrome window will open.', 'ok');
+      if (res?.campaign) setLiCampaign(res.campaign);
+      liFlash(
+        res?.reused
+          ? '↻ Attached to the campaign already running for this job.'
+          : '🚀 Campaign started. It runs in the backend and keeps going if you leave this page.',
+        'ok',
+      );
       setLiIsRunning(true);
       applyProgressStore.mark(jobId || job?.id, 'linkedin', {
         company: job?.company || '',
@@ -312,8 +355,13 @@ export default function Apply() {
 
   const handleLiStopCampaign = async () => {
     try {
-      await api.stopLinkedIn();
-      liFlash('Stop signal sent', 'ok');
+      if (liCampaign?.id) {
+        const res = await api.stopCampaign(liCampaign.id);
+        if (res?.campaign) setLiCampaign(res.campaign);
+      } else {
+        await api.stopLinkedIn();
+      }
+      liFlash('Campaign stopped. You can resume it from the campaign card.', 'ok');
       setLiIsRunning(false);
     } catch (err) {
       liFlash(err.message || 'Failed to stop', 'err');
@@ -1724,6 +1772,24 @@ ${firstName}`;
                   />
                 </div>
 
+                {/* Target Job Role — drives every referral message */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
+                    Target Job Role <em style={{ fontWeight: '400', textTransform: 'none', color: '#94a3b8' }}>every message is written for this role</em>
+                  </label>
+                  <input
+                    value={liJobRole}
+                    onChange={(e) => setLiJobRole(e.target.value)}
+                    placeholder="e.g. Software Engineer, Data Analyst"
+                    disabled={liIsRunning}
+                    style={{
+                      width: '100%', padding: '12px 16px', border: '1px solid #e2e8f0',
+                      borderRadius: '10px', fontSize: '14px', color: '#1a202c',
+                      background: '#ffffff', outline: 'none', fontFamily: 'inherit'
+                    }}
+                  />
+                </div>
+
                 {/* Role Filters */}
                 <div style={{ marginBottom: '16px' }}>
                   <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
@@ -1863,9 +1929,26 @@ ${firstName}`;
                         boxShadow: '0 4px 16px rgba(0,0,0,0.15)'
                       }}
                     >
-                      <Play size={16} /> {liStarting ? 'Starting...' : `Start Campaign (${liRoles.length * liPerRole} requests)`}
+                      <Play size={16} /> {liStarting ? 'Starting...' : 'Start Campaign'}
                     </button>
                   )}
+                </div>
+
+                {/* Live stage progress + activity log for this job's campaign */}
+                <div style={{ marginTop: '18px' }}>
+                  <CampaignStatus
+                    variant="full"
+                    showLog
+                    defaultOpenLog
+                    campaignId={liCampaign?.id || ''}
+                    company={job?.company || liCompany}
+                    filterByCompany
+                    onChange={(next) => {
+                      setLiCampaign(next);
+                      const live = next && ['running', 'queued', 'waiting'].includes(next.status);
+                      setLiIsRunning(Boolean(live));
+                    }}
+                  />
                 </div>
               </div>
             </div>

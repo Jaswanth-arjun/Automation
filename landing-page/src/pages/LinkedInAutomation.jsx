@@ -36,8 +36,9 @@ import {
   X,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import { api, profileStore } from '../lib/api';
+import { api, profileStore, campaignPrefsStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import CampaignStatus from '../components/CampaignStatus';
 import './LinkedInAutomation.css';
 
 const LinkedinIcon = ({ size = 22 }) => (
@@ -194,8 +195,7 @@ export default function LinkedInAutomation() {
   const [logs, setLogs] = useState([]);
 
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [connError, setConnError] = useState('');
+  const [loadError, setLoadError] = useState('');  const [connError, setConnError] = useState('');
   const [analyticsError, setAnalyticsError] = useState('');
   const [wsLive, setWsLive] = useState(false);
 
@@ -211,6 +211,7 @@ export default function LinkedInAutomation() {
 
   // Campaign form
   const [company, setCompany] = useState(() => searchParams.get('company') || '');
+  const [jobRole, setJobRole] = useState(() => searchParams.get('role') || '');
   const [roles, setRoles] = useState(DEFAULT_ROLES);
   const [newRole, setNewRole] = useState('');
   const [perRole, setPerRole] = useState(10);
@@ -219,6 +220,7 @@ export default function LinkedInAutomation() {
   const [starting, setStarting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
+  const [campaign, setCampaign] = useState(null);
 
   // Tracker filters
   const [search, setSearch] = useState('');
@@ -287,6 +289,42 @@ export default function LinkedInAutomation() {
   useEffect(() => {
     refreshData(true);
   }, [refreshData]);
+
+  useEffect(() => {
+    let alive = true;
+    api.getActiveCampaign()
+      .then((res) => {
+        if (!alive) return;
+        if (res?.active) setCampaign(res.active);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // Prefill the launcher with the values used last time — either here or from
+  // the Apply → LinkedIn tab — so both entry points run the same campaign.
+  useEffect(() => {
+    const prefs = campaignPrefsStore.get();
+    if (!prefs) return;
+    if (prefs.company) setCompany(prefs.company);
+    if (prefs.role) setJobRole(prefs.role);
+    if (Array.isArray(prefs.roles) && prefs.roles.length) setRoles(prefs.roles);
+    if (typeof prefs.perRole === 'number' && prefs.perRole > 0) setPerRole(prefs.perRole);
+    if (typeof prefs.useAI === 'boolean') setUseAI(prefs.useAI);
+    if (typeof prefs.note === 'string') setNote(prefs.note);
+  }, []);
+
+  // A running campaign is the source of truth for the launcher values.
+  useEffect(() => {
+    if (!campaign) return;
+    const config = campaign.config || {};
+    if (campaign.company) setCompany(campaign.company);
+    if (campaign.role) setJobRole(campaign.role);
+    if (Array.isArray(config.roles) && config.roles.length) setRoles(config.roles);
+    if (typeof config.perRole === 'number' && config.perRole > 0) setPerRole(config.perRole);
+    if (typeof config.useAINotes === 'boolean') setUseAI(config.useAINotes);
+    if (typeof config.connectionNote === 'string') setNote(config.connectionNote);
+  }, [campaign?.id]);
 
   const loadAccount = useCallback(async () => {
     try {
@@ -361,6 +399,7 @@ export default function LinkedInAutomation() {
             setLiAccount(mine);
             setConnectPending(mine.status === 'pending_login');
           }
+          if (data.campaign) setCampaign((current) => current || data.campaign);
         } else if (type === 'linkedin_account') {
           if (data.userId === userId) {
             setLiAccount(data.account);
@@ -386,6 +425,8 @@ export default function LinkedInAutomation() {
         } else if (type === 'connections_updated') {
           if (Array.isArray(data.connections)) setConnections(data.connections);
           if (data.analytics) setAnalytics(data.analytics);
+        } else if (type === 'campaign_update') {
+          if (data) setCampaign(data);
         }
       };
 
@@ -452,8 +493,10 @@ export default function LinkedInAutomation() {
 
   const meta = STATUS_META[statusInfo?.status] || STATUS_META.idle;
   const status = statusInfo?.status;
-  const isRunning = status === 'running' || status === 'syncing';
-  const isSyncing = status === 'syncing';
+  const campaignActive = Boolean(campaign && ['queued', 'running', 'paused', 'waiting', 'needs_attention'].includes(campaign.status));
+  const campaignRunning = Boolean(campaign && ['queued', 'running', 'waiting'].includes(campaign.status));
+  const isRunning = campaignRunning || status === 'running' || status === 'syncing';
+  const isSyncing = !campaignRunning && status === 'syncing';
   const progress = statusInfo?.progress;
   const progressTarget = progress?.stats?.totalTarget || 0;
   const progressSent = progress?.stats?.sent || 0;
@@ -683,33 +726,45 @@ export default function LinkedInAutomation() {
       flash('err', 'Connect your LinkedIn account before starting a campaign.');
       return;
     }
-    if (!roles.length) {
-      flash('err', 'Add at least one role filter.');
+    if (!jobRole.trim()) {
+      flash('err', 'Enter the target job role — referral messages are written for that role.');
       return;
     }
     if (!company.trim()) {
       flash('err', 'Enter a target company or LinkedIn company URL.');
       return;
     }
-    if (note.length > 200) {
-      flash('err', 'Keep the connection note under 200 characters (LinkedIn truncates longer notes).');
-      return;
-    }
 
     setStarting(true);
     try {
-      await api.startLinkedIn({
+      campaignPrefsStore.save({
+        company: company.trim(),
+        role: jobRole.trim(),
+        roles,
+        perRole,
+        useAI,
+        note,
+      });
+      const res = await api.startCampaign({
         userId,
         company: company.trim(),
+        role: jobRole.trim(),
         roles,
-        connectionsPerFilter: perRole,
-        connectionNote: note.trim() || undefined,
+        perRole,
+        sendInvites: true,
         useAINotes: useAI,
+        connectionNote: note.trim(),
         userProfile: profileStore.get() || {},
       });
+      if (res?.campaign) setCampaign(res.campaign);
       setLogs([]);
       setStatusInfo((current) => ({ ...(current || {}), status: 'running' }));
-      flash('ok', 'Campaign started. A Chrome window will open and send requests one at a time.');
+      flash(
+        'ok',
+        res?.reused
+          ? '↻ Attached to the campaign already running for this company and role.'
+          : 'Referral campaign started. It keeps running in the background — you can leave this page.',
+      );
     } catch (err) {
       flash('err', err.message || 'Could not start the campaign.');
     } finally {
@@ -719,6 +774,12 @@ export default function LinkedInAutomation() {
 
   const handleStop = async () => {
     try {
+      if (campaign && ['queued', 'running', 'waiting', 'paused', 'needs_attention'].includes(campaign.status)) {
+        const res = await api.stopCampaign(campaign.id);
+        if (res?.campaign) setCampaign(res.campaign);
+        flash('ok', 'Campaign stopped. Resume it any time from the campaign card.');
+        return;
+      }
       await api.stopLinkedIn();
       setStatusInfo((current) => ({ ...(current || {}), status: 'stopped' }));
       flash('ok', 'Stop signal sent.');
@@ -1221,6 +1282,9 @@ export default function LinkedInAutomation() {
                 </div>
 
                 <div className="liq-stack">
+                  {campaign && (
+                    <CampaignStatus variant="compact" onNavigate={() => setTab('campaign')} showLog={false} />
+                  )}
                   <section className="liq-card">
                     <header className="liq-card-head">
                       <div className="liq-card-title"><Activity size={14} /> Current run</div>
@@ -1332,9 +1396,9 @@ export default function LinkedInAutomation() {
             <div className="liq-campaign">
               <section className="liq-card">
                 <header className="liq-card-head">
-                  <div className="liq-card-title"><Target size={14} /> Campaign launcher</div>
-                  <span className={`liq-pill ${isRunning ? 'tone-warn' : meta.tone}`}>
-                    {isSyncing ? 'Syncing' : isRunning ? 'Running' : meta.label}
+                  <div className="liq-card-title"><Target size={14} /> Referral campaign launcher</div>
+                  <span className={`liq-pill ${campaignRunning ? 'tone-warn' : meta.tone}`}>
+                    {campaignRunning ? 'Running' : isSyncing ? 'Syncing' : meta.label}
                   </span>
                 </header>
                 <div className="liq-card-body">
@@ -1346,17 +1410,31 @@ export default function LinkedInAutomation() {
                       value={company}
                       onChange={(event) => setCompany(event.target.value)}
                       placeholder="e.g. Google, Microsoft or https://linkedin.com/company/…"
-                      disabled={isRunning}
+                      disabled={campaignActive}
                     />
                   </div>
 
                   <div className="liq-field">
-                    <div className="liq-label">Role filters <em>{roles.length} selected</em></div>
+                    <label className="liq-label" htmlFor="liq-role">
+                      Target job role <em>every message is written for this role</em>
+                    </label>
+                    <input
+                      id="liq-role"
+                      className="liq-input"
+                      value={jobRole}
+                      onChange={(event) => setJobRole(event.target.value)}
+                      placeholder="e.g. Software Engineer Intern, Data Analyst"
+                      disabled={campaignActive}
+                    />
+                  </div>
+
+                  <div className="liq-field">
+                    <div className="liq-label">Invite roles for not-connected people <em>{roles.length} selected</em></div>
                     <div className="liq-chips">
                       {roles.map((role) => (
                         <span key={role} className="liq-chip">
                           {role}
-                          {!isRunning && (
+                          {!campaignActive && (
                             <button type="button" onClick={() => setRoles(roles.filter((item) => item !== role))} aria-label={`Remove ${role}`}>
                               <X size={10} />
                             </button>
@@ -1365,7 +1443,7 @@ export default function LinkedInAutomation() {
                       ))}
                       {roles.length === 0 && <span className="liq-muted" style={{ fontSize: 11.5 }}>Add at least one role below.</span>}
                     </div>
-                    {!isRunning && (
+                    {!campaignActive && (
                       <div className="liq-role-add">
                         <input
                           value={newRole}
@@ -1387,7 +1465,7 @@ export default function LinkedInAutomation() {
 
                   <div className="liq-row2">
                     <div className="liq-field">
-                      <label className="liq-label" htmlFor="liq-per-role">Requests per role</label>
+                      <label className="liq-label" htmlFor="liq-per-role">Invites per role</label>
                       <input
                         id="liq-per-role"
                         className="liq-input"
@@ -1399,25 +1477,25 @@ export default function LinkedInAutomation() {
                           const next = Number(event.target.value) || 1;
                           setPerRole(Math.max(1, Math.min(40, next)));
                         }}
-                        disabled={isRunning}
+                        disabled={campaignActive}
                       />
                     </div>
                     <div className="liq-field">
-                      <div className="liq-label">Note style</div>
+                      <div className="liq-label">Message style</div>
                       <button
                         type="button"
                         className={`liq-toggle ${useAI ? 'on' : ''}`}
                         onClick={() => setUseAI((value) => !value)}
-                        disabled={isRunning}
+                        disabled={campaignActive}
                       >
-                        <Sparkles size={13} /> {useAI ? 'Gemini AI + template fallback' : 'Template note only'}
+                        <Sparkles size={13} /> {useAI ? 'AI-written + template fallback' : 'Template only'}
                       </button>
                     </div>
                   </div>
 
                   <div className="liq-field">
                     <label className="liq-label" htmlFor="liq-note">
-                      Custom note template <em>{useAI ? 'used as the fallback' : 'used for everyone'}</em>
+                      Fallback note template <em>used when AI is unavailable</em>
                     </label>
                     <textarea
                       id="liq-note"
@@ -1427,7 +1505,7 @@ export default function LinkedInAutomation() {
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
                       placeholder="Hi {name}, I'd love to connect and learn more about opportunities at your company!"
-                      disabled={isRunning}
+                      disabled={campaignActive}
                     />
                     <div className="liq-note-meta">
                       <span>Supports {'{name}'}. LinkedIn allows up to 200 characters.</span>
@@ -1436,21 +1514,33 @@ export default function LinkedInAutomation() {
                   </div>
 
                   <div className="liq-estimate">
-                    <span><b>{batchTotal}</b> requests across <b>{roles.length}</b> role filters</span>
-                    <span><Hourglass size={12} /> {formatEstimate(estimateSeconds)} at human pace</span>
+                    <span><b>6 stages</b> in priority order · replied → seen → unseen → never messaged → pending (skipped) → invite</span>
+                    <span><Hourglass size={12} /> {formatEstimate(estimateSeconds)} for {batchTotal} invites, messages take longer</span>
                   </div>
 
                   <div className="liq-actions">
-                    {isRunning ? (
-                      <button type="button" className="liq-btn danger" onClick={handleStop}>
-                        <Square size={14} /> {isSyncing ? 'Stop sync' : 'Stop campaign'}
+                    {campaign?.status === 'running' || campaign?.status === 'queued' || campaign?.status === 'waiting' ? (
+                      <button
+                        type="button"
+                        className="liq-btn danger"
+                        onClick={async () => {
+                          try {
+                            const res = await api.pauseCampaign(campaign.id);
+                            if (res?.campaign) setCampaign(res.campaign);
+                            flash('ok', 'Campaign paused. Resume whenever you are ready.');
+                          } catch (err) {
+                            flash('err', err.message || 'Could not pause the campaign.');
+                          }
+                        }}
+                      >
+                        <PauseCircle size={14} /> Pause campaign
                       </button>
                     ) : (
                       <button
                         type="button"
                         className="liq-btn primary"
                         onClick={handleStart}
-                        disabled={starting || !connected || roles.length === 0}
+                        disabled={starting || !connected || !jobRole.trim() || !company.trim() || campaign?.status === 'paused'}
                       >
                         <Play size={14} />
                         {starting
@@ -1459,7 +1549,9 @@ export default function LinkedInAutomation() {
                             ? 'Checking LinkedIn session…'
                             : !connected
                               ? 'Connect LinkedIn to start'
-                              : `Start campaign · ${batchTotal} requests`}
+                              : campaign?.status === 'paused'
+                                ? 'Resume below to continue'
+                                : 'Start campaign'}
                       </button>
                     )}
                   </div>
@@ -1468,18 +1560,23 @@ export default function LinkedInAutomation() {
                       ? 'Checking the saved LinkedIn session for this profile…'
                       : !connected
                         ? 'Connect your LinkedIn session above before starting.'
-                        : !roles.length
-                          ? 'Add at least one role filter to build the queue.'
-                          : isSyncing
-                            ? 'A background status sync is running. Stop it before launching a campaign.'
+                        : !jobRole.trim()
+                          ? 'Enter the target job role so messages can be personalised for it.'
+                          : campaign?.status === 'paused'
+                            ? 'A paused campaign is waiting. Use Resume in the live status card below.'
                             : needsLogin
                               ? 'The last sync hit a login wall. Reconnect above if this run cannot send.'
-                              : 'A Chrome window opens and sends requests one at a time. Stop halts the queue between requests.'}
+                              : 'Runs in the backend — leaving this page will not stop the campaign.'}
                   </div>
                 </div>
               </section>
 
               <div className="liq-stack">
+                <CampaignStatus
+                  variant="full"
+                  onNavigate={() => setTab('connections')}
+                  showLog
+                />
                 <section className="liq-card">
                   <header className="liq-card-head">
                     <div className="liq-card-title"><Timer size={14} /> How this run is paced</div>
