@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import 'dotenv/config';
 import multer from 'multer';
 import { LinkedInBotEngine } from './lib/bot-engine.js';
-import { LinkedInTrackerEngine, setLiveSearchSessionDir } from './lib/tracker-engine.js';
+import { LinkedInTrackerEngine, setLiveSearchSessionDir, readLinkedInThread, sendLinkedInMessage } from './lib/tracker-engine.js';
 import { LinkedInSessionManager } from './lib/session-manager.js';
 import { db } from './lib/db.js';
 import { handleRagChat } from './lib/rag-assistant.js';
@@ -21,9 +21,10 @@ import puppeteer from 'puppeteer-core';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
-import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, renderResumePdf, resumePlainText } from './lib/resume-pdf.js';
-import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, validateTailoredResume } from './lib/job-analysis.js';
+import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
+import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
+import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -450,16 +451,63 @@ async function pdfToRows(pdf) {
 }
 
 async function pdfToLinks(pdf) {
+  // Each annotation rect sits on the visible word it belongs to ("Certificate",
+  // "GitHub", the email address), so keep the words on that line with the URL.
+  // The tailored resume uses them to put the Drive certificate under the right
+  // internship and each repo under its own project.
   const links = [];
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
     const page = await pdf.getPage(pageNumber);
     const annotations = await page.getAnnotations();
+    if (!annotations.length) continue;
+    const content = await page.getTextContent();
+    const items = content.items
+      .map((item) => ({
+        str: String(item.str || '').trim(),
+        x: item.transform?.[4] || 0,
+        y: item.transform?.[5] || 0,
+        width: item.width || 0,
+      }))
+      .filter((item) => item.str);
+    const rows = new Map();
+    items.forEach((item) => {
+      const key = Math.round(item.y / 4);
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push(item);
+    });
+    rows.forEach((row) => row.sort((a, b) => a.x - b.x));
     for (const annotation of annotations) {
       const url = String(annotation?.url || annotation?.unsafeUrl || '').trim();
-      if (/^https?:\/\//i.test(url)) links.push(url);
+      if (!/^https?:\/\//i.test(url)) continue;
+      const rect = Array.isArray(annotation.rect) ? annotation.rect : null;
+      let context = '';
+      let label = '';
+      if (rect) {
+        const [, bottom, , top] = rect;
+        const centerY = (bottom + top) / 2;
+        const rowKey = [...rows.keys()].reduce((best, key) => {
+          const rowY = key * 4;
+          if (!best) return key;
+          return Math.abs(rowY - centerY) < Math.abs(best * 4 - centerY) ? key : best;
+        }, 0);
+        const row = rows.get(rowKey) || [];
+        context = row.map((item) => item.str).join(' ').replace(/\s+/g, ' ').trim();
+        // The linked word is the one whose glyph box overlaps the annotation.
+        label = row
+          .filter((item) => item.x + item.width >= rect[0] - 2 && item.x <= rect[2] + 2)
+          .map((item) => item.str)
+          .join(' ')
+          .trim();
+      }
+      links.push({ url, label, context });
     }
   }
-  return [...new Set(links)];
+  const seen = new Set();
+  return links.filter((link) => {
+    if (!link.url || seen.has(link.url)) return false;
+    seen.add(link.url);
+    return true;
+  });
 }
 
 function saveEmployeeRecords(records, source) {
@@ -675,8 +723,9 @@ app.post('/api/resume/extract-text', uploadList.single('file'), async (req, res)
     if (!/\.pdf$/i.test(req.file.originalname || '')) return res.json({ text: '' });
     const pdf = await getDocumentProxy(new Uint8Array(req.file.buffer));
     const text = await pdfToRows(pdf);
-    const links = await pdfToLinks(pdf);
-    res.json({ text: String(text || '').slice(0, 20000), links });
+    const linkItems = await pdfToLinks(pdf);
+    const links = [...new Set(linkItems.map((item) => item.url))];
+    res.json({ text: String(text || '').slice(0, 20000), links, linkItems });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not read that resume.' });
   }
@@ -814,8 +863,8 @@ async function askGemini(prompt) {
   // RadoxAI / Coarena is the primary high-speed OpenAI-compatible provider.
   const radoxEnabled = String(process.env.ENABLE_RADOX_FALLBACK || 'true').toLowerCase() !== 'false';
   if (radoxEnabled && (process.env.RADOX_API_KEY || process.env.RADOXAI_API_KEY)) {
-    const rawModel = String(process.env.RADOX_MODEL || 'claude-sonnet-5-5').replace(/\./g, '-');
-    const radoxModels = [...new Set([rawModel, 'claude-sonnet-5-5', 'claude-opus-5-5'])];
+    const rawModel = String(process.env.RADOX_MODEL || 'gpt-6-luna').replace(/\./g, '-');
+    const radoxModels = [...new Set([rawModel, 'gpt-6-luna', 'deepseek-v4.1-flash-1017', 'gemini-3.8-flash'])];
     for (const rModel of radoxModels) {
       try {
         return await askRadox([{ role: 'user', content: prompt }], { model: rModel, maxTokens: 3000, temperature: 0.1 });
@@ -829,8 +878,8 @@ async function askGemini(prompt) {
 
   // Nara Router fallback.
   if (process.env.BYNARA_API_KEY || process.env.NARA_API_KEY) {
-    const rawNara = String(process.env.BYNARA_MODEL || 'claude-sonnet-5-5').replace(/\./g, '-');
-    const naraModels = [...new Set([rawNara, 'claude-sonnet-5-5'])];
+    const rawNara = String(process.env.BYNARA_MODEL || 'gpt-6-luna').replace(/\./g, '-');
+    const naraModels = [...new Set([rawNara, 'gpt-6-luna'])];
     for (const naraModel of naraModels) {
       try {
         return await askNara([{ role: 'user', content: prompt }], { model: naraModel, maxTokens: 3000, temperature: 0.1 });
@@ -1476,6 +1525,149 @@ app.post('/api/ai/mail/followup/send', async (req, res) => {
   }
 });
 
+/**
+ * Conversation-aware AI reply. The Activity drawer already has the whole
+ * thread on screen, so the model is given every earlier message (not just the
+ * last one) and answers in that context, in the user's voice.
+ */
+app.post('/api/ai/conversation/reply', async (req, res) => {
+  const { channel, contactName, role, company, messages = [], instruction = '' } = req.body || {};
+  const history = (Array.isArray(messages) ? messages : [])
+    .filter((item) => item && String(item.text || '').trim())
+    .slice(-14)
+    .map((item) => `${item.direction === 'out' ? 'You' : (item.author || contactName || 'Them')}: ${String(item.text).slice(0, 1200)}`)
+    .join('\n');
+
+  if (!history) {
+    return res.status(400).json({ error: 'There is no conversation to reply to yet.' });
+  }
+
+  const isLinkedIn = String(channel || '').toLowerCase() === 'linkedin';
+  const prompt = `You write the next message in an ongoing conversation on behalf of the user (the job seeker), replying to ${contactName || 'a recruiter'}${company ? ` at ${company}` : ''}${role ? ` about the ${role} role` : ''}.
+
+Rules:
+- Match the channel: ${isLinkedIn ? 'this is LinkedIn messaging, so keep it short (40-90 words), friendly and professional, no subject line, no signature block.' : 'this is email, so include a short greeting and a professional sign-off, 80-150 words.'}
+- Read the WHOLE conversation below and answer the latest message directly. Do not repeat what was already said, do not restart the introduction.
+- Only use facts present in the conversation. Never invent deadlines, salaries, links, or promises.
+- If they asked something, answer it. If they offered a next step, accept it clearly.
+- Return only the message body text, no commentary, no markdown.
+${instruction ? `\nExtra instruction from the user: ${String(instruction).slice(0, 500)}` : ''}
+
+Conversation so far (oldest first):
+${history}`;
+
+  try {
+    const text = await askGemini(prompt);
+    res.json({ text: String(text || '').trim() });
+  } catch (err) {
+    // Deterministic draft so the composer never dead-ends.
+    const last = [...(Array.isArray(messages) ? messages : [])].reverse().find((item) => item?.text);
+    const fallback = isLinkedIn
+      ? `Hi ${String(contactName || '').split(' ')[0] || 'there'}, thanks for getting back to me${role ? ` about the ${role} role` : ''}. ${last ? 'Happy to share whatever you need next.' : ''} Let me know the best next step and I'll take it from there.`
+      : `Hi ${String(contactName || '').split(' ')[0] || 'there'},\n\nThanks for your reply${role ? ` about the ${role} role at ${company || 'your company'}` : ''}. I've read your message and I'm happy to move forward — please let me know the next step and I'll take care of it right away.\n\nBest regards,`;
+    res.json({ text: fallback, fallback: true, note: 'AI is unavailable — this is an editable draft.' });
+  }
+});
+
+/**
+ * Gmail thread for one contact so the drawer can show the whole back-and-forth
+ * (every sent follow-up and every reply), not just the first email.
+ */
+app.get('/api/contact/thread', async (req, res) => {
+  try {
+    const email = String(req.query.email || '').trim();
+    if (!email) return res.status(400).json({ error: 'An email address is required.' });
+    const list = await gmailApi(`messages?maxResults=40&q=${encodeURIComponent(`from:${email} OR to:${email}`)}`);
+    const ids = (list.messages || []).slice(0, 25);
+    const rows = [];
+    for (let i = 0; i < ids.length; i += 5) {
+      const chunk = ids.slice(i, i + 5);
+      const messages = await Promise.all(
+        chunk.map((item) => gmailApi(`messages/${item.id}?format=full`).catch(() => null)),
+      );
+      messages.forEach((message) => {
+        if (!message) return;
+        const payload = message.payload || {};
+        const from = parseMailboxAddress(gmailHeader(payload, 'From'));
+        const to = parseMailboxAddress(gmailHeader(payload, 'To'));
+        rows.push({
+          id: message.id,
+          threadId: message.threadId,
+          subject: gmailHeader(payload, 'Subject') || '',
+          body: decodeGmailBody(payload).slice(0, 8000),
+          fromEmail: from.email,
+          fromName: from.name,
+          toEmail: to.email,
+          at: new Date(Number(message.internalDate || Date.now())).toISOString(),
+          direction: from.email.toLowerCase() === email.toLowerCase() ? 'in' : 'out',
+          messageIdHeader: gmailHeader(payload, 'Message-ID'),
+          referencesHeader: gmailHeader(payload, 'References'),
+        });
+      });
+    }
+    rows.sort((a, b) => new Date(a.at) - new Date(b.at));
+    res.json({ messages: rows });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: friendlyGmailError(err) });
+  }
+});
+
+/**
+ * Live LinkedIn conversation with one contact (read from the user's own account).
+ */
+app.post('/api/linkedin/thread', async (req, res) => {
+  try {
+    const { personName } = req.body || {};
+    const name = String(personName || '').trim();
+    if (!name) return res.status(400).json({ error: 'A contact name is required.' });
+
+    const userId = sessionManager.resolveActiveUser();
+    if (!userId) {
+      return res.status(400).json({ error: 'Connect your LinkedIn account first, then try again.' });
+    }
+    setLiveSearchSessionDir(sessionManager.getSessionDir(userId));
+
+    const existingBrowser = activeBotInstance && activeBotInstance.isRunning && activeBotInstance.browser
+      ? activeBotInstance.browser
+      : null;
+
+    const result = await readLinkedInThread(name, existingBrowser);
+    if (result.error) return res.status(502).json({ error: result.error });
+    res.json({ messages: result.messages || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not read the LinkedIn conversation.' });
+  }
+});
+
+/**
+ * Send a reply from the user's own LinkedIn account.
+ */
+app.post('/api/linkedin/send-message', async (req, res) => {
+  try {
+    const { personName, message } = req.body || {};
+    const name = String(personName || '').trim();
+    const body = String(message || '').trim();
+    if (!name) return res.status(400).json({ error: 'A contact name is required.' });
+    if (!body) return res.status(400).json({ error: 'Write a message before sending.' });
+
+    const userId = sessionManager.resolveActiveUser();
+    if (!userId) {
+      return res.status(400).json({ error: 'Connect your LinkedIn account first, then try again.' });
+    }
+    setLiveSearchSessionDir(sessionManager.getSessionDir(userId));
+
+    if (activeBotInstance && activeBotInstance.isRunning) {
+      return res.status(400).json({ error: 'A LinkedIn campaign is running. Stop it before sending a message.' });
+    }
+
+    const result = await sendLinkedInMessage(name, body);
+    if (!result.ok) return res.status(502).json({ error: result.error || 'LinkedIn did not accept the message.' });
+    res.json({ ok: true, sent: result.sent, warning: result.warning || '' });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not send the LinkedIn message.' });
+  }
+});
+
 app.post('/api/reply/send', async (req, res) => {
   try {
     const { to, subject, body, threadId, inReplyTo, references } = req.body || {};
@@ -1949,36 +2141,77 @@ function mergeKeywordsIntoSkillGroups(resume, keywords) {
   return next;
 }
 
+function linkContextTokens(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' ')
+    .split(/[^a-z0-9+]+/)
+    .filter((token) => token.length > 2);
+}
+
+function overlapScore(left, right) {
+  const target = new Set(linkContextTokens(right));
+  if (!target.size) return 0;
+  return linkContextTokens(left).reduce((score, token) => score + (target.has(token) ? 1 : 0), 0);
+}
+
 function restoreResumeLinks(resume, profile = {}) {
-  const links = [...new Set((profile.resume?.links || []).map((link) => String(link || '').trim()).filter((link) => /^https?:\/\//i.test(link)))];
-  if (!links.length) return resume;
+  // Certificate links come from the PDF annotations; repo links can also come
+  // from the resume text or the saved profile projects. When the extractor kept
+  // the annotation's line, that line decides which entry each link belongs to.
+  const items = [];
+  const pushItem = (url, context = '', label = '') => {
+    const clean = String(url || '').trim();
+    if (!/^https?:\/\//i.test(clean)) return;
+    if (items.some((item) => item.url === clean)) return;
+    items.push({ url: clean, context: String(context || ''), label: String(label || '') });
+  };
+  (profile.resume?.linkItems || []).forEach((item) => pushItem(item.url, item.context, item.label));
+  (profile.resume?.links || []).forEach((url) => pushItem(url));
+  urlsInResumeText(profile.resume?.text || '').forEach((url) => pushItem(url));
+  (profile.projects || []).forEach((item) => pushItem(item.link || item.url));
+  (profile.experience || []).forEach((item) => pushItem(item.url || item.link));
+
   const next = {
     ...resume,
     internships: (resume.internships || []).map((item) => ({ ...item })),
     projects: (resume.projects || []).map((item) => ({ ...item })),
   };
-  const github = links.filter((link) => /github\.com/i.test(link));
-  const certificates = links.filter((link) => !/linkedin\.com|github\.com/i.test(link));
-  let githubIndex = 0;
-  let certificateIndex = 0;
-  const linkForProject = (item) => {
-    const text = `${item.name || ''} ${item.stack || ''}`.toLowerCase();
-    const preferred = github.find((link) =>
-      (/(food|safety|hygiene)/i.test(text) && /food|safety/i.test(link)) ||
-      (/(fee|queue)/i.test(text) && /fee|queue/i.test(link)) ||
-      (/(course|automation|agent|atlas)/i.test(text) && /smart|agent|course/i.test(link))
-    );
-    return preferred || github[githubIndex++];
-  };
+  const isGithub = (link) => /github\.com/i.test(link.url) && !/\/Jaswanth-arjun\/?$/i.test(link.url);
+  const github = items.filter(isGithub);
+  // Anything that is not a repo or a profile URL is treated as a certificate.
+  const certificates = items.filter((item) => !/linkedin\.com|github\.com/i.test(item.url));
+
+  const usedGithub = new Set();
   next.projects = next.projects.map((item) => {
-    if (item.url) return item;
-    const url = linkForProject(item);
-    return url ? { ...item, url, linkLabel: item.linkLabel || 'GitHub' } : { ...item, linkLabel: item.linkLabel || 'GitHub' };
+    // The candidate's own resume links the word "GitHub" / "Certificate";
+    // keep exactly those words instead of whatever label the model invented.
+    const linkLabel = 'GitHub';
+    if (item.url) return { ...item, linkLabel };
+    const itemText = `${item.name || ''} ${item.stack || ''} ${item.detail || ''}`;
+    const free = github.filter((link) => !usedGithub.has(link.url));
+    const scored = free
+      .map((link) => ({ link, score: overlapScore(`${link.label} ${link.context}`, itemText) }))
+      .sort((a, b) => b.score - a.score);
+    // Without stored link context (older profiles), keep the previous
+    // behaviour of handing the remaining repos out in order.
+    const best = scored[0]?.score > 0 ? scored[0].link : (free[0] || null);
+    if (best) usedGithub.add(best.url);
+    return best ? { ...item, url: best.url, linkLabel } : { ...item, linkLabel };
   });
+
+  const usedCertificates = new Set();
   next.internships = next.internships.map((item) => {
-    if (item.url) return item;
-    const url = certificates[certificateIndex++];
-    return url ? { ...item, url, linkLabel: item.linkLabel || 'Certificate' } : { ...item, linkLabel: item.linkLabel || 'Certificate' };
+    const linkLabel = 'Certificate';
+    if (item.url) return { ...item, linkLabel };
+    const itemText = `${item.title || ''} ${item.detail || ''}`;
+    const free = certificates.filter((link) => !usedCertificates.has(link.url));
+    const scored = free
+      .map((link) => ({ link, score: overlapScore(`${link.label} ${link.context}`, itemText) }))
+      .sort((a, b) => b.score - a.score);
+    const best = scored[0]?.score > 0 ? scored[0].link : (free[0] || null);
+    if (best) usedCertificates.add(best.url);
+    return best ? { ...item, url: best.url, linkLabel } : { ...item, linkLabel };
   });
   return next;
 }
@@ -2011,6 +2244,87 @@ function restoreOriginalProjects(resume, profile = {}) {
     };
   });
   return { ...resume, projects: nextProjects };
+}
+
+/**
+ * Never let a real internship/experience entry disappear from the tailored
+ * resume: keep the model's rewritten bullets where it returned an entry, and
+ * restore anything it dropped from the profile or the uploaded resume text.
+ */
+function restoreOriginalExperience(resume, profile = {}, sourceResume = '') {
+  const current = Array.isArray(resume.internships) ? resume.internships.filter(Boolean) : [];
+  const fromProfile = (Array.isArray(profile.experience) && profile.experience.length
+    ? profile.experience
+    : (Array.isArray(profile.internships) ? profile.internships : []))
+    .map((item) => ({
+      title: item.title || item.role || '',
+      linkLabel: item.linkLabel || '',
+      url: item.url || item.link || '',
+      dates: item.dates || item.duration || '',
+      detail: item.detail || item.description || '',
+    }))
+    .filter((item) => item.title || item.detail);
+  const backups = fromProfile.length ? fromProfile : experienceFromResumeText(sourceResume);
+  if (!backups.length) return resume;
+
+  const used = new Set();
+  const merged = current.map((item) => {
+    const index = backups.findIndex((base, position) => {
+      if (used.has(position)) return false;
+      const left = normalizeRecordName(item.title || item.name || '');
+      const right = normalizeRecordName(base.title || '');
+      if (!left || !right) return false;
+      return left.includes(right.slice(0, 12)) || right.includes(left.slice(0, 12));
+    });
+    if (index < 0) return item;
+    used.add(index);
+    const base = backups[index];
+    return {
+      ...base,
+      ...item,
+      title: item.title || base.title,
+      dates: item.dates || base.dates,
+      detail: item.detail || base.detail,
+      url: item.url || base.url,
+      linkLabel: item.linkLabel || base.linkLabel,
+    };
+  });
+
+  backups.forEach((base, index) => {
+    if (used.has(index) || merged.length >= 4) return;
+    merged.push(base);
+  });
+
+  return { ...resume, internships: merged };
+}
+
+/**
+ * Keep the candidate's ACHIEVEMENTS & ADDITIONAL INFORMATION block: use the
+ * saved profile rows when they exist, otherwise read them out of the uploaded
+ * resume text so the section is never missing from the tailored page.
+ */
+function restoreResumeExtras(resume, profile = {}, sourceResume = '') {
+  const current = Array.isArray(resume.extras)
+    ? resume.extras.filter((item) => item && (item.label || item.value))
+    : [];
+
+  const fromProfile = (Array.isArray(profile.extras) ? profile.extras : [])
+    .map((item) => ({ label: item.label || '', value: item.value || '' }))
+    .filter((item) => item.value);
+  const backups = fromProfile.length ? fromProfile : extrasFromResumeText(sourceResume);
+  if (!backups.length) return resume;
+  if (!current.length) return { ...resume, extras: backups.slice(0, 4) };
+
+  // The model often keeps some rows and drops the rest (usually Languages).
+  const known = new Set(current.map((item) => String(item.label || '').toLowerCase().replace(/[^a-z]/g, '')));
+  const merged = [...current];
+  backups.forEach((item) => {
+    const key = String(item.label || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (merged.length >= 4 || known.has(key)) return;
+    known.add(key);
+    merged.push(item);
+  });
+  return { ...resume, extras: merged };
 }
 
 function removeTargetedKeywordSection(value) {
@@ -2072,6 +2386,7 @@ CRITICAL RULES:
 3. Rephrase the professional summary to lead with the exact job title and highlight alignment with the role requirements. The summary must be 100-130 words.
 4. Rewrite internship and project bullet points to use the EXACT terminology from the job description wherever possible.
 5. Keep every real internship, project, school, and achievement. Do NOT delete sections. Do NOT invent employers, schools, projects, dates, or links.
+5b. Every entry from the resume's INTERNSHIPS / EXPERIENCE section must be returned in the "internships" array (never rename that key, never return it empty when the resume has entries).
 6. Order skills so that job-matching skills appear FIRST.
 7. Remove skills that are completely irrelevant to this job description.
 8. Keep the result compact enough for one A4 page. Plain text only — no markdown, no asterisks, no **bold**.
@@ -2095,12 +2410,21 @@ Candidate profile: ${JSON.stringify(profile || {}).slice(0, 4000)}
 Full resume text: ${sourceResume}
 Job description: ${jobText.slice(0, 16000)}`;
     let parsed = null;
-    try {
-      const raw = await askGemini(prompt);
-      const jsonStr = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
-      parsed = validateTailoredResume(JSON.parse(jsonStr));
-    } catch (geminiErr) {
-      throw new Error(`Tailoring failed: ${geminiErr.message}. No fallback resume was fabricated.`);
+    let firstError = null;
+    for (let attempt = 0; attempt < 2 && !parsed; attempt += 1) {
+      try {
+        // A truncated or slightly malformed reply is repaired instead of
+        // failing the whole run; the section restorers then fill any gap.
+        const answer = await askGemini(attempt === 0
+          ? prompt
+          : `${prompt}\n\nThe previous reply was cut off. Keep every detail under 35 words and close every brace and bracket.`);
+        parsed = validateTailoredResume(parseModelJson(answer));
+      } catch (geminiErr) {
+        firstError = firstError || geminiErr;
+      }
+    }
+    if (!parsed) {
+      throw new Error(`Tailoring failed: ${firstError?.message || 'no usable model reply'}. No fallback resume was fabricated.`);
     }
 
     // The submitted resume is the only resume evidence. Profile is contact metadata,
@@ -2111,7 +2435,19 @@ Job description: ${jobText.slice(0, 16000)}`;
     for (const key of ['internships', 'projects', 'education', 'extras']) {
       if ((tailored[key] || []).length < (baseline[key] || []).length) tailored[key] = [...(tailored[key] || []), ...(baseline[key] || []).slice((tailored[key] || []).length)];
     }
-    const fitted = restoreResumeLinks(restoreOriginalProjects(tailored, profile || {}), profile || {});
+    // Restore every real entry first, then attach the saved certificate and
+    // repository links to whichever entries actually made it into the resume.
+    const fitted = restoreResumeLinks(
+      restoreOriginalProjects(
+        restoreResumeExtras(
+          restoreOriginalExperience(tailored, profile || {}, sourceResume),
+          profile || {},
+          sourceResume,
+        ),
+        profile || {},
+      ),
+      { ...(profile || {}), resume: { ...(profile?.resume || {}), text: sourceResume } },
+    );
     const safeProfile = profile || {};
     const sourceKeywords = jobKeywords;
     let atsSafeFitted = preserveExistingAtsKeywords(fitted, sourceKeywords, sourceResume);
@@ -2141,13 +2477,13 @@ Job description: ${jobText.slice(0, 16000)}`;
       ...formatDefs.filter((f) => f.id !== preferredFormatId),
     ].filter(Boolean);
     for (const format of formats) {
-      format.pdfBase64 = await renderResumePdf(safeProfile, atsSafeFitted, format.style);
-      const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(format.pdfBase64, 'base64')));
-      const pages = [];
-      for (let page = 1; page <= pdf.numPages; page++) pages.push((await (await pdf.getPage(page)).getTextContent()).items.map((item) => item.str).join(' '));
-      format.plainText = pages.join('\n');
-      format.pageCount = pdf.numPages;
-       format.ats = calculateKeywordCoverage(sourceKeywords, sourceResume, format.plainText);
+      // Tighten the copy until every section (achievements included) is on the
+      // single page, rather than silently dropping the bottom sections.
+      const rendered = await renderFittedResumePdf(safeProfile, atsSafeFitted, format.style);
+      format.pdfBase64 = rendered.base64;
+      format.plainText = rendered.text;
+      format.pageCount = rendered.pageCount;
+      format.ats = calculateKeywordCoverage(sourceKeywords, sourceResume, format.plainText);
     }
     // Guard: never let a stale/hallucinated company (e.g. old Cloudflare default)
     // override what the URL + page text actually say.
@@ -2619,6 +2955,7 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     const results = [];
+    const failures = [];
     const allSent = readSentEmails();
 
     for (const recipient of recipients) {
@@ -2638,64 +2975,79 @@ app.post('/api/send-email', async (req, res) => {
       const personalizedSubject = fill(subject) || `Application Referral Request for ${jobTitle || 'Role'} at ${company || 'Company'}`;
 
       let messageId = '';
-      if (useOAuthRest) {
-        const sendResult = await sendEmailViaGmailRestApi(validAccessToken, {
-          from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
-          to: recipientEmail,
+      try {
+        if (useOAuthRest) {
+          const sendResult = await sendEmailViaGmailRestApi(validAccessToken, {
+            from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
+            to: recipientEmail,
+            subject: personalizedSubject,
+            text: personalizedBody,
+            html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
+              ${personalizedBody.replace(/\n/g, '<br/>')}
+              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+              <p style="font-size: 12px; color: #777;">
+                📎 <em>${attachments.length ? `Attached Resume: ${attachments[0].filename}` : `Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf`}</em>
+              </p>
+            </div>`,
+            attachments,
+          });
+          messageId = sendResult.id;
+        } else {
+          const mailOptions = {
+            from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
+            to: recipientEmail,
+            subject: personalizedSubject,
+            text: personalizedBody,
+            html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
+              ${personalizedBody.replace(/\n/g, '<br/>')}
+              <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+              <p style="font-size: 12px; color: #777;">
+                📎 <em>${attachments.length ? `Attached Resume: ${attachments[0].filename}` : `Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf`}</em>
+              </p>
+            </div>`,
+            attachments,
+          };
+          const info = await passTransporter.sendMail(mailOptions);
+          messageId = info.messageId;
+        }
+
+        const sentRecord = {
+          id: messageId,
+          recipient: recipientEmail,
+          recipientName,
+          sender: targetEmail,
           subject: personalizedSubject,
-          text: personalizedBody,
-          html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
-            ${personalizedBody.replace(/\n/g, '<br/>')}
-            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #777;">
-              📎 <em>${attachments.length ? `Attached Resume: ${attachments[0].filename}` : `Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf`}</em>
-            </p>
-          </div>`,
-          attachments,
-        });
-        messageId = sendResult.id;
-      } else {
-        const mailOptions = {
-          from: `"${targetEmail.split('@')[0]}" <${targetEmail}>`,
-          to: recipientEmail,
-          subject: personalizedSubject,
-          text: personalizedBody,
-          html: `<div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111;">
-            ${personalizedBody.replace(/\n/g, '<br/>')}
-            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-            <p style="font-size: 12px; color: #777;">
-              📎 <em>${attachments.length ? `Attached Resume: ${attachments[0].filename}` : `Attached PDF Resume: ${targetEmail.split('@')[0]}-resume.pdf`}</em>
-            </p>
-          </div>`,
-          attachments,
+          bodyText: personalizedBody,
+          jobTitle: jobTitle || '',
+          company: company || '',
+          sentAt: new Date().toISOString(),
+          status: 'Sent',
         };
-        const info = await passTransporter.sendMail(mailOptions);
-        messageId = info.messageId;
+
+        results.push(sentRecord);
+        allSent.unshift(sentRecord);
+      } catch (sendErr) {
+        failures.push({ name: recipientName, email: recipientEmail, error: sendErr.message || 'Send failed' });
       }
-
-      const sentRecord = {
-        id: messageId,
-        recipient: recipientEmail,
-        recipientName,
-        sender: targetEmail,
-        subject: personalizedSubject,
-        bodyText: personalizedBody,
-        jobTitle: jobTitle || '',
-        company: company || '',
-        sentAt: new Date().toISOString(),
-        status: 'Sent',
-      };
-
-      results.push(sentRecord);
-      allSent.unshift(sentRecord);
     }
 
     writeSentEmails(allSent);
 
+    if (!results.length && failures.length) {
+      return res.status(502).json({
+        error: `None of the ${failures.length} emails could be sent. ${failures[0].error}`,
+        failures,
+      });
+    }
+
     res.json({
       success: true,
-      message: `Successfully sent real emails to ${recipients.length} company employees!`,
+      message: failures.length
+        ? `Sent to ${results.length} of ${recipients.length} employees. ${failures.length} failed.`
+        : `Successfully sent real emails to ${recipients.length} company employees!`,
       details: results,
+      failures,
+      allSent: results.length === recipients.length,
     });
   } catch (err) {
     console.error('Error sending real Gmail email:', err);

@@ -1627,6 +1627,100 @@
   cursor: default;
 }
 
+/* ---------- Full conversation thread ---------- */
+.atd-thread-full {
+  flex: 1;
+  min-height: 180px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 10px;
+  margin-bottom: 14px;
+  border: 1px solid #eef0f4;
+  border-radius: 12px;
+  background: #fdfdfe;
+  scrollbar-width: thin;
+}
+
+.atd-thread-loading,
+.atd-thread-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  padding: 26px 10px;
+  font-size: 11.5px;
+  color: #8a8d96;
+  text-align: center;
+}
+
+.atd-bubble p {
+  max-height: none;
+}
+
+.atd-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.atd-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid #e3e5ec;
+  border-radius: 6px;
+  background: #fff;
+  color: #6b6e76;
+  font: 700 10px Manrope, sans-serif;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+
+.atd-refresh:hover {
+  border-color: #c9ccd4;
+  color: var(--ink);
+}
+
+.atd-refresh .spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Contact pill status colors */
+.atd-pill-badge.s-sent {
+  background: #f1f2f5;
+  color: #6b6e76;
+}
+
+.atd-pill-badge.s-seen,
+.atd-pill-badge.s-accepted {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.atd-pill-badge.s-replied {
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.atd-pill-badge.s-you-replied {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.atd-pill-badge.s-handled {
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.atd-pill-badge.s-bounced,
+.atd-pill-badge.s-declined {
+  background: #fef2f2;
+  color: #b42318;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1180px) {
   .activity-table {

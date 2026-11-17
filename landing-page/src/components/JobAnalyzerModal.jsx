@@ -11,7 +11,7 @@ import { DEMO_JOBS } from '../lib/mockData';
 import { useAuth } from '../lib/auth';
 import { jobOwner } from '../lib/jobOwnership';
 import { shortenJobTitle } from './jobTitle';
-import { mapProfileForBackend, extractResumeLocation, profileResumeText, keywordAudit, scoreValue, scoreLabel } from './JobAnalyzerModal.helpers';
+import { mapProfileForBackend, extractResumeLocation, profileResumeText, keywordAudit, scoreValue, scoreLabel, extractProfilePdf } from './JobAnalyzerModal.helpers';
 import './JobAnalyzerModal.css';
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -70,7 +70,7 @@ function printResumeHtml(html) {
   win.document.close(); win.focus(); win.print();
 }
 
-export function ResumeRichEditor({ plainText, initialHtml = '', onSave, onClose }) {
+export function ResumeRichEditor({ plainText, initialHtml = '', onSave, onClose, readOnly = false }) {
   const editorRef = React.useRef(null);
   const savedSelectionRef = React.useRef(null);
   const [fontSize, setFontSize] = React.useState('3');
@@ -132,37 +132,38 @@ export function ResumeRichEditor({ plainText, initialHtml = '', onSave, onClose 
   return <div style={editorOverlayStyle} onClick={onClose}>
     <div style={editorDialogStyle} onClick={event => event.stopPropagation()}>
       <style>{`.resume-page{width:100%;margin:0 auto}.resume-page header{text-align:center;border:0;padding:0;margin:0}.resume-page h1{font-family:"Times New Roman",Times,serif;font-size:16.5px;line-height:1;margin:0 0 3px;text-transform:uppercase}.resume-page h2{font-size:10.5px;line-height:1;border-bottom:1px solid #222;padding:0 0 2px;margin:3.2px 0 2px}.resume-page p{font-size:10px;line-height:1.18;margin:0 0 1px}.resume-page article{margin:0 0 2px}.resume-page .entry-title{display:flex;justify-content:space-between;gap:10px;line-height:1.1}.resume-page .entry-link{margin:0}.resume-page a{color:#1649d8;text-decoration:none}.resume-page .skill-row{display:grid;grid-template-columns:140px 1fr;gap:0;margin:0;line-height:1.12}.resume-page i{font-weight:normal}`}</style>
-      <div style={editorHeaderStyle}><div><strong>Edit resume</strong><span>Changes are saved to this tailored version.</span></div><button onClick={onClose} style={closeButtonStyle}><X size={18} /></button></div>
-      <div style={editorToolbarStyle}>
-        <button onClick={() => command('bold')} style={editorToolButton}>Bold</button>
-        <button onClick={() => command('italic')} style={editorToolButton}>Italic</button>
-        <button onClick={() => command('underline')} style={editorToolButton}>Underline</button>
-        <select value={fontSize} onChange={event => { setFontSize(event.target.value); command('fontSize', event.target.value); }} style={editorSelectStyle}><option value="2">Small</option><option value="3">Normal</option><option value="4">Large</option><option value="5">Heading</option></select>
-        <button onClick={() => command('formatBlock', 'h2')} style={editorToolButton}>Heading</button>
-        <button onClick={() => command('formatBlock', 'p')} style={editorToolButton}>Paragraph</button>
-        <button onClick={() => command('insertUnorderedList')} style={editorToolButton}>• List</button>
-        <button onMouseDown={event => { event.preventDefault(); saveSelection(); }} onClick={addLink} style={editorToolButton}>Add link</button>
-        <button onClick={() => command('justifyLeft')} style={editorToolButton}>Align left</button>
-        <button onClick={() => command('justifyCenter')} style={editorToolButton}>Center</button>
+      <div style={editorHeaderStyle}><div><strong>{readOnly ? 'Resume preview' : 'Edit resume'}</strong><span>{readOnly ? 'Read-only view. Use the Edit button to make changes.' : 'Changes are saved to this tailored version.'}</span></div><button onClick={onClose} style={closeButtonStyle}><X size={18} /></button></div>
+      {!readOnly && (
+        <div style={editorToolbarStyle}>
+          <button onClick={() => command('bold')} style={editorToolButton}>Bold</button>
+          <button onClick={() => command('italic')} style={editorToolButton}>Italic</button>
+          <button onClick={() => command('underline')} style={editorToolButton}>Underline</button>
+          <select value={fontSize} onChange={event => { setFontSize(event.target.value); command('fontSize', event.target.value); }} style={editorSelectStyle}><option value="2">Small</option><option value="3">Normal</option><option value="4">Large</option><option value="5">Heading</option></select>
+          <button onClick={() => command('formatBlock', 'h2')} style={editorToolButton}>Heading</button>
+          <button onClick={() => command('formatBlock', 'p')} style={editorToolButton}>Paragraph</button>
+          <button onClick={() => command('insertUnorderedList')} style={editorToolButton}>• List</button>
+          <button onMouseDown={event => { event.preventDefault(); saveSelection(); }} onClick={addLink} style={editorToolButton}>Add link</button>
+          <button onClick={() => command('justifyLeft')} style={editorToolButton}>Align left</button>
+          <button onClick={() => command('justifyCenter')} style={editorToolButton}>Center</button>
+        </div>
+      )}
+      <div style={editorScrollStyle}><div ref={editorRef} contentEditable={!readOnly} suppressContentEditableWarning onMouseUp={saveSelection} onKeyUp={saveSelection} style={editorPaperStyle} aria-label={readOnly ? 'Resume preview' : 'Editable resume content'} /></div>
+      <div style={editorFooterStyle}>
+        <span>{readOnly ? 'This is a preview of your tailored resume.' : 'Tip: select text, then use the toolbar. Use Add link for GitHub or certificate URLs.'}</span>
+        <div>
+          <button onClick={printResume} className="btn-ghost">Print / Save PDF</button>
+          {readOnly ? (
+            <button onClick={onClose} className="btn-accent">Close</button>
+          ) : (
+            <>
+              <button onClick={onClose} className="btn-ghost">Cancel</button>
+              <button onClick={save} className="btn-accent">Save edits</button>
+            </>
+          )}
+        </div>
       </div>
-      <div style={editorScrollStyle}><div ref={editorRef} contentEditable suppressContentEditableWarning onMouseUp={saveSelection} onKeyUp={saveSelection} style={editorPaperStyle} aria-label="Editable resume content" /></div>
-      <div style={editorFooterStyle}><span>Tip: select text, then use the toolbar. Use Add link for GitHub or certificate URLs.</span><div><button onClick={printResume} className="btn-ghost">Print / Save PDF</button><button onClick={onClose} className="btn-ghost">Cancel</button><button onClick={save} className="btn-accent">Save edits</button></div></div>
     </div>
   </div>;
-}
-
-async function extractStoredProfilePdf(profile) {
-  const dataUrl = profile?.resume?.dataUrl;
-  if (!dataUrl || !/^data:[^;]+;base64,/i.test(dataUrl)) return { text: '', links: [] };
-  const base64 = dataUrl.split(',')[1] || '';
-  const binary = atob(base64);
-  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
-  const body = new FormData();
-  body.append('file', new Blob([bytes], { type: 'application/pdf' }), profile.resume.fileName || 'profile-resume.pdf');
-  const response = await fetch('/api/resume/extract-text', { method: 'POST', body });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || 'Could not read the resume saved in your profile.');
-  return { text: String(result.text || '').trim(), links: Array.isArray(result.links) ? result.links : [] };
 }
 
 /* ── main component ──────────────────────────────────────── */
@@ -272,10 +273,10 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
       // Recover the text from that already-uploaded PDF instead of asking the
       // user to upload the same resume again.
       if (rawProfile.resume?.dataUrl) {
-        const storedPdf = await extractStoredProfilePdf(rawProfile);
+        const storedPdf = await extractProfilePdf(rawProfile);
         if (!originalSourceText) originalSourceText = storedPdf.text;
         if (storedPdf.links.length || !rawProfile.resume.links?.length) {
-          profileStore.save({ ...rawProfile, resume: { ...rawProfile.resume, text: originalSourceText, links: storedPdf.links.length ? storedPdf.links : (rawProfile.resume.links || []) } });
+          profileStore.save({ ...rawProfile, resume: { ...rawProfile.resume, text: originalSourceText, links: storedPdf.links.length ? storedPdf.links : (rawProfile.resume.links || []), linkItems: storedPdf.linkItems?.length ? storedPdf.linkItems : (rawProfile.resume.linkItems || []) } });
         }
       }
       // Last fallback: use the structured profile fields. This keeps older
@@ -378,7 +379,6 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
          jobId: targetJob.id,
          company: companyName,
          title: jobTitle,
-        isActive: true,
       });
 
 

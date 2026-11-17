@@ -4,16 +4,16 @@ import {
   ArrowLeft, ArrowRight, Mail, FileText, Sparkles, ExternalLink, 
   Copy, Check, Send, UserPlus, Download, CheckCircle2, 
   MapPin, Clock, Building, Bookmark, AlertCircle, RefreshCw,
-  Upload, Eye, ChevronRight, UserCheck, ShieldCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor
+  Upload, Eye, ChevronRight, UserCheck, ShieldCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore } from '../lib/api';
+import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore } from '../lib/api';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
 import { ResumeRichEditor } from '../components/JobAnalyzerModal';
-import { keywordAudit, scoreValue, scoreLabel } from '../components/JobAnalyzerModal.helpers';
+import { keywordAudit, scoreValue, scoreLabel, mapProfileForBackend, extractProfilePdf } from '../components/JobAnalyzerModal.helpers';
 
 const Linkedin = ({ size = 16, style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -87,7 +87,10 @@ export default function Apply() {
   const [editorState, setEditorState] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [sendingAll, setSendingAll] = useState(false);
-  const [sendSuccess, setSendSuccess] = useState(false);
+  const [sendSuccess, setSendSuccess] = useState(() => Boolean(applyProgressStore.get(jobId)?.referral));
+  const [referralRecipients, setReferralRecipients] = useState(
+    () => applyProgressStore.get(jobId)?.referralRecipients || [],
+  );
 
   // Auto-Apply state
   const [autoApplying, setAutoApplying] = useState(false);
@@ -99,16 +102,37 @@ export default function Apply() {
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
 
-  // A tailored resume only belongs to the job it was generated for.
+  // A tailored resume only belongs to the job it was generated for. If this job
+  // was already tailored, restore that report instead of asking for it again.
   useEffect(() => {
-    setTailorResult(null);
     setTailorError('');
-    setTailoredPdfBase64(null);
-    setTailoredFileName('');
-    setFormatId('recommended');
     setEditorState(null);
     setSubmitted(Boolean(applyProgressStore.get(jobId)?.apply));
+    // Referral sending is a one-time action per job: once every selected contact
+    // has been emailed, reopening this page must not offer "Confirm & Send" again.
+    const savedProgress = applyProgressStore.get(jobId) || {};
+    setSendSuccess(Boolean(savedProgress.referral));
+    setReferralRecipients(savedProgress.referralRecipients || []);
+    const saved = tailorReportStore.get(jobId);
+    if (saved?.report) {
+      const savedFormatId = saved.formatId || saved.report.recommendedId || 'recommended';
+      setTailorResult(saved.report);
+      setFormatId(savedFormatId);
+      setTailoredFileName(saved.resumeName || '');
+      setTailoredPdfBase64(jobResume?.pdfBase64 || null);
+    } else {
+      setTailorResult(null);
+      setTailoredPdfBase64(null);
+      setTailoredFileName('');
+      setFormatId('recommended');
+    }
   }, [jobId]);
+
+  // The PDF of a saved tailored resume is kept in the resume store, so attach it
+  // once it is available (not needed when a fresh report just generated one).
+  useEffect(() => {
+    if (!tailoredPdfBase64 && jobResume?.pdfBase64) setTailoredPdfBase64(jobResume.pdfBase64);
+  }, [jobResume?.pdfBase64]);
 
   // Job Tracker "continue" links open a specific stage via ?stage=...
   useEffect(() => {
@@ -464,6 +488,10 @@ ${firstName}`;
         return;
       }
 
+      const sentNames = (res?.details || []).map((item) => item.recipientName).filter(Boolean);
+      const failed = Array.isArray(res?.failures) ? res.failures : [];
+      const allSent = res?.allSent !== false && failed.length === 0;
+
       // Log the referral as outreach (not an application). The Job Tracker
       // reads this plus the sent-email log to show stage 2 as completed.
       applicationStore.add({
@@ -475,15 +503,24 @@ ${firstName}`;
         stage: 'referral',
         ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
         resumeUsed: tailoredFileName || jobResume?.name || activeResume?.name || `${(profile.fullName || 'User').split(' ')[0]}-resume.pdf`,
-        referralSentTo: selectedEmployees.map(e => e.name).join(', ')
+        referralSentTo: (sentNames.length ? sentNames : selectedEmployees.map(e => e.name)).join(', ')
       });
       applyProgressStore.mark(jobId || job?.id, 'referral', {
         company: job?.company || '',
         title: job?.title || '',
+        referralRecipients: sentNames.length ? sentNames : selectedEmployees.map(e => e.name),
+        referralAllSent: allSent,
       });
 
       setSendingAll(false);
-      setSendSuccess(true);
+      if (allSent) {
+        setReferralRecipients(sentNames.length ? sentNames : selectedEmployees.map(e => e.name));
+        setSendSuccess(true);
+      } else {
+        setGmailAuthError(
+          `Sent to ${sentNames.length} of ${selectedEmployees.length}. Failed: ${failed.map(f => f.name || f.email).join(', ') || 'some recipients'}.`,
+        );
+      }
     } catch (err) {
       console.error('Error sending referral email:', err);
       setSendingAll(false);
@@ -518,14 +555,42 @@ ${firstName}`;
     try {
       const link = job?.applyLink || job?.url || window.location.href;
       const active = activeResume || resumes[0];
+      // Prefer the uploaded PDF text (it carries every section, experience
+      // included). The structured-field fallback only lists titles and loses
+      // internships, which silently dropped the EXPERIENCE section.
+      const resumeText = String(active?.text || '').trim()
+        || String(profile?.resume?.text || '').trim()
+        || [
+          profile.skills?.length ? `Skills: ${profile.skills.join(', ')}` : '',
+          ...(profile.experience || []).map(e => [e.title, e.company, e.duration, e.description].filter(Boolean).join(' ')),
+          ...(profile.education || []).map(ed => [ed.degree, ed.school, ed.graduationYear].filter(Boolean).join(' ')),
+          ...(profile.projects || []).map(p => [p.title, p.technologies, p.description].filter(Boolean).join(' ')),
+        ].filter(Boolean).join('\n');
+      const mappedProfile = mapProfileForBackend(profile || {});
+      // Older profiles stored only the PDF's URLs, without the word each link
+      // sits on. Re-read the PDF so a certificate lands on its internship and
+      // each repo lands on its own project.
+      if (!mappedProfile.resume?.linkItems?.length && profile?.resume?.dataUrl) {
+        try {
+          const stored = await extractProfilePdf(profile);
+          if (stored.linkItems?.length) {
+            mappedProfile.resume = {
+              ...(mappedProfile.resume || {}),
+              links: stored.links.length ? stored.links : (mappedProfile.resume?.links || []),
+              linkItems: stored.linkItems,
+            };
+            const savedProfile = profileStore.get() || profile;
+            profileStore.save({
+              ...savedProfile,
+              resume: { ...(savedProfile.resume || {}), links: stored.links, linkItems: stored.linkItems },
+            });
+          }
+        } catch { /* tailor without link context */ }
+      }
       const result = await api.tailorExternalJob({
         url: link,
-        profile: profile || {},
-        resumeText: active?.text || [
-          profile.skills?.length ? `Skills: ${profile.skills.join(', ')}` : '',
-          ...(profile.experience || []).map(e => `${e.title} at ${e.company}`),
-          ...(profile.education || []).map(ed => `${ed.degree} at ${ed.school}`),
-        ].join('\n'),
+        profile: mappedProfile,
+        resumeText,
         template: getSelectedTemplateId(),
       });
 
@@ -547,12 +612,19 @@ ${firstName}`;
         jobId,
         company: job?.company || '',
         title: job?.title || '',
-        isActive: true,
       });
       applyProgressStore.mark(jobId || job?.id, 'tailor', {
         company: job?.company || '',
         title: job?.title || '',
         resumeName: name,
+      });
+      // Keep the report with the job so it is still there after a refresh,
+      // after moving to another stage, or when reopened from Job Tracker.
+      tailorReportStore.save(jobId || job?.id, result, {
+        formatId: chosen.id || 'recommended',
+        resumeName: name,
+        jobTitle: job?.title || '',
+        company: job?.company || '',
       });
     } catch (err) {
       const raw = err?.message || '';
@@ -576,19 +648,45 @@ ${firstName}`;
     }
   };
 
-  // Switch the previewed/downloaded resume format
-  const handleSelectFormat = (nextFormatId) => {
-    if (!tailorResult) return;
-    const chosen = tailorResult.formats?.find(f => f.id === nextFormatId) || tailorResult.formats?.[0];
-    if (!chosen?.pdfBase64) return;
-    setFormatId(chosen.id || nextFormatId);
-    setTailoredPdfBase64(chosen.pdfBase64);
+  // Open the tailored resume as a real PDF in a new browser tab
+  const handleViewTailored = async () => {
+    const chosen = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
+    if (!chosen) return;
+    if (!chosen.pdfBase64 && !tailoredPdfBase64) return;
+    // Anchor clicks survive popup blockers that reject window.open().
+    const openUrl = (url) => {
+      if (window.open(url, '_blank')) return;
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+    if (!chosen.editedHtml) {
+      openUrl(pdfObjectUrl(chosen.pdfBase64 || tailoredPdfBase64));
+      return;
+    }
+    // The re-render is async, so grab the tab while the click gesture is live.
+    const win = window.open('', '_blank');
+    try {
+      const rendered = await api.renderEditedResumePdf(chosen.editedHtml);
+      const url = pdfObjectUrl(rendered.pdfBase64);
+      if (win) win.location.href = url;
+      else openUrl(url);
+    } catch {
+      const url = pdfObjectUrl(chosen.pdfBase64 || tailoredPdfBase64);
+      if (win) win.location.href = url;
+      else openUrl(url);
+    }
   };
 
   // Download the selected format (re-rendered when the user edited it)
   const handleDownloadTailored = async () => {
     const chosen = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
-    if (!chosen?.pdfBase64) return;
+    if (!chosen) return;
+    if (!chosen.pdfBase64 && !tailoredPdfBase64) return;
     const name = tailoredFileName || 'tailored-resume.pdf';
     if (chosen.editedHtml) {
       try {
@@ -599,7 +697,7 @@ ${firstName}`;
         // Fall back to the generated PDF rather than failing the download.
       }
     }
-    downloadPdf(chosen.pdfBase64, name);
+    downloadPdf(chosen.pdfBase64 || tailoredPdfBase64, name);
   };
 
   // Check extension availability and sync answers on mount
@@ -751,8 +849,8 @@ ${firstName}`;
         const active = activeResume || resumes[0];
         const result = await api.tailorExternalJob({
           url: link,
-          profile: profile || {},
-          resumeText: active?.text || '',
+          profile: mapProfileForBackend(profile || {}),
+          resumeText: String(active?.text || '').trim() || String(profile?.resume?.text || '').trim(),
           template: getSelectedTemplateId(),
         });
         const chosen = result.formats?.[0];
@@ -768,7 +866,6 @@ ${firstName}`;
             jobId,
             company: job?.company || '',
             title: job?.title || '',
-            isActive: true,
           });
           setTailoredPdfBase64(pdfToAttach);
           setTailoredFileName(fileNameToAttach);
@@ -778,7 +875,7 @@ ${firstName}`;
       }
     }
 
-    const currentResumeText = activeResume?.text || jobResume?.text || '';
+    const currentResumeText = activeResume?.text || jobResume?.text || profile?.resume?.text || '';
 
     // Send the apply request to the extension
     window.postMessage({
@@ -879,7 +976,6 @@ ${firstName}`;
   const reportPartial = keywordRows.filter(r => r.status === 'Partial');
   const reportMissing = keywordRows.filter(r => r.status === 'Missing');
   const reportRemoved = keywordRows.filter(r => r.status === 'Removed');
-  const jobKeywords = (job.requiredSkills || job.skills || ['Python', 'Node.js', 'SQL', 'REST APIs']);
 
   const jobProgress = applyProgressStore.get(jobId || job?.id);
   const resumeReady = Boolean(tailorResult || jobResume);
@@ -1306,10 +1402,19 @@ ${firstName}`;
 
           {/* Success Banner if Sent */}
           {sendSuccess && (
-            <div style={{ padding: '18px 24px', background: '#d1fae5', border: '1px solid #34d399', borderRadius: '14px', color: '#065f46', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '800', fontSize: '14px' }}>
-                <CheckCircle2 size={22} />
-                <span>Referral emails sent successfully to {selectedEmployees.map(e => e.name).join(', ')} with PDF resume attached!</span>
+            <div style={{ padding: '18px 24px', background: '#d1fae5', border: '1px solid #34d399', borderRadius: '14px', color: '#065f46', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontWeight: '800', fontSize: '14px' }}>
+                <CheckCircle2 size={22} style={{ flexShrink: 0 }} />
+                <div>
+                  <div>
+                    {referralRecipients.length
+                      ? `All referral emails sent successfully to ${referralRecipients.length} ${referralRecipients.length === 1 ? 'contact' : 'contacts'}: ${referralRecipients.join(', ')}`
+                      : 'All referral emails sent successfully with your PDF resume attached.'}
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#047857', marginTop: '3px' }}>
+                    This step is complete for this job — you don't need to send it again.
+                  </div>
+                </div>
               </div>
               <button 
                 className="btn-ghost" 
@@ -1371,31 +1476,52 @@ ${firstName}`;
             </button>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <button
-                onClick={handleConfirmAndSend}
-                disabled={sendingAll || selectedEmployees.length === 0}
-                style={{
-                  background: (sendingAll || selectedEmployees.length === 0) ? '#94a3b8' : '#18181b',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '30px',
-                  padding: '14px 34px',
-                  fontSize: '13px',
-                  fontWeight: '900',
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  cursor: (sendingAll || selectedEmployees.length === 0) ? 'not-allowed' : 'pointer',
-                  opacity: (sendingAll || selectedEmployees.length === 0) ? 0.6 : 1,
-                  boxShadow: (sendingAll || selectedEmployees.length === 0) ? 'none' : '0 8px 24px rgba(0,0,0,0.2)',
-                  transition: 'all 0.2s'
-                }}
-              >
-                <span>{sendingAll ? 'Sending Outreach...' : 'CONFIRM & SEND'}</span>
-                <ArrowRight size={16} />
-              </button>
+              {sendSuccess ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    background: '#ecfdf5',
+                    border: '1px solid #a7f3d0',
+                    color: '#047857',
+                    borderRadius: '30px',
+                    padding: '12px 24px',
+                    fontSize: '12.5px',
+                    fontWeight: '900',
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  <CheckCircle2 size={16} /> All Referral Emails Sent
+                </span>
+              ) : (
+                <button
+                  onClick={handleConfirmAndSend}
+                  disabled={sendingAll || selectedEmployees.length === 0}
+                  style={{
+                    background: (sendingAll || selectedEmployees.length === 0) ? '#94a3b8' : '#18181b',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '30px',
+                    padding: '14px 34px',
+                    fontSize: '13px',
+                    fontWeight: '900',
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: (sendingAll || selectedEmployees.length === 0) ? 'not-allowed' : 'pointer',
+                    opacity: (sendingAll || selectedEmployees.length === 0) ? 0.6 : 1,
+                    boxShadow: (sendingAll || selectedEmployees.length === 0) ? 'none' : '0 8px 24px rgba(0,0,0,0.2)',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <span>{sendingAll ? 'Sending Outreach...' : 'CONFIRM & SEND'}</span>
+                  <ArrowRight size={16} />
+                </button>
+              )}
 
               <button
                 onClick={() => setActiveTab('linkedin')}
@@ -1806,37 +1932,6 @@ ${firstName}`;
             </p>
           </div>
 
-          {/* Skill Alignment Card */}
-          <div style={{ background: '#fafaf7', border: '1px solid #e8e8e3', borderRadius: '14px', padding: '20px', marginBottom: '20px' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: '800', color: '#171817', margin: '0 0 12px' }}>
-              Required Job Skills vs Your Profile
-            </h4>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {jobKeywords.map(skill => {
-                const hasSkill = (profile.skills || []).some(s => s.toLowerCase().includes(skill.toLowerCase()));
-                return (
-                  <span
-                    key={skill}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: '20px',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      background: hasSkill ? '#e8f5e9' : '#fff3e0',
-                      color: hasSkill ? '#2e7d32' : '#e65100',
-                      border: `1px solid ${hasSkill ? '#c8e6c9' : '#ffe0b2'}`,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    {hasSkill ? '✓ ' : '⚡ '} {skill}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Tailor action box */}
           <div style={{ border: tailorResult ? '1px solid #bbf7d0' : '2px dashed #445cf5', borderRadius: '14px', padding: '22px 24px', textAlign: 'center', background: tailorResult ? '#f0fdf4' : '#f8f9ff', marginBottom: '20px' }}>
             {tailorResult ? <CheckCircle2 size={30} style={{ color: '#059669', marginBottom: '8px' }} /> : <Sparkles size={30} style={{ color: '#445cf5', marginBottom: '8px' }} />}
@@ -1863,10 +1958,17 @@ ${firstName}`;
                 <>
                   <button
                     className="btn-ghost"
+                    onClick={handleViewTailored}
+                    style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
+                  >
+                    <Eye size={16} /> View
+                  </button>
+                  <button
+                    className="btn-ghost"
                     onClick={() => setEditorState({ formatId, format: chosenFormat })}
                     style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
                   >
-                    <Eye size={16} /> View / Edit
+                    <Pencil size={16} /> Edit
                   </button>
                   <button
                     className="btn-ghost"
@@ -1992,89 +2094,57 @@ ${firstName}`;
                   )}
                 </div>
 
-                {/* Right: tailored resume */}
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-                  <h4 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>Tailored Resume</h4>
-                  <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#64748b' }}>
-                    Tailored for {job.title} at {job.company}
-                  </p>
-
-                  {tailorResult.formats?.length > 1 && (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                      {tailorResult.formats.map(f => (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => handleSelectFormat(f.id)}
-                          style={{
-                            padding: '5px 11px', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
-                            border: formatId === f.id ? '2px solid #4f46e5' : '1px solid #e2e8f0',
-                            background: formatId === f.id ? '#eef2ff' : '#ffffff',
-                            color: formatId === f.id ? '#4338ca' : '#64748b',
-                          }}
-                        >
-                          {f.label || f.name || f.id}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', marginBottom: '12px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#eef2ff', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <FileText size={17} />
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <strong style={{ display: 'block', fontSize: '12px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {tailoredFileName || 'tailored-resume.pdf'}
-                      </strong>
-                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                        PDF{chosenFormat?.pageCount ? ` · ${chosenFormat.pageCount} page${chosenFormat.pageCount > 1 ? 's' : ''}` : ''}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => chosenFormat?.pdfBase64 && window.open(pdfObjectUrl(chosenFormat.pdfBase64), '_blank')}
-                      disabled={!chosenFormat?.pdfBase64}
-                      style={{ padding: '9px 14px', fontSize: '12.5px', gap: '6px' }}
-                    >
-                      <Eye size={14} /> Preview PDF
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => setEditorState({ formatId, format: chosenFormat })}
-                      style={{ padding: '9px 14px', fontSize: '12.5px', gap: '6px' }}
-                    >
-                      <FileText size={14} /> Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={handleDownloadTailored}
-                      style={{ padding: '9px 14px', fontSize: '12.5px', gap: '6px' }}
-                    >
-                      <Download size={14} /> Download
-                    </button>
-                  </div>
-
-                  {/* What changed */}
-                  <div style={{ marginTop: '14px', padding: '12px 14px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', color: '#4338ca', marginBottom: '6px' }}>
-                      <Sparkles size={13} /> What was added
-                    </div>
-                    <p style={{ margin: 0, fontSize: '11.5px', color: '#475569', lineHeight: 1.55 }}>
-                      {reportAdded.length ? reportAdded.map(r => r.keyword).join(', ') : 'No new keywords were required — your resume already covered the job keywords.'}
+                {/* Right: application readiness. Preview/Edit/Download already sit
+                    above, and the template is chosen in the Resume section. */}
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', background: '#fff', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>Ready to apply</h4>
+                    <p style={{ margin: 0, fontSize: '11.5px', color: '#64748b' }}>
+                      Your tailored resume is attached automatically in the next steps.
                     </p>
-                    {tailorResult.removedKeywords?.length > 0 && (
-                      <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
-                        Removed: {tailorResult.removedKeywords.join(', ')}
-                      </p>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: '700', color: '#166534' }}>
+                      <CheckCircle2 size={14} /> Resume tailored for {job.title} at {job.company}
+                    </div>
+                    {afterScore !== null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: '700', color: '#334155' }}>
+                        <Target size={14} style={{ color: '#445cf5' }} />
+                        ATS score {beforeScore === null ? '—' : `${beforeScore}%`} → {afterScore}%
+                        {scoreDelta !== null && scoreDelta > 0 && (
+                          <span style={{ fontSize: '10.5px', fontWeight: '800', background: '#dcfce7', color: '#166534', padding: '1px 7px', borderRadius: '10px' }}>+{scoreDelta}%</span>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: '700', color: '#334155' }}>
+                      <CheckCircle2 size={14} style={{ color: '#059669' }} />
+                      {matchedCount}/{totalKeywords ?? '—'} job keywords covered
+                    </div>
+                    {reportMissing.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', fontSize: '11.5px', color: '#b45309', fontWeight: '600', lineHeight: 1.45 }}>
+                        <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <span>Still missing: {reportMissing.slice(0, 5).map(r => r.keyword).join(', ')}{reportMissing.length > 5 ? ` +${reportMissing.length - 5}` : ''}</span>
+                      </div>
                     )}
                   </div>
+
+                  <div style={{ padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginBottom: '6px' }}>Next steps</div>
+                    <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '11.5px', color: '#475569', lineHeight: 1.65 }}>
+                      <li>Send a referral email to an employee</li>
+                      <li>Connect on LinkedIn with a short note</li>
+                      <li>Direct apply with the attached resume</li>
+                    </ol>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('referral')}
+                    style={{ marginTop: 'auto', background: '#445cf5', color: '#fff', border: 'none', borderRadius: '10px', padding: '10px 14px', fontSize: '12.5px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', cursor: 'pointer' }}
+                  >
+                    Continue to Referral Email <ArrowRight size={15} />
+                  </button>
                 </div>
               </div>
             </>

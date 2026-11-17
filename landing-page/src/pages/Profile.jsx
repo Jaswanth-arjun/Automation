@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, Plus, X, Edit3, FileText, Upload, Trash2, Eye, Sparkles, PenLine, Loader2 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { profileStore, getUserName } from '../lib/api';
+import { profileStore, resumeStore, getUserName } from '../lib/api';
 import { DEFAULT_PROFILE } from '../lib/mockData';
 
 // Standalone ProfileField component declared outside of Profile to prevent unmounting & focus loss
@@ -112,12 +112,14 @@ export default function Profile() {
       .trim();
     const parseExperience = (section) => {
       const entries = [];
+      const months = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*';
       section.forEach(line => {
         const clean = cleanPdfText(line);
         if (!clean) return;
-        const dateMatch = clean.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*-\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?\d{4})\b/i);
+        // Resumes use ASCII hyphen, en dash (–) and em dash (—) interchangeably.
+        const dateMatch = clean.match(new RegExp(`\\b(${months}\\s+\\d{4}\\s*[-–—]\\s*(?:(?:${months})\\s+)?\\d{4}|\\d{4}\\s*[-–—]\\s*\\d{4})\\b`, 'i'));
         if (dateMatch) {
-          const title = clean.replace(dateMatch[0], '').replace(/\s*[-|]\s*$/, '').trim();
+          const title = clean.replace(dateMatch[0], '').replace(/\s*[-–—|]\s*$/, '').trim();
           entries.push({ title, company: '', duration: dateMatch[1], description: '' });
         } else if (entries.length) {
           entries[entries.length - 1].description = `${entries[entries.length - 1].description} ${clean}`.trim();
@@ -184,8 +186,12 @@ export default function Profile() {
         reader.readAsDataURL(file);
       });
       const extracted = parseResumeText(result.text, profile, result.links);
-      const updated = { ...extracted, resume: { fileName: file.name, fileSize: `${(file.size / 1024).toFixed(1)} KB`, uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), dataUrl, fileType: file.type, text: result.text, links: result.links || [] } };
+      const updated = { ...extracted, resume: { fileName: file.name, fileSize: `${(file.size / 1024).toFixed(1)} KB`, uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), dataUrl, fileType: file.type, text: result.text, links: result.links || [], linkItems: result.linkItems || [] } };
       profileStore.save(updated);
+      // Keep the Resume/Apply pages' active resume in sync with this upload so
+      // tailoring always uses the real PDF text (experience included) instead
+      // of the short profile-field fallback.
+      resumeStore.add({ name: file.name, size: `${(file.size / 1024).toFixed(1)} KB`, type: file.type, text: result.text, makeActive: true });
       setProfile(updated);
       setEditing(false);
       setShowEditChoice(false);

@@ -44,6 +44,9 @@ export const api = {
   generateMailReply: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/reply', { method: 'POST', body: JSON.stringify(mail) }),
   generateFollowUp: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/followup', { method: 'POST', body: JSON.stringify(mail) }),
   sendFollowUp: (payload) => apiFetch(MAILMIND_API, '/api/ai/mail/followup/send', { method: 'POST', body: JSON.stringify(payload) }),
+  generateConversationReply: (payload) => apiFetch(MAILMIND_API, '/api/ai/conversation/reply', { method: 'POST', body: JSON.stringify(payload) }),
+  getContactThread: (email) => apiFetch(MAILMIND_API, `/api/contact/thread?email=${encodeURIComponent(email)}`),
+  sendReply: (payload) => apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
   getEmails: (page = 0, size = 20, category = '', mailbox = '', label = '', q = '') => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (category) params.set('category', category);
@@ -68,8 +71,6 @@ export const api = {
     apiFetch(MAILMIND_API, '/api/drafts/send', { method: 'POST', body: JSON.stringify({ draftId, subject, bodyText, recipientEmails }) }),
   generateReply: (emailId, threadId, instruction) =>
     apiFetch(MAILMIND_API, '/api/reply/generate', { method: 'POST', body: JSON.stringify({ emailId, threadId, instruction }) }),
-  sendReply: (draftId, subject, bodyText, recipientEmails) =>
-    apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify({ draftId, subject, bodyText, recipientEmails }) }),
   replySend: (payload) => apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
   chatMail: (question, sessionId = '', threadId = '') =>
     apiFetch(MAILMIND_API, '/api/chat/query', { method: 'POST', body: JSON.stringify({ question, sessionId, threadId }) }),
@@ -97,6 +98,9 @@ export const api = {
   connectLinkedInCookie: (userId, liAt) => apiFetch(LINKEDIN_API, '/api/linkedin/connect-cookie', { method: 'POST', body: JSON.stringify({ userId, liAt }) }),
   disconnectLinkedIn: (userId) => apiFetch(LINKEDIN_API, '/api/linkedin/disconnect', { method: 'POST', body: JSON.stringify({ userId }) }),
   verifyLinkedIn: (userId) => apiFetch(LINKEDIN_API, '/api/linkedin/verify', { method: 'POST', body: JSON.stringify({ userId }) }),
+  // Live conversation with one contact, from the user's own LinkedIn account
+  getLinkedInThread: (payload) => apiFetch(LINKEDIN_API, '/api/linkedin/thread', { method: 'POST', body: JSON.stringify(payload) }),
+  sendLinkedInMessage: (payload) => apiFetch(LINKEDIN_API, '/api/linkedin/send-message', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Real Email Outreach API
   getGmailConfig: () => apiFetch('', '/api/config/gmail'),
@@ -231,7 +235,14 @@ export function getEmailUsername(user, profile) {
 export const resumeStore = {
   getAll() {
     const raw = localStorage.getItem('wayin_resumes');
-    return raw ? JSON.parse(raw) : [];
+    const all = raw ? JSON.parse(raw) : [];
+    // An uploaded resume stays the active one until the user picks another,
+    // so never leave the list without an active entry.
+    if (all.length && !all.some((r) => r.isActive)) {
+      all[0] = { ...all[0], isActive: true };
+      localStorage.setItem('wayin_resumes', JSON.stringify(all));
+    }
+    return all;
   },
   add(resume) {
     const all = this.getAll();
@@ -249,7 +260,8 @@ export const resumeStore = {
     return all;
   },
   remove(id) {
-    const all = this.getAll().filter(r => r.id !== id);
+    let all = this.getAll().filter(r => r.id !== id);
+    if (all.length && !all.some(r => r.isActive)) all = all.map((r, i) => ({ ...r, isActive: i === 0 }));
     localStorage.setItem('wayin_resumes', JSON.stringify(all));
     window.dispatchEvent(new Event('resumes_updated'));
     return all;
@@ -335,6 +347,64 @@ export const applyProgressStore = {
     delete all[String(jobId)];
     localStorage.setItem(APPLY_PROGRESS_KEY, JSON.stringify(all));
     window.dispatchEvent(new Event('apply_progress_updated'));
+  },
+};
+
+// Tailoring report per job (ATS scores, keyword audit, tailored sections). Saved
+// so the report and the tailored resume survive a refresh, a stage change or
+// reopening the application from Job Tracker. The PDF itself is not copied
+// here — the resume store already keeps it for the job.
+const TAILOR_REPORT_KEY = 'wayin_tailor_reports';
+
+function readTailorReports() {
+  try {
+    const raw = localStorage.getItem(TAILOR_REPORT_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export const tailorReportStore = {
+  getAll() {
+    const value = readTailorReports();
+    return value && typeof value === 'object' ? value : {};
+  },
+  get(jobId) {
+    if (!jobId) return null;
+    return this.getAll()[String(jobId)] || null;
+  },
+  save(jobId, report, meta = {}) {
+    if (!jobId || !report) return null;
+    const all = this.getAll();
+    const entry = {
+      savedAt: new Date().toISOString(),
+      ...meta,
+      report: {
+        ...report,
+        formats: (report.formats || []).map(({ pdfBase64, ...rest }) => rest),
+      },
+    };
+    all[String(jobId)] = entry;
+    try {
+      localStorage.setItem(TAILOR_REPORT_KEY, JSON.stringify(all));
+    } catch {
+      // Storage full: keep the newest report by dropping the oldest entries.
+      const keys = Object.keys(all);
+      if (keys.length > 1) {
+        delete all[keys.find((key) => key !== String(jobId))];
+        try { localStorage.setItem(TAILOR_REPORT_KEY, JSON.stringify(all)); } catch { /* give up quietly */ }
+      }
+    }
+    window.dispatchEvent(new Event('tailor_report_updated'));
+    return entry;
+  },
+  clear(jobId) {
+    if (!jobId) return;
+    const all = this.getAll();
+    delete all[String(jobId)];
+    localStorage.setItem(TAILOR_REPORT_KEY, JSON.stringify(all));
+    window.dispatchEvent(new Event('tailor_report_updated'));
   },
 };
 

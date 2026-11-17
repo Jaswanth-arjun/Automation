@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy,
-  Loader2, Mail, Send, Sparkles, X,
+  AlertCircle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Loader2,
+  Mail, RefreshCw, Send, Sparkles, X,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { activityStore, APPLICATION_STATUS_OPTIONS } from '../lib/activityStore';
@@ -39,10 +39,6 @@ function fallbackSummary(text) {
   return sentences.slice(0, 2).join(' ').slice(0, 260);
 }
 
-function fallbackReply(contact, row) {
-  return `Hi ${firstName(contact?.name)},\n\nThank you for getting back to me about the ${row.role} role at ${row.company}. I really appreciate your time and the update.\n\nIf there is anything else you need from me — my resume, portfolio, or availability — I am happy to share it right away.\n\nThanks again,\n`;
-}
-
 function aiPayload(contact, row, reply) {
   return {
     subject: reply?.subject || contact?.emails?.[0]?.subject || `Application for ${row.role}`,
@@ -58,7 +54,6 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   const [activeId, setActiveId] = useState('');
   const [summary, setSummary] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState('');
   const [summaryNonce, setSummaryNonce] = useState(0);
   const [replyText, setReplyText] = useState('');
   const [replySubject, setReplySubject] = useState('');
@@ -67,7 +62,17 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   const [statusBusy, setStatusBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [emailThread, setEmailThread] = useState([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadNonce, setThreadNonce] = useState(0);
+  const [liMessages, setLiMessages] = useState([]);
+  const [liLoading, setLiLoading] = useState(false);
+  const [liSending, setLiSending] = useState(false);
+  const [liReplyText, setLiReplyText] = useState('');
+  const [liAiLoading, setLiAiLoading] = useState(false);
+  const [liNonce, setLiNonce] = useState(0);
   const noticeTimer = useRef(null);
+  const threadEndRef = useRef(null);
 
   const emailContacts = useMemo(
     () => (row?.contacts || []).filter((contact) => contact.emails?.length),
@@ -84,18 +89,9 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     [activeId, contacts, row],
   );
 
+  const isLinkedIn = tab === 'linkedin';
   const reply = selectedContact?.reply || null;
-  const linkedinReply = selectedContact?.linkedinReply
-    ? {
-        subject: `LinkedIn reply — ${row.company}`,
-        from: selectedContact.name,
-        fromEmail: '',
-        body: selectedContact.linkedinReply.body,
-        receivedAt: selectedContact.linkedinReply.receivedAt,
-      }
-    : null;
-  const activeReply = reply || linkedinReply;
-  const isLinkedIn = Boolean(selectedContact?.linkedin && !selectedContact?.emails?.length);
+  const activeReply = reply;
 
   /* Escape closes the drawer; lock page scroll while it is open. */
   useEffect(() => {
@@ -124,9 +120,11 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     setReplyText('');
     setReplySubject('');
     setSummary('');
-    setSummaryError('');
     setNotice('');
     setError('');
+    setEmailThread([]);
+    setLiMessages([]);
+    setLiReplyText('');
   }, [row?.id]);
 
   /* When the tab changes, make sure a contact from that tab is selected. */
@@ -157,41 +155,78 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     setError('');
   }, [selectedContact?.id, row?.role]);
 
-  /* Only summarize if the reply has substantial content (at least 120 chars and 20 words) */
+  /* Load the whole Gmail thread for the selected email contact. */
+  useEffect(() => {
+    if (isLinkedIn || !selectedContact?.email) {
+      setEmailThread([]);
+      return undefined;
+    }
+    let alive = true;
+    setThreadLoading(true);
+    api.getContactThread(selectedContact.email)
+      .then((result) => {
+        if (alive) setEmailThread(Array.isArray(result?.messages) ? result.messages : []);
+      })
+      .catch(() => {
+        if (alive) setEmailThread([]);
+      })
+      .finally(() => {
+        if (alive) setThreadLoading(false);
+      });
+    return () => { alive = false; };
+  }, [isLinkedIn, selectedContact?.email, threadNonce]);
+
+  /* Load the live LinkedIn conversation from the user's own account. */
+  useEffect(() => {
+    if (!isLinkedIn || !selectedContact?.linkedin) {
+      setLiMessages([]);
+      return undefined;
+    }
+    let alive = true;
+    setLiLoading(true);
+    api.getLinkedInThread({
+      personName: selectedContact.name,
+      profileUrl: selectedContact.linkedin.profileUrl,
+    })
+      .then((result) => {
+        if (alive) setLiMessages(Array.isArray(result?.messages) ? result.messages : []);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setLiMessages([]);
+        setError(err?.message || 'Could not read the LinkedIn conversation.');
+      })
+      .finally(() => {
+        if (alive) setLiLoading(false);
+      });
+    return () => { alive = false; };
+  }, [isLinkedIn, selectedContact?.id, selectedContact?.linkedin?.profileUrl, liNonce]);
+
   const shouldShowSummary = Boolean(
     activeReply?.body &&
     activeReply.body.trim().length >= 120 &&
     activeReply.body.trim().split(/\s+/).filter(Boolean).length >= 20
   );
 
-  /* AI summary for whichever reply is open (only when substantial). */
+  /* AI summary for the email reply (only when substantial). */
   useEffect(() => {
-    if (!shouldShowSummary || !activeReply?.body) {
+    if (isLinkedIn || !shouldShowSummary || !activeReply?.body) {
       setSummary('');
-      setSummaryError('');
-      setSummaryLoading(false);
       return undefined;
     }
     let alive = true;
     setSummaryLoading(true);
-    setSummaryError('');
     api
       .summarizeMail(aiPayload(selectedContact, row, activeReply))
-      .then((result) => {
-        if (!alive) return;
-        setSummary(result?.text || fallbackSummary(activeReply.body));
-      })
-      .catch(() => {
-        if (!alive) return;
-        setSummary(fallbackSummary(activeReply.body));
-      })
-      .finally(() => {
-        if (alive) setSummaryLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [shouldShowSummary, activeReply?.body, selectedContact?.id, row?.id, summaryNonce]);
+      .then((result) => { if (alive) setSummary(result?.text || fallbackSummary(activeReply.body)); })
+      .catch(() => { if (alive) setSummary(fallbackSummary(activeReply.body)); })
+      .finally(() => { if (alive) setSummaryLoading(false); });
+    return () => { alive = false; };
+  }, [isLinkedIn, shouldShowSummary, activeReply?.body, selectedContact?.id, row?.id, summaryNonce]);
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [emailThread.length, liMessages.length, tab]);
 
   if (!row) return null;
 
@@ -199,6 +234,41 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   const statusOptions = APPLICATION_STATUS_OPTIONS.includes(row.applicationStatus)
     ? APPLICATION_STATUS_OPTIONS
     : [row.applicationStatus, ...APPLICATION_STATUS_OPTIONS];
+
+  const emailHistory = emailThread.length
+    ? emailThread.map((mail) => ({
+        key: mail.id,
+        direction: mail.direction,
+        author: mail.direction === 'out' ? 'You' : (mail.fromName || mail.fromEmail || selectedContact?.name),
+        text: mail.body,
+        at: mail.at,
+        subject: mail.subject,
+      }))
+    : ([
+        ...(selectedContact?.emails || []).map((mail) => ({
+          key: mail.id,
+          direction: 'out',
+          author: 'You',
+          text: mail.body,
+          at: mail.sentAt,
+          subject: mail.subject,
+        })),
+        ...(reply ? [{ key: reply.id, direction: 'in', author: reply.from, text: reply.body, at: reply.receivedAt, subject: reply.subject }] : []),
+        ...(selectedContact?.sentReply ? [{ key: 'sent-reply', direction: 'out', author: 'You', text: selectedContact.sentReply.body, at: selectedContact.sentReply.at, subject: '' }] : []),
+      ]);
+
+  const liHistory = liMessages.length
+    ? liMessages
+    : [
+        ...(selectedContact?.linkedin?.note ? [{ direction: 'out', author: 'You', text: selectedContact.linkedin.note, at: selectedContact.linkedin.sentAt }] : []),
+        ...(selectedContact?.linkedinReply ? [{ direction: 'in', author: selectedContact.name, text: selectedContact.linkedinReply.body, at: selectedContact.linkedinReply.receivedAt }] : []),
+      ];
+
+  const conversationForAi = (isLinkedIn ? liHistory : emailHistory).map((item) => ({
+    direction: item.direction,
+    author: item.author,
+    text: item.text,
+  }));
 
   const handleStatusChange = (event) => {
     const status = event.target.value;
@@ -209,18 +279,43 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     showNotice(status === 'Not applied' ? 'Application removed from tracker.' : `Application marked ${status}.`);
   };
 
+  const generateDraft = async (channel) => {
+    if (!selectedContact) return '';
+    const result = await api.generateConversationReply({
+      channel,
+      contactName: selectedContact.name,
+      role: row.role,
+      company: row.company,
+      messages: conversationForAi,
+    });
+    return String(result?.text || '').trim();
+  };
+
   const handleGenerate = async () => {
     if (!selectedContact) return;
     setAiLoading(true);
     setError('');
     try {
-      const result = await api.generateMailReply(aiPayload(selectedContact, row, activeReply));
-      setReplyText(result?.text || fallbackReply(selectedContact, row));
-    } catch {
-      setReplyText(fallbackReply(selectedContact, row));
-      showNotice('AI service unavailable — added a draft you can edit.');
+      const text = await generateDraft('email');
+      setReplyText(text || `Hi ${firstName(selectedContact.name)},\n\n`);
+    } catch (err) {
+      setError(err?.message || 'Could not generate a reply right now.');
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  const handleGenerateLinkedIn = async () => {
+    if (!selectedContact) return;
+    setLiAiLoading(true);
+    setError('');
+    try {
+      const text = await generateDraft('linkedin');
+      setLiReplyText(text || `Hi ${firstName(selectedContact.name)}, `);
+    } catch (err) {
+      setError(err?.message || 'Could not generate a reply right now.');
+    } finally {
+      setLiAiLoading(false);
     }
   };
 
@@ -229,10 +324,14 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     setSending(true);
     setError('');
     try {
-      await api.sendFollowUp({
+      const latestInbound = [...emailThread].reverse().find((mail) => mail.direction === 'in');
+      await api.sendReply({
         to: selectedContact.email,
         subject: replySubject,
         body: replyText,
+        threadId: latestInbound?.threadId || reply?.threadId || '',
+        inReplyTo: latestInbound?.messageIdHeader || '',
+        references: latestInbound?.referencesHeader || '',
       });
       activityStore.saveSentReply(row.id, selectedContact.id, {
         subject: replySubject,
@@ -240,8 +339,9 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
         at: new Date().toISOString(),
       });
       setReplyText('');
+      setThreadNonce((value) => value + 1);
       onChanged?.();
-      showNotice('Reply sent. This opportunity is marked as handled.');
+      showNotice('Reply sent from your Gmail account.');
     } catch (err) {
       setError(err?.message || 'Could not send the reply. Check the Gmail connection and try again.');
     } finally {
@@ -249,13 +349,27 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     }
   };
 
-  const handleCopy = async () => {
-    if (!replyText.trim()) return;
+  const handleLinkedInSend = async () => {
+    if (!selectedContact || !liReplyText.trim()) return;
+    const text = liReplyText.trim();
+    setLiSending(true);
+    setError('');
     try {
-      await navigator.clipboard.writeText(replyText);
-      showNotice('Reply copied — paste it in LinkedIn.');
-    } catch {
-      setError('Clipboard access was blocked. Select the text and copy it manually.');
+      const result = await api.sendLinkedInMessage({
+        personName: selectedContact.name,
+        message: text,
+      });
+      setLiMessages((current) => [
+        ...current,
+        { direction: 'out', author: 'You', text, at: new Date().toISOString() },
+      ]);
+      setLiReplyText('');
+      onChanged?.();
+      showNotice(result?.warning || 'Message sent from your LinkedIn account.');
+    } catch (err) {
+      setError(err?.message || 'Could not send the LinkedIn message.');
+    } finally {
+      setLiSending(false);
     }
   };
 
@@ -266,8 +380,9 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     showNotice('Marked as handled.');
   };
 
-  const canReplyByEmail = Boolean(selectedContact?.email);
   const linkedinProfile = selectedContact?.linkedin?.profileUrl;
+  const canSendEmail = Boolean(selectedContact?.email);
+  const canSendLinkedIn = Boolean(selectedContact?.linkedin);
 
   return (
     <div className="atd-overlay" onMouseDown={onClose} role="presentation">
@@ -339,7 +454,6 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
         </div>
 
         <div className="atd-body atd-body-free">
-          {/* Spacious Horizontal Contact Switcher (Replaces cramped vertical sidebar) */}
           {contacts.length > 1 && (
             <div className="atd-contact-bar">
               <span className="atd-contact-bar-label">Contact:</span>
@@ -374,7 +488,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
 
             {contacts.length === 0 ? (
               <div className="atd-empty-detail">
-                <Mail size={26} />
+                {tab === 'email' ? <Mail size={26} /> : <LinkedInIcon size={26} />}
                 <p>
                   {tab === 'email'
                     ? 'No email outreach yet for this role.'
@@ -395,114 +509,80 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                       {selectedContact.email || selectedContact.linkedin?.headline || selectedContact.title || 'LinkedIn member'}
                     </p>
                   </div>
-                  {linkedinProfile && (
-                    <a href={linkedinProfile} target="_blank" rel="noreferrer" className="atd-open-li">
-                      Open <ArrowUpRight size={12} />
-                    </a>
-                  )}
+                  <div className="atd-head-actions">
+                    <button
+                      className="atd-refresh"
+                      onClick={() => (isLinkedIn ? setLiNonce((value) => value + 1) : setThreadNonce((value) => value + 1))}
+                      title="Refresh the conversation"
+                    >
+                      <RefreshCw size={12} className={isLinkedIn ? (liLoading ? 'spin' : '') : (threadLoading ? 'spin' : '')} /> Refresh
+                    </button>
+                    {linkedinProfile && (
+                      <a href={linkedinProfile} target="_blank" rel="noreferrer" className="atd-open-li">
+                        Open <ArrowUpRight size={12} />
+                      </a>
+                    )}
+                  </div>
                 </div>
 
-                {isLinkedIn ? (
-                  <>
-                    <div className="atd-li-steps">
-                      {['sent', 'seen', 'accepted', 'replied'].map((step) => {
-                        const current = String(selectedContact.linkedin?.status || 'pending').toLowerCase();
-                        const done =
-                          step === 'sent' ||
-                          (step === 'seen' && current === 'seen') ||
-                          (step === 'accepted' && (current === 'accepted' || current === 'replied')) ||
-                          (step === 'replied' && current === 'replied');
-                        return (
-                          <span key={step} className={`atd-li-step ${done ? 'done' : ''}`}>
-                            {done ? <Check size={11} /> : <span className="atd-dot" />} {step}
-                          </span>
-                        );
-                      })}
-                    </div>
-
-                    {selectedContact.linkedin?.note && (
-                      <div className="atd-thread">
-                        <div className="atd-bubble out">
-                          <header>
-                            <span>You</span>
-                            <time>{formatDateTime(selectedContact.linkedin.sentAt) || 'Request sent'}</time>
-                          </header>
-                          <p>{selectedContact.linkedin.note}</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {linkedinReply && (
-                      <>
-                        <div className="atd-thread">
-                          <div className="atd-bubble in">
-                            <header>
-                              <span>{selectedContact.name}</span>
-                              <time>{formatDateTime(linkedinReply.receivedAt)}</time>
-                            </header>
-                            <p>{linkedinReply.body}</p>
-                          </div>
-                        </div>
-                        {shouldShowSummary && (
-                          <SummaryBox
-                            loading={summaryLoading}
-                            text={summary}
-                            error={summaryError}
-                            onRetry={() => setSummaryNonce((value) => value + 1)}
-                          />
-                        )}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="atd-thread">
-                      {(selectedContact.emails || []).slice(0, 1).map((email) => (
-                        <div key={email.id} className="atd-bubble out">
-                          <header>
-                            <span>You · {email.subject || 'Referral request'}</span>
-                            <time>{formatDateTime(email.sentAt)}</time>
-                          </header>
-                          <p>{email.body}</p>
-                          {email.bounced && (
-                            <span className="atd-bounced"><AlertCircle size={11} /> Delivery failed — address not found</span>
-                          )}
-                        </div>
-                      ))}
-
-                      {reply && (
-                        <div className="atd-bubble in">
-                          <header>
-                            <span>{reply.from}</span>
-                            <time>{formatDateTime(reply.receivedAt)}</time>
-                          </header>
-                          <p>{reply.body}</p>
-                        </div>
-                      )}
-
-                      {selectedContact.sentReply && (
-                        <div className="atd-bubble out">
-                          <header>
-                            <span>You · reply sent</span>
-                            <time>{formatDateTime(selectedContact.sentReply.at)}</time>
-                          </header>
-                          <p>{selectedContact.sentReply.body}</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {reply && shouldShowSummary && (
-                      <SummaryBox
-                        loading={summaryLoading}
-                        text={summary}
-                        error={summaryError}
-                        onRetry={() => setSummaryNonce((value) => value + 1)}
-                      />
-                    )}
-                  </>
+                {isLinkedIn && (
+                  <div className="atd-li-steps">
+                    {['sent', 'seen', 'accepted', 'replied'].map((step) => {
+                      const current = String(selectedContact.linkedin?.status || 'pending').toLowerCase();
+                      const done =
+                        step === 'sent' ||
+                        (step === 'seen' && current === 'seen') ||
+                        (step === 'accepted' && (current === 'accepted' || current === 'replied')) ||
+                        (step === 'replied' && current === 'replied');
+                      return (
+                        <span key={step} className={`atd-li-step ${done ? 'done' : ''}`}>
+                          {done ? <Check size={11} /> : <span className="atd-dot" />} {step}
+                        </span>
+                      );
+                    })}
+                  </div>
                 )}
 
-                {(reply || linkedinReply) && !selectedContact.replyHandled && (
+                <div className="atd-thread atd-thread-full">
+                  {isLinkedIn ? (
+                    liLoading ? (
+                      <div className="atd-thread-loading"><Loader2 size={16} className="spin" /> Loading your LinkedIn conversation…</div>
+                    ) : liHistory.length === 0 ? (
+                      <p className="atd-thread-empty">No messages in this LinkedIn conversation yet.</p>
+                    ) : (
+                      liHistory.map((message, index) => (
+                        <div key={`${message.at}-${index}`} className={`atd-bubble ${message.direction === 'out' ? 'out' : 'in'}`}>
+                          <header>
+                            <span>{message.author}</span>
+                            <time>{formatDateTime(message.at) || ''}</time>
+                          </header>
+                          <p>{message.text}</p>
+                        </div>
+                      ))
+                    )
+                  ) : threadLoading && emailHistory.length === 0 ? (
+                    <div className="atd-thread-loading"><Loader2 size={16} className="spin" /> Loading the email thread…</div>
+                  ) : emailHistory.length === 0 ? (
+                    <p className="atd-thread-empty">No emails in this conversation yet.</p>
+                  ) : (
+                    emailHistory.map((message, index) => (
+                      <div key={`${message.key}-${index}`} className={`atd-bubble ${message.direction === 'out' ? 'out' : 'in'}`}>
+                        <header>
+                          <span>{message.direction === 'out' ? 'You' : message.author}{message.subject ? ` · ${message.subject}` : ''}</span>
+                          <time>{formatDateTime(message.at) || ''}</time>
+                        </header>
+                        <p>{message.text}</p>
+                      </div>
+                    ))
+                  )}
+                  <div ref={threadEndRef} />
+                </div>
+
+                {!isLinkedIn && reply && shouldShowSummary && (
+                  <SummaryBox loading={summaryLoading} text={summary} onRetry={() => setSummaryNonce((value) => value + 1)} />
+                )}
+
+                {(reply || selectedContact.linkedinReply) && !selectedContact.replyHandled && (
                   <button className="atd-handled" onClick={handleHandled}>
                     <CheckCircle2 size={14} /> Mark as handled
                   </button>
@@ -511,50 +591,71 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                 <div className="atd-composer">
                   <div className="atd-composer-head">
                     <div>
-                      <h5>{reply || linkedinReply ? 'Reply' : 'Follow up'}</h5>
+                      <h5>{isLinkedIn ? 'Reply on LinkedIn' : 'Reply by email'}</h5>
                       <p>
-                        {canReplyByEmail
-                          ? `Send directly to ${selectedContact.email}`
-                          : 'Generate a reply, copy it, then paste it in LinkedIn.'}
+                        {isLinkedIn
+                          ? `Sends from your own LinkedIn account to ${selectedContact.name}.`
+                          : `Sends from your Gmail account to ${selectedContact.email}.`}
                       </p>
                     </div>
-                    <button className="atd-ai-btn" onClick={handleGenerate} disabled={aiLoading}>
-                      {aiLoading ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
-                      {aiLoading ? 'Generating…' : 'Generate with AI'}
+                    <button
+                      className="atd-ai-btn"
+                      onClick={isLinkedIn ? handleGenerateLinkedIn : handleGenerate}
+                      disabled={isLinkedIn ? liAiLoading : aiLoading}
+                    >
+                      {(isLinkedIn ? liAiLoading : aiLoading) ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+                      {(isLinkedIn ? liAiLoading : aiLoading) ? 'Generating…' : 'Generate with AI'}
                     </button>
                   </div>
 
-                  {canReplyByEmail && (
+                  {!isLinkedIn && (
                     <label className="atd-subject">
                       <span>Subject</span>
                       <input value={replySubject} onChange={(event) => setReplySubject(event.target.value)} />
                     </label>
                   )}
 
-                  <textarea
-                    className="atd-textarea"
-                    rows={6}
-                    value={replyText}
-                    onChange={(event) => setReplyText(event.target.value)}
-                    placeholder={canReplyByEmail ? 'Write your reply…' : 'Generate a reply to copy into LinkedIn…'}
-                  />
+                  {isLinkedIn ? (
+                    <textarea
+                      className="atd-textarea"
+                      rows={5}
+                      value={liReplyText}
+                      onChange={(event) => setLiReplyText(event.target.value)}
+                      placeholder="Write a LinkedIn reply…"
+                    />
+                  ) : (
+                    <textarea
+                      className="atd-textarea"
+                      rows={6}
+                      value={replyText}
+                      onChange={(event) => setReplyText(event.target.value)}
+                      placeholder="Write your reply…"
+                    />
+                  )}
 
                   <div className="atd-composer-actions">
                     <span className="atd-hint">
-                      {reply?.fromEmail ? `Replying to ${reply.fromEmail}` : 'Edit anything before sending.'}
+                      {isLinkedIn
+                        ? (liHistory.length ? 'AI reads the whole thread before writing.' : 'Reply in the context of this conversation.')
+                        : 'AI reads the whole thread before writing. Edit anything before sending.'}
                     </span>
-                    {canReplyByEmail ? (
+                    {isLinkedIn ? (
+                      <button
+                        className="atd-send"
+                        onClick={handleLinkedInSend}
+                        disabled={liSending || !liReplyText.trim() || !canSendLinkedIn}
+                      >
+                        {liSending ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
+                        {liSending ? 'Sending…' : 'Send on LinkedIn'}
+                      </button>
+                    ) : (
                       <button
                         className="atd-send"
                         onClick={handleSend}
-                        disabled={sending || !replyText.trim()}
+                        disabled={sending || !replyText.trim() || !canSendEmail}
                       >
                         {sending ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
                         {sending ? 'Sending…' : 'Send reply'}
-                      </button>
-                    ) : (
-                      <button className="atd-send" onClick={handleCopy} disabled={!replyText.trim()}>
-                        <Copy size={14} /> Copy reply
                       </button>
                     )}
                   </div>
@@ -568,7 +669,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   );
 }
 
-function SummaryBox({ loading, text, error, onRetry }) {
+function SummaryBox({ loading, text, onRetry }) {
   if (!loading && !text) return null;
   return (
     <div className="atd-summary">
@@ -583,7 +684,6 @@ function SummaryBox({ loading, text, error, onRetry }) {
       ) : (
         <p>{text}</p>
       )}
-      {!text && error && <small>{error}</small>}
     </div>
   );
 }

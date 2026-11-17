@@ -3,6 +3,9 @@ export function mapProfileForBackend(profile = {}) {
   if (profile.resume?.links?.length) {
     mapped.resume = { ...(mapped.resume || {}), links: [...new Set(profile.resume.links.filter(Boolean))] };
   }
+  if (profile.resume?.linkItems?.length) {
+    mapped.resume = { ...(mapped.resume || {}), linkItems: profile.resume.linkItems.filter((item) => item?.url) };
+  }
   if (profile.education?.length) mapped.education = profile.education.map((e) => ({ degree: [e.degree, e.branch].filter(Boolean).join(' in '), school: e.institution || e.school || '', dates: e.graduationYear || e.dates || '', detail: e.cgpa ? `CGPA: ${e.cgpa}` : (e.detail || '') }));
   if (profile.experience?.length) mapped.experience = profile.experience.map((e) => ({ title: e.title || '', company: e.company || '', dates: e.duration || e.dates || '', description: e.description || '', detail: e.description || e.detail || '' }));
   if (profile.projects?.length) mapped.projects = profile.projects.map((p) => ({ name: p.title || p.name || '', stack: p.technologies || p.stack || '', url: p.link || p.url || '', detail: p.description || p.detail || '', linkLabel: (p.link || p.url) ? 'GitHub' : '' }));
@@ -11,6 +14,37 @@ export function mapProfileForBackend(profile = {}) {
     if (!mapped.github && profile.links.github) mapped.github = profile.links.github;
   }
   return mapped;
+}
+
+/**
+ * Read the resume PDF saved in the profile: its text and every link the PDF
+ * carries (certificate and GitHub URLs live in the annotations, not the text).
+ */
+export async function extractProfilePdf(profile = {}) {
+  const dataUrl = profile?.resume?.dataUrl;
+  if (!dataUrl || !/^data:[^;]+;base64,/i.test(dataUrl)) return { text: '', links: [], linkItems: [] };
+  const base64 = dataUrl.split(',')[1] || '';
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const body = new FormData();
+  body.append('file', new Blob([bytes], { type: 'application/pdf' }), profile.resume.fileName || 'profile-resume.pdf');
+  const response = await fetch('/api/resume/extract-text', { method: 'POST', body });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || 'Could not read the resume saved in your profile.');
+  return {
+    text: String(result.text || '').trim(),
+    links: Array.isArray(result.links) ? result.links : [],
+    linkItems: Array.isArray(result.linkItems) ? result.linkItems : [],
+  };
+}
+
+/** Pull URLs straight out of resume text when the PDF has no link annotations. */
+export function resumeUrlsFromText(text) {
+  const found = String(text || '').match(/https?:\/\/[^\s|,;)\]}]+|(?:www\.)?(?:github|linkedin|gitlab)\.com\/[^\s|,;)\]}]+/gi) || [];
+  return [...new Set(found.map((url) => {
+    const clean = url.replace(/[.,;:)\]}]+$/, '');
+    return /^https?:/i.test(clean) ? clean : `https://${clean}`;
+  }))];
 }
 
 export function extractResumeLocation(resumeText, fallback = '') {
@@ -30,6 +64,7 @@ export function profileResumeText(profile = {}) {
     // structured fields so tailoring uses the user's actual resume, not only
     // the short profile form values.
     profile.resume?.text || '',
+    ...(profile.resume?.links || []),
     profile.skills?.length ? `Skills: ${profile.skills.join(', ')}` : '',
     ...(mapped.experience || []).map(i => [i.title, i.company, i.dates, i.description || i.detail].filter(Boolean).join(' ')),
     ...(mapped.education || []).map(i => [i.degree, i.school, i.dates, i.detail].filter(Boolean).join(' ')),
