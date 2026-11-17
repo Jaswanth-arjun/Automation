@@ -8,9 +8,10 @@ import { DEMO_JOBS } from '../lib/mockData';
 import { computeJobScores } from '../lib/matchScore';
 import { savedJobsStore } from '../lib/savedJobsStore';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
-import ApplyOptionsModal from '../components/ApplyOptionsModal';
 import CompleteProfileModal from '../components/CompleteProfileModal';
 import ActivityTable from '../components/ActivityTable';
+import ConnectAccounts from '../components/ConnectAccounts';
+import CompanyLogo from '../components/CompanyLogo';
 
 function isProfileIncomplete(p) {
   if (!p) return true;
@@ -130,7 +131,6 @@ export default function Dashboard() {
   // Modal states
   const [showJobUrlModal, setShowJobUrlModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [applyingJob, setApplyingJob] = useState(null);
   const [showProfilePromptModal, setShowProfilePromptModal] = useState(() => {
     return isProfileIncomplete(profileStore.get());
   });
@@ -233,6 +233,8 @@ export default function Dashboard() {
         </button>
       </section>
 
+      <ConnectAccounts />
+
       <section className="dash-section">
         <div className="section-header">
           <h2>Top Matches</h2>
@@ -256,7 +258,7 @@ export default function Dashboard() {
           {topMatches.map(job => (
             <article key={job.id} className="match-card" onClick={() => navigate(`/dashboard/jobs/${job.id}`)}>
               <div className="match-card-header-row">
-                <div className="job-card-company-mark">{job.companyMark || job.company?.[0]?.toUpperCase() || 'J'}</div>
+                <CompanyLogo job={job} />
                 <ScoreCircle
                   score={
                     job.matchResult?.status === 'scored' || job.matchResult?.status === 'ineligible'
@@ -274,7 +276,7 @@ export default function Dashboard() {
                   className="match-card-apply-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setApplyingJob(job);
+                    navigate(`/dashboard/jobs/${job.id}`);
                   }}
                 >
                   Apply <ArrowRight size={13} />
@@ -303,10 +305,11 @@ export default function Dashboard() {
         onStartOutreach={() => navigate('/dashboard/jobs')}
       />
 
-      {/* Add Job Link Interactive Modal (Analyzing -> Results Flow) */}
-      <JobAnalyzerModal 
-        isOpen={showJobUrlModal} 
-        onClose={() => setShowJobUrlModal(false)} 
+      {/* Add Job Link — finds-or-creates the job, then jumps into the apply flow */}
+      <JobAnalyzerModal
+        isOpen={showJobUrlModal}
+        onClose={() => setShowJobUrlModal(false)}
+        applyMode
         onAccepted={() => setProfile(profileStore.get())}
       />
 
@@ -359,13 +362,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-      {/* Apply Options Modal */}
-      <ApplyOptionsModal
-        job={applyingJob}
-        isOpen={Boolean(applyingJob)}
-        onClose={() => setApplyingJob(null)}
-      />
-
       {/* Complete Profile First-Time Modal */}
       <CompleteProfileModal
         isOpen={showProfilePromptModal}

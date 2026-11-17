@@ -5,8 +5,11 @@ import {
   Check, AlertTriangle, FileText, Calendar, Users, Key, Download
 } from 'lucide-react';
 import { api, profileStore, resumeStore } from '../lib/api';
+import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { adminJobStore } from '../lib/adminJobStore';
 import { DEMO_JOBS } from '../lib/mockData';
+import { useAuth } from '../lib/auth';
+import { jobOwner } from '../lib/jobOwnership';
 import { shortenJobTitle } from './jobTitle';
 import { mapProfileForBackend, extractResumeLocation, profileResumeText, keywordAudit, scoreValue, scoreLabel } from './JobAnalyzerModal.helpers';
 import './JobAnalyzerModal.css';
@@ -34,14 +37,40 @@ function downloadPdf(base64, filename) {
   link.click();
 }
 
+// Canonical form of a job link so protocol/case/tracking params do not hide duplicates.
+function normalizeJobLinkKey(value) {
+  try {
+    const url = new URL(String(value));
+    url.hash = '';
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id', 'gclid', 'fbclid', 'ref', 'source']
+      .forEach((p) => url.searchParams.delete(p));
+    let s = url.toString();
+    while (s.endsWith('/')) s = s.slice(0, -1);
+    return s.toLowerCase();
+  } catch {
+    return String(value || '').trim().toLowerCase();
+  }
+}
+
+// A job already posted in the portal (by admin/recruiter or earlier import)?
+// Match on the saved links first — the role+company pair is re-checked by the
+// server when the job is actually added.
+function findExistingJob(link) {
+  const key = normalizeJobLinkKey(link);
+  const all = [...adminJobStore.getWithFreshDates(), ...DEMO_JOBS];
+  return all.find((job) => [job.applyLink, job.sourceUrl, job.url]
+    .filter(Boolean)
+    .map(normalizeJobLinkKey)
+    .includes(key));
+}
+
 function printResumeHtml(html) {
   const win = window.open('', '_blank');
-  if (!win) return;
-  win.document.write(`<html><head><title>Tailored Resume</title><style>@page{size:A4;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#111}body{font-family:"Times New Roman",Times,serif;font-size:10px;line-height:1.18}.resume-page{width:595.28px;min-height:841.89px;padding:8.6px 28.8px 8px;margin:0 auto}.resume-page header{text-align:center;border:0;padding:0;margin:0}.resume-page h1{font-family:"Times New Roman",Times,serif;font-size:16.5px;line-height:1;margin:0 0 3px;text-transform:uppercase}.resume-page h2{font-size:10.5px;line-height:1;border-bottom:1px solid #222;padding:0 0 2px;margin:3.2px 0 2px}.resume-page p{font-size:10px;line-height:1.18;margin:0 0 1px}.resume-page article{margin:0 0 2px}.resume-page .entry-title{display:flex;justify-content:space-between;gap:10px;line-height:1.1}.resume-page .entry-link{margin:0}.resume-page a{color:#1649d8;text-decoration:none}.resume-page .skill-row{display:grid;grid-template-columns:140px 1fr;gap:0;margin:0;line-height:1.12}.resume-page .skill-row b{font-weight:bold}.resume-page i{font-weight:normal} @media print{body{width:595.28px}.resume-page{margin:0}}</style></head><body>${html}</body></html>`);
+  if (!win) return;  win.document.write(`<html><head><title>Tailored Resume</title><style>@page{size:A4;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#111}body{font-family:"Times New Roman",Times,serif;font-size:10px;line-height:1.18}.resume-page{width:595.28px;min-height:841.89px;padding:8.6px 28.8px 8px;margin:0 auto}.resume-page header{text-align:center;border:0;padding:0;margin:0}.resume-page h1{font-family:"Times New Roman",Times,serif;font-size:16.5px;line-height:1;margin:0 0 3px;text-transform:uppercase}.resume-page h2{font-size:10.5px;line-height:1;border-bottom:1px solid #222;padding:0 0 2px;margin:3.2px 0 2px}.resume-page p{font-size:10px;line-height:1.18;margin:0 0 1px}.resume-page article{margin:0 0 2px}.resume-page .entry-title{display:flex;justify-content:space-between;gap:10px;line-height:1.1}.resume-page .entry-link{margin:0}.resume-page a{color:#1649d8;text-decoration:none}.resume-page .skill-row{display:grid;grid-template-columns:140px 1fr;gap:0;margin:0;line-height:1.12}.resume-page .skill-row b{font-weight:bold}.resume-page i{font-weight:normal} @media print{body{width:595.28px}.resume-page{margin:0}}</style></head><body>${html}</body></html>`);
   win.document.close(); win.focus(); win.print();
 }
 
-function ResumeRichEditor({ plainText, initialHtml = '', onSave, onClose }) {
+export function ResumeRichEditor({ plainText, initialHtml = '', onSave, onClose }) {
   const editorRef = React.useRef(null);
   const savedSelectionRef = React.useRef(null);
   const [fontSize, setFontSize] = React.useState('3');
@@ -138,13 +167,12 @@ async function extractStoredProfilePdf(profile) {
 
 /* ── main component ──────────────────────────────────────── */
 
-export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onAccepted }) {
+export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onAccepted, applyMode = false }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [step, setStep] = useState('input');         // 'input' | 'analyzing' | 'result' | 'error'
   const [jobUrl, setJobUrl] = useState(initialUrl);
-  const [pastedJobDescription, setPastedJobDescription] = useState('');
-  const [jobTitleInput, setJobTitleInput] = useState('');
-  const [companyInput, setCompanyInput] = useState('');
+  const [applyBusy, setApplyBusy] = useState('');    // '' | 'checking' | 'importing'
   const [analysisStep, setAnalysisStep] = useState(0);
   const [tailoredData, setTailoredData] = useState(null);
   const [formatId, setFormatId] = useState('recommended');
@@ -158,9 +186,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
     if (isOpen) {
       setStep('input');
       setJobUrl(initialUrl || '');
-      setPastedJobDescription('');
-      setJobTitleInput('');
-      setCompanyInput('');
+      setApplyBusy('');
       setTailoredData(null);
       setFormatId('recommended');
        setShowPdfPreview(false);
@@ -173,10 +199,60 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
 
   if (!isOpen) return null;
 
+  /* ── Apply with Hamzo: find-or-create the job, then open the apply flow ── */
+  const handleApplyWithHamzo = async (e) => {
+    if (e) e.preventDefault();
+    const link = jobUrl.trim();
+    if (!link) return;
+
+    let parsed;
+    try {
+      parsed = new URL(link);
+    } catch {
+      setErrorMsg('Enter a valid job link starting with https://');
+      return;
+    }
+    if (!/^https?:$/.test(parsed.protocol)) {
+      setErrorMsg('Enter a valid job link starting with https://');
+      return;
+    }
+
+    setErrorMsg('');
+    setApplyBusy('checking');
+
+    // Already in our jobs? Reuse it — never post a duplicate.
+    const existing = findExistingJob(link);
+    if (existing) {
+      onClose();
+      navigate(`/dashboard/apply/${existing.id}`);
+      return;
+    }
+
+    // New job: read it from the link and add it internally, the same way an
+    // admin posts from the portal. The server re-checks role+company matches.
+    setApplyBusy('importing');
+    try {
+      const data = await adminJobStore.importFromLink(link);
+      const draft = data.job || {};
+      const saved = await adminJobStore.add({
+        ...draft,
+        skills: draft.skills?.length ? draft.skills : [...(draft.requiredSkills || []), ...(draft.preferredSkills || [])],
+        applyLink: draft.applyLink || link,
+        sourceUrl: data.sourceUrl || link,
+        postedBy: jobOwner(user),
+      });
+      onClose();
+      navigate(`/dashboard/apply/${saved.id}`);
+    } catch (err) {
+      setErrorMsg(err.message || 'That job link could not be read.');
+      setApplyBusy('');
+    }
+  };
+
   /* ── Actual API call with proper field mapping ── */
   const handleStartAnalysis = async (e) => {
     if (e) e.preventDefault();
-    if ((!jobUrl || !jobUrl.trim()) && (!pastedJobDescription || !pastedJobDescription.trim())) return;
+    if (!jobUrl || !jobUrl.trim()) return;
 
     setStep('analyzing');
     setAnalysisStep(0);
@@ -219,11 +295,9 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
 
       const result = await api.tailorExternalJob({
         url: jobUrl.trim(),
-        ...(pastedJobDescription.trim() ? { jobDescription: pastedJobDescription.trim() } : {}),
-         ...(jobTitleInput.trim() ? { title: jobTitleInput.trim() } : {}),
-        ...(companyInput.trim() ? { company: companyInput.trim() } : {}),
         profile: mappedProfile,
         resumeText: originalSourceText,
+        template: getSelectedTemplateId(),
       });
 
       clearTimeout(t1);
@@ -290,7 +364,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
        const location = tailoredData.job?.location || 'Remote';
        const allJobs = [...adminJobStore.getWithFreshDates(), ...DEMO_JOBS];
        let targetJob = allJobs.find(j => j.title?.toLowerCase().trim() === jobTitle.toLowerCase().trim() && j.company?.toLowerCase().trim() === companyName.toLowerCase().trim());
-        if (!targetJob) targetJob = adminJobStore.add({ title: jobTitle, company: companyName, companyLogoUrl: tailoredData.job?.logo || '', location, category: 'Freshers', type: 'Full Time', applyLink: tailoredData.job?.applyUrl || jobUrl, skills: tailoredData.job?.keywords || ['Software Development'], description: tailoredData.job?.description ?? tailoredData.jobDescription ?? pastedJobDescription ?? '' });
+        if (!targetJob) targetJob = adminJobStore.add({ title: jobTitle, company: companyName, companyLogoUrl: tailoredData.job?.logo || '', location, category: 'Freshers', type: 'Full Time', applyLink: tailoredData.job?.applyUrl || jobUrl, skills: tailoredData.job?.keywords || ['Software Development'], description: tailoredData.job?.description ?? tailoredData.jobDescription ?? '' });
 
        resumeStore.add({
         name: fileName,
@@ -367,13 +441,17 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '800', color: '#0f172a' }}>Add Job Link</h3>
-                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Paste a job URL to analyze & tailor your resume</p>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
+                    {applyMode
+                      ? 'Paste a valid job link — Hamzo opens the application flow for it'
+                      : 'Paste a job URL to analyze & tailor your resume'}
+                  </p>
                 </div>
               </div>
               <button onClick={onClose} style={closeButtonStyle}><X size={16} /></button>
             </div>
 
-            <form onSubmit={handleStartAnalysis}>
+            <form onSubmit={applyMode ? handleApplyWithHamzo : handleStartAnalysis}>
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', marginBottom: '8px' }}>
                   Job Page URL
@@ -397,19 +475,25 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                   }}
                 />
               </div>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', marginBottom: '8px' }}>Full job description (optional recovery)</label>
-                <textarea value={pastedJobDescription} onChange={e => setPastedJobDescription(e.target.value)} rows={4} placeholder="Paste the job description if the URL is blocked" style={{ width: '100%', padding: '11px 14px', borderRadius: '12px', border: '1.5px solid #cbd5e1', boxSizing: 'border-box', resize: 'vertical' }} />
-              </div>
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-                <input value={jobTitleInput} onChange={e => setJobTitleInput(e.target.value)} placeholder="Job title (optional)" style={{ ...inputStyle, flex: 1 }} />
-                <input value={companyInput} onChange={e => setCompanyInput(e.target.value)} placeholder="Company (optional)" style={{ ...inputStyle, flex: 1 }} />
-              </div>
+
+              {applyMode && errorMsg && (
+                <p style={{ margin: '-8px 0 14px', fontSize: '12px', fontWeight: 600, color: '#b42318', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertTriangle size={13} /> {errorMsg}
+                </p>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
-                <button type="submit" className="btn-accent" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  Analyze & Tailor <Sparkles size={15} />
+                <button
+                  type="submit"
+                  className="btn-accent"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: applyBusy ? 0.65 : 1 }}
+                  disabled={applyBusy !== ''}
+                >
+                  {applyMode
+                    ? (applyBusy === 'checking' ? 'Checking jobs…' : applyBusy === 'importing' ? 'Importing job…' : 'Apply with Hamzo')
+                    : 'Analyze & Tailor'}
+                  {applyBusy === '' && <Sparkles size={15} />}
                 </button>
               </div>
             </form>
@@ -816,11 +900,6 @@ const modalOverlayStyle = {
   background: 'rgba(15, 23, 42, 0.65)',
   backdropFilter: 'blur(6px)',
   padding: '20px',
-};
-
-const inputStyle = {
-  padding: '11px 12px', borderRadius: '10px', border: '1.5px solid #cbd5e1',
-  fontSize: '13px', boxSizing: 'border-box', background: '#f8fafc', color: '#0f172a',
 };
 
 const editorOverlayStyle = { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px' };

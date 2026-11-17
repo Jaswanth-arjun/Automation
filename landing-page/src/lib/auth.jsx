@@ -129,6 +129,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('wayin_profile');
     localStorage.removeItem('wayin_resumes');
     localStorage.removeItem('wayin_applications');
+    localStorage.removeItem('wayin_apply_progress');
   }, [setToken]);
 
   const isAuthenticated = Boolean(token || user);

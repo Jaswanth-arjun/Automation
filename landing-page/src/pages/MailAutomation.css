@@ -11,6 +11,9 @@
   max-width: 1400px;
 }
 
+/* Inbox/Sent give the mail list every pixel: tighter section gaps. */
+.mm-page.is-mail-list { gap: 14px; }
+
 /* ---------- Header ---------- */
 .mm-head {
   display: flex;
@@ -205,6 +208,31 @@
   background: #fffdf8;
 }
 
+/* Inbox/Sent: keep the connection status on one slim line so the mail list
+   gets the vertical space instead. */
+.mm-account.is-compact {
+  padding: 8px 14px;
+  gap: 11px;
+  border-radius: 12px;
+}
+
+.mm-account.is-compact .mm-account-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.mm-account.is-compact .mm-account-info small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mm-account.is-compact .mm-btn {
+  padding: 6px 11px;
+  font-size: 11.5px;
+}
+
 .mm-account-icon {
   width: 40px;
   height: 40px;
@@ -234,24 +262,6 @@
   margin-top: 2px;
   font-size: 11.5px;
   color: var(--muted);
-}
-
-.mm-account-scopes {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.mm-scope {
-  font: 500 9.5px 'DM Mono', monospace;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: #4b5a8f;
-  background: #f0f2fa;
-  border: 1px solid #dfe4f5;
-  border-radius: 999px;
-  padding: 4px 8px;
 }
 
 .mm-account-actions {
@@ -348,6 +358,203 @@
   color: #9a9c95;
 }
 
+/* ---------- Overview hero ---------- */
+.mm-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 0.9fr);
+  gap: 22px;
+  padding: 20px 22px;
+  border: 1px solid #e3e4f6;
+  border-radius: 16px;
+  background:
+    radial-gradient(125% 150% at 0% 0%, #f2f4ff 0%, rgba(242, 244, 255, 0) 58%),
+    #ffffff;
+  box-shadow: 0 1px 2px rgba(23, 24, 23, 0.03), 0 12px 30px rgba(59, 79, 216, 0.06);
+}
+
+.mm-hero-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.mm-hero-eyebrow {
+  font: 500 10px 'DM Mono', monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.mm-hero-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mm-hero-figure strong {
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  color: #232a63;
+}
+
+.mm-hero-figure span {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #4d5390;
+}
+
+.mm-hero-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #7d8079;
+  max-width: 48ch;
+}
+
+.mm-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.mm-hero-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+.mm-kpi {
+  border: 1px solid var(--line);
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mm-kpi:hover {
+  border-color: #d7d9e8;
+  box-shadow: 0 4px 14px rgba(23, 24, 23, 0.05);
+}
+
+.mm-kpi span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8f938c;
+}
+
+.mm-kpi strong {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+.mm-kpi small {
+  font-size: 10px;
+  color: #a4a79f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mm-kpi.is-indigo strong { color: #3b4fd8; }
+.mm-kpi.is-green strong { color: #1f7a45; }
+.mm-kpi.is-amber strong { color: #b45309; }
+.mm-kpi.is-slate strong { color: #4b4f58; }
+
+/* ---------- Application signal tiles ---------- */
+.mm-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mm-signal-tile {
+  text-align: left;
+  border: 1px solid #edede7;
+  background: #fafaf7;
+  border-radius: 11px;
+  padding: 9px 11px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.mm-signal-tile:hover {
+  background: #ffffff;
+  border-color: #dcdcd4;
+  transform: translateY(-1px);
+}
+
+.mm-signal-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mm-signal-tile-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mm-signal, #a0a49c);
+  flex-shrink: 0;
+}
+
+.mm-signal-tile strong {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #b3b6ae;
+}
+
+.mm-signal-tile.has-mail strong { color: var(--ink); }
+
+.mm-signal-tile-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #7c7f78;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mm-empty-note {
+  margin: 0;
+  font-size: 11.5px;
+  color: #9a9c95;
+  line-height: 1.5;
+}
+
+@media (max-width: 980px) {
+  .mm-hero { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+
+@media (max-width: 520px) {
+  .mm-hero { padding: 16px; }
+  .mm-hero-figure strong { font-size: 32px; }
+  .mm-signal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* ---------- Tabs ---------- */
 .mm-tabs {
   display: flex;
@@ -407,6 +614,7 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(23, 24, 23, 0.03);
 }
 
 .mm-card-head {
@@ -451,7 +659,9 @@
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-  align-items: start;
+  /* Stretch, not start: both stacks must end on the same line so the column
+     of cards never leaves a dead gap under the shorter one. */
+  align-items: stretch;
 }
 
 @media (max-width: 1100px) {
@@ -463,6 +673,41 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  height: 100%;
+}
+
+/* The last card of a stack absorbs any leftover height instead of leaving
+   empty page below it. */
+.mm-card-grow {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.mm-card-body-grow {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  /* Leftover height becomes even padding instead of one dead block at the
+     bottom, and the rows inside keep a natural rhythm. */
+  justify-content: center;
+  gap: 12px;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
+.mm-card-body-grow.is-list {
+  /* Slack becomes even breathing room between rows, never one dead block. */
+  justify-content: space-between;
+  gap: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.mm-card-body-grow .mm-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
 /* ---------- Attention list ---------- */
@@ -669,98 +914,6 @@
   transition: width .5s cubic-bezier(.22, 1, .36, 1);
 }
 
-/* ---------- Pipeline board ---------- */
-.mm-board {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  align-items: start;
-}
-
-.mm-lane {
-  background: #ffffff;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  display: flex;
-  flex-direction: column;
-  min-height: 120px;
-}
-
-.mm-lane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 11px 13px;
-  border-bottom: 1px solid #f1f1ec;
-}
-
-.mm-lane-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11.5px;
-  font-weight: 800;
-  letter-spacing: .02em;
-  text-transform: uppercase;
-}
-
-.mm-lane-count {
-  font: 700 10px 'DM Mono', monospace;
-  color: #6b6e66;
-  background: #f1f1ec;
-  border-radius: 999px;
-  padding: 2px 7px;
-}
-
-.mm-lane-list {
-  display: flex;
-  flex-direction: column;
-  padding: 7px;
-  gap: 7px;
-}
-
-.mm-lane-card {
-  border: 1px solid #ecece6;
-  border-radius: 9px;
-  padding: 9px 10px;
-  background: #fdfdfb;
-  cursor: pointer;
-  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
-}
-
-.mm-lane-card:hover {
-  border-color: #c7cdf0;
-  box-shadow: 0 4px 12px rgba(23, 24, 23, .05);
-  transform: translateY(-1px);
-}
-
-.mm-lane-card strong {
-  display: block;
-  font-size: 11.5px;
-  font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mm-lane-card small {
-  display: block;
-  margin-top: 2px;
-  font-size: 10.5px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mm-lane-empty {
-  padding: 14px 10px;
-  font-size: 11px;
-  color: #9a9c95;
-  text-align: center;
-}
-
 /* ---------- Toolbar ---------- */
 .mm-toolbar {
   display: flex;
@@ -821,6 +974,21 @@
   overflow-x: auto;
   scrollbar-width: none;
   padding-bottom: 1px;
+  min-width: 0;
+}
+
+/* One toolbar row on desktop: search, scrollable chips, sort. */
+@media (min-width: 1180px) {
+  .mm-toolbar { flex-wrap: nowrap; }
+  .mm-toolbar .mm-search { flex: 0 1 300px; min-width: 190px; }
+  .mm-toolbar .mm-chips {
+    flex: 1 1 0;
+    flex-wrap: nowrap;
+    /* Soft edge instead of a hard cut where the chips scroll out of view. */
+    mask-image: linear-gradient(to right, #000 94%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, #000 94%, transparent 100%);
+  }
+  .mm-toolbar .mm-sort { flex-shrink: 0; }
 }
 
 .mm-chips::-webkit-scrollbar { display: none; }
@@ -883,6 +1051,13 @@
   gap: 14px;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
+  min-height: 0;
+}
+
+/* Desktop: JS sizes the pane to end at the bottom of the viewport, so the list
+   scrolls inside its own scrollbar and the page never grows with the mailbox. */
+@media (min-width: 1180px) {
+  .mm-split { align-items: stretch; }
 }
 
 @media (min-width: 1180px) {
@@ -896,13 +1071,33 @@
   border: 1px solid var(--line);
   border-radius: 13px;
   overflow: hidden;
+  min-height: 0;
+}
+
+@media (min-width: 1180px) {
+  .mm-list {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: #d8d8cf transparent;
+  }
+
+  .mm-list::-webkit-scrollbar { width: 9px; }
+  .mm-list::-webkit-scrollbar-track { background: transparent; }
+  .mm-list::-webkit-scrollbar-thumb {
+    background: #dcdcd3;
+    border-radius: 999px;
+    border: 2px solid #ffffff;
+  }
+
+  .mm-list::-webkit-scrollbar-thumb:hover { background: #c5c5bb; }
 }
 
 .mm-row {
   display: flex;
   align-items: flex-start;
   gap: 11px;
-  padding: 12px 14px;
+  padding: 9px 14px;
   border-bottom: 1px solid #f2f2ed;
   cursor: pointer;
   position: relative;
@@ -1050,7 +1245,8 @@
 @media (min-width: 1180px) {
   .mm-detail-col,
   .mm-detail-col.is-open {
-    display: block;
+    display: flex;
+    flex-direction: column;
     position: sticky;
     top: 18px;
     inset: auto;
@@ -1070,6 +1266,7 @@
   display: flex;
   flex-direction: column;
   min-height: 240px;
+  flex: 1 1 auto;
 }
 
 .mm-detail-head {

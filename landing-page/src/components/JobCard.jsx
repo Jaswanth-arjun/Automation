@@ -1,13 +1,10 @@
-import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Bookmark } from 'lucide-react';
 import MatchScore from './MatchScore';
-import ApplyOptionsModal from './ApplyOptionsModal';
+import CompanyLogo from './CompanyLogo';
 
 export default function JobCard({ job, matchResult, saved, onSave }) {
   const navigate = useNavigate();
-  const [applyModalOpen, setApplyModalOpen] = useState(false);
-  const [imgError, setImgError] = useState(false);
 
   // Score from computed matchResult or job
   const score = matchResult?.status === 'scored' || matchResult?.status === 'ineligible'
@@ -16,7 +13,7 @@ export default function JobCard({ job, matchResult, saved, onSave }) {
 
   const handleApply = (e) => {
     e.stopPropagation();
-    setApplyModalOpen(true);
+    navigate(`/dashboard/jobs/${job.id}`);
   };
 
   const handleSave = (e) => {
@@ -25,33 +22,21 @@ export default function JobCard({ job, matchResult, saved, onSave }) {
   };
 
   return (
-    <>
-      <article
-        className="match-card"
-        onClick={() => navigate(`/dashboard/jobs/${job.id}`)}
-      >
+    <article
+      className="match-card"
+      onClick={() => navigate(`/dashboard/jobs/${job.id}`)}
+    >
         <div className="match-card-header-row">
-          {job.companyLogoUrl && !imgError ? (
-            <img
-              src={job.companyLogoUrl}
-              alt=""
-              onError={() => setImgError(true)}
-              style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '11px',
-                objectFit: 'contain',
-                background: '#fff',
-                border: '1px solid #e5e5e0',
-                flexShrink: 0,
-                padding: '4px',
-              }}
-            />
-          ) : (
-            <div className="job-card-company-mark">
-              {job.companyMark || job.company?.[0]?.toUpperCase() || 'J'}
-            </div>
-          )}
+          <CompanyLogo
+            job={job}
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '11px',
+              flexShrink: 0,
+              padding: '4px',
+            }}
+          />
           <MatchScore score={score} size="small" />
         </div>
 
@@ -78,13 +63,6 @@ export default function JobCard({ job, matchResult, saved, onSave }) {
             <Bookmark size={15} fill={saved ? 'currentColor' : 'none'} />
           </button>
         </div>
-      </article>
-
-      <ApplyOptionsModal
-        job={job}
-        isOpen={applyModalOpen}
-        onClose={() => setApplyModalOpen(false)}
-      />
-    </>
+    </article>
   );
 }

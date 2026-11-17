@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
   ArrowLeft, ArrowRight, Mail, FileText, Sparkles, ExternalLink, 
   Copy, Check, Send, UserPlus, Download, CheckCircle2, 
@@ -8,9 +8,12 @@ import {
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, applicationStore, resumeStore, api, employeeStore } from '../lib/api';
+import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore } from '../lib/api';
+import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
+import { ResumeRichEditor } from '../components/JobAnalyzerModal';
+import { keywordAudit, scoreValue, scoreLabel } from '../components/JobAnalyzerModal.helpers';
 
 const Linkedin = ({ size = 16, style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -20,9 +23,27 @@ const Linkedin = ({ size = 16, style = {} }) => (
   </svg>
 );
 
+function pdfObjectUrl(base64) {
+  if (!base64) return '';
+  const binary = atob(base64.includes(',') ? base64.split(',')[1] : base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+}
+
+function downloadPdf(base64, filename) {
+  if (!base64) return;
+  const link = document.createElement('a');
+  link.href = pdfObjectUrl(base64);
+  link.download = filename?.toLowerCase().endsWith('.pdf') ? filename : `${filename || 'resume'}.pdf`;
+  link.click();
+}
+
 export default function Apply() {
   const { jobId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
 
   // Find job from admin store or demo jobs
   const adminJobs = adminJobStore.getWithFreshDates();
@@ -53,11 +74,17 @@ export default function Apply() {
   );
   const hasMatchScore = typeof matchResult.score === 'number';
 
-  const [activeTab, setActiveTab] = useState('referral'); // 'referral' | 'linkedin' | 'tailor'
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get('stage');
+    return ['tailor', 'referral', 'linkedin', 'apply'].includes(requested) ? requested : 'tailor';
+  }); // 'tailor' | 'referral' | 'linkedin' | 'apply'
   const [copiedNoteIndex, setCopiedNoteIndex] = useState(null);
   const [emailSentIndex, setEmailSentIndex] = useState(null);
   const [isTailoring, setIsTailoring] = useState(false);
-  const [tailoredDone, setTailoredDone] = useState(false);
+  const [tailorResult, setTailorResult] = useState(null);
+  const [tailorError, setTailorError] = useState('');
+  const [formatId, setFormatId] = useState('recommended');
+  const [editorState, setEditorState] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [sendingAll, setSendingAll] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
@@ -71,6 +98,23 @@ export default function Apply() {
   const [extensionReady, setExtensionReady] = useState(false);
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
+
+  // A tailored resume only belongs to the job it was generated for.
+  useEffect(() => {
+    setTailorResult(null);
+    setTailorError('');
+    setTailoredPdfBase64(null);
+    setTailoredFileName('');
+    setFormatId('recommended');
+    setEditorState(null);
+    setSubmitted(Boolean(applyProgressStore.get(jobId)?.apply));
+  }, [jobId]);
+
+  // Job Tracker "continue" links open a specific stage via ?stage=...
+  useEffect(() => {
+    const requested = new URLSearchParams(location.search).get('stage');
+    if (['tailor', 'referral', 'linkedin', 'apply'].includes(requested)) setActiveTab(requested);
+  }, [location.search]);
 
   // Gmail App Password Configuration Modal
   const [showGmailModal, setShowGmailModal] = useState(false);
@@ -103,7 +147,6 @@ export default function Apply() {
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
 
   // LinkedIn connection status for Tab 2
-  const { user } = useAuth();
   const liUserId = user?.id || 'demo-user-1';
   const [liConnected, setLiConnected] = useState(false);
   const [liAccount, setLiAccount] = useState(null);
@@ -232,6 +275,11 @@ export default function Apply() {
       });
       liFlash('🚀 Campaign started! Chrome window will open.', 'ok');
       setLiIsRunning(true);
+      applyProgressStore.mark(jobId || job?.id, 'linkedin', {
+        company: job?.company || '',
+        title: job?.title || '',
+        roles: liRoles,
+      });
     } catch (err) {
       liFlash(err.message || 'Failed to start campaign', 'err');
     }
@@ -416,20 +464,26 @@ ${firstName}`;
         return;
       }
 
-      // Log application in store
+      // Log the referral as outreach (not an application). The Job Tracker
+      // reads this plus the sent-email log to show stage 2 as completed.
       applicationStore.add({
         title: job?.title,
         company: job?.company,
         companyMark: job?.companyMark,
         jobId: job?.id,
+        status: 'Outreach',
+        stage: 'referral',
         ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
         resumeUsed: tailoredFileName || jobResume?.name || activeResume?.name || `${(profile.fullName || 'User').split(' ')[0]}-resume.pdf`,
         referralSentTo: selectedEmployees.map(e => e.name).join(', ')
       });
+      applyProgressStore.mark(jobId || job?.id, 'referral', {
+        company: job?.company || '',
+        title: job?.title || '',
+      });
 
       setSendingAll(false);
       setSendSuccess(true);
-      setSubmitted(true);
     } catch (err) {
       console.error('Error sending referral email:', err);
       setSendingAll(false);
@@ -457,10 +511,10 @@ ${firstName}`;
     setTimeout(() => setCopiedNoteIndex(null), 2500);
   };
 
-  // Handle Tailor Resume — generate a real tailored PDF for this job
+  // Tailor Resume — generate a real tailored PDF + ATS report for this job
   const handleTailorResume = async () => {
     setIsTailoring(true);
-    setTailoredDone(false);
+    setTailorError('');
     try {
       const link = job?.applyLink || job?.url || window.location.href;
       const active = activeResume || resumes[0];
@@ -472,41 +526,80 @@ ${firstName}`;
           ...(profile.experience || []).map(e => `${e.title} at ${e.company}`),
           ...(profile.education || []).map(ed => `${ed.degree} at ${ed.school}`),
         ].join('\n'),
+        template: getSelectedTemplateId(),
       });
 
-      const chosen = result.formats?.[0] || result.formats?.find(f => f.id === result.recommendedId);
-      if (chosen?.pdfBase64) {
-        const name = `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-tailored-resume.pdf`;
-        setTailoredPdfBase64(chosen.pdfBase64);
-        setTailoredFileName(name);
-        resumeStore.add({
-          name,
-          size: '1 page PDF',
-          type: 'application/pdf',
-          pdfBase64: chosen.pdfBase64,
-          jobUrl: link,
-          jobId,
-          company: job?.company || '',
-          title: job?.title || '',
-          isActive: true,
-        });
-        setTailoredDone(true);
-      } else {
-        throw new Error('No PDF format returned from tailoring engine.');
-      }
+      const chosen = result.formats?.find(f => f.id === result.recommendedId) || result.formats?.[0];
+      if (!chosen?.pdfBase64) throw new Error('The tailoring engine did not return a PDF for this job.');
+
+      const name = `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-tailored-resume.pdf`;
+      setTailorResult(result);
+      setFormatId(chosen.id || 'recommended');
+      setTailoredPdfBase64(chosen.pdfBase64);
+      setTailoredFileName(name);
+      resumeStore.add({
+        name,
+        size: chosen.pageCount ? `${chosen.pageCount} page PDF` : '1 page PDF',
+        type: 'application/pdf',
+        text: chosen.plainText || result.plainText || '',
+        pdfBase64: chosen.pdfBase64,
+        jobUrl: link,
+        jobId,
+        company: job?.company || '',
+        title: job?.title || '',
+        isActive: true,
+      });
+      applyProgressStore.mark(jobId || job?.id, 'tailor', {
+        company: job?.company || '',
+        title: job?.title || '',
+        resumeName: name,
+      });
     } catch (err) {
-      console.warn('Tailor resume notice:', err.message);
-      const active = activeResume || resumes[0];
-      if (active?.pdfBase64 || active?.base64) {
-        setTailoredPdfBase64(active.pdfBase64 || active.base64);
-        setTailoredFileName(active.name || `${(job?.company || 'job')}-resume.pdf`);
-        setTailoredDone(true);
-      } else {
-        alert('Could not generate tailored PDF resume. Make sure the server is running (npm start).');
+      const raw = err?.message || '';
+      let message = 'Could not tailor a resume for this job. Make sure the backend is running and try again.';
+      const jsonStart = raw.indexOf('{');
+      if (jsonStart >= 0) {
+        try { message = JSON.parse(raw.slice(jsonStart)).error || message; } catch { message = raw; }
+      } else if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+        message = 'Could not reach the tailoring server. Start the backend (npm start), then try again.';
+      } else if (/timeout|timed out/i.test(raw)) {
+        message = 'The job page took too long to analyze. Try again in a moment.';
+      } else if (raw) {
+        message = raw;
       }
+      setTailorResult(null);
+      setTailoredPdfBase64(null);
+      setTailoredFileName('');
+      setTailorError(message);
     } finally {
       setIsTailoring(false);
     }
+  };
+
+  // Switch the previewed/downloaded resume format
+  const handleSelectFormat = (nextFormatId) => {
+    if (!tailorResult) return;
+    const chosen = tailorResult.formats?.find(f => f.id === nextFormatId) || tailorResult.formats?.[0];
+    if (!chosen?.pdfBase64) return;
+    setFormatId(chosen.id || nextFormatId);
+    setTailoredPdfBase64(chosen.pdfBase64);
+  };
+
+  // Download the selected format (re-rendered when the user edited it)
+  const handleDownloadTailored = async () => {
+    const chosen = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
+    if (!chosen?.pdfBase64) return;
+    const name = tailoredFileName || 'tailored-resume.pdf';
+    if (chosen.editedHtml) {
+      try {
+        const rendered = await api.renderEditedResumePdf(chosen.editedHtml);
+        downloadPdf(rendered.pdfBase64, name);
+        return;
+      } catch {
+        // Fall back to the generated PDF rather than failing the download.
+      }
+    }
+    downloadPdf(chosen.pdfBase64, name);
   };
 
   // Check extension availability and sync answers on mount
@@ -586,8 +679,15 @@ ${firstName}`;
             company: job?.company,
             companyMark: job?.companyMark,
             jobId: job?.id,
+            status: 'Applied',
+            stage: 'apply',
+            appliedViaExtension: true,
             ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
             resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
+          });
+          applyProgressStore.mark(jobId || job?.id, 'apply', {
+            company: job?.company || '',
+            title: job?.title || '',
           });
           setSubmitted(true);
         }
@@ -653,6 +753,7 @@ ${firstName}`;
           url: link,
           profile: profile || {},
           resumeText: active?.text || '',
+          template: getSelectedTemplateId(),
         });
         const chosen = result.formats?.[0];
         if (chosen?.pdfBase64) {
@@ -751,6 +852,45 @@ ${firstName}`;
   const effectiveResume = (tailoredPdfBase64 && { name: tailoredFileName, pdfBase64: tailoredPdfBase64 }) || jobResume || activeResume;
   const resumeDisplayName = effectiveResume?.name || `${(profile.fullName || 'Jaswanth').split(' ')[0]}-resume.pdf`;
 
+  // ── Tailoring report derived values ──
+  const chosenFormat = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
+  const ats = chosenFormat?.ats || tailorResult?.ats || {};
+  const beforeScore = scoreValue(ats.beforeScore);
+  const afterScore = scoreValue(ats.afterScore);
+  const scoreDelta = tailorResult?.scoreDelta ?? (beforeScore !== null && afterScore !== null ? afterScore - beforeScore : null);
+  const audit = keywordAudit(ats);
+  const matchedCount = audit.find(a => a.label === 'Matched after')?.values?.length ?? 0;
+  const totalKeywords = Array.isArray(ats.jobKeywords) ? ats.jobKeywords.length : null;
+  const keywordRows = (Array.isArray(ats.jobKeywords) ? ats.jobKeywords : []).map((keyword) => {
+    const exactAfter = (ats.matchedKeywordsAfter || ats.matchedKeywords || []).includes(keyword);
+    const partialAfter = (ats.partialKeywordsAfter || []).includes(keyword);
+    const exactBefore = (ats.matchedKeywordsBefore || []).includes(keyword);
+    const wasRemoved = exactBefore && !exactAfter && !partialAfter;
+    let status = 'Missing';
+    let tagIcon = '⚠';
+    if (exactAfter && exactBefore) { status = 'Already Present'; tagIcon = '✓'; }
+    else if (exactAfter && !exactBefore) { status = 'Newly Added'; tagIcon = '＋'; }
+    else if (wasRemoved) { status = 'Removed'; tagIcon = '✗'; }
+    else if (partialAfter) { status = 'Partial'; tagIcon = '●'; }
+    return { keyword, status, tagIcon };
+  });
+  const reportAdded = keywordRows.filter(r => r.status === 'Newly Added');
+  const reportPresent = keywordRows.filter(r => r.status === 'Already Present');
+  const reportPartial = keywordRows.filter(r => r.status === 'Partial');
+  const reportMissing = keywordRows.filter(r => r.status === 'Missing');
+  const reportRemoved = keywordRows.filter(r => r.status === 'Removed');
+  const jobKeywords = (job.requiredSkills || job.skills || ['Python', 'Node.js', 'SQL', 'REST APIs']);
+
+  const jobProgress = applyProgressStore.get(jobId || job?.id);
+  const resumeReady = Boolean(tailorResult || jobResume);
+  const resumeReadyName = tailoredFileName || jobResume?.name || '';
+  const STEPS = [
+    { key: 'tailor', label: 'Tailor Resume', icon: Sparkles, done: Boolean(tailorResult || jobResume || jobProgress.tailor) },
+    { key: 'referral', label: 'Send Referral Request (Email)', icon: Mail, done: sendSuccess || Boolean(jobProgress.referral) },
+    { key: 'linkedin', label: 'Connect on LinkedIn with Note', icon: Linkedin, done: liIsRunning || Boolean(jobProgress.linkedin) },
+    { key: 'apply', label: 'Direct Apply', icon: Zap, done: submitted || Boolean(jobProgress.apply) },
+  ];
+
   return (
     <div className="page-apply" style={{ maxWidth: '1040px', margin: '0 auto', padding: '30px 20px' }}>
       {/* Back Button */}
@@ -824,79 +964,25 @@ ${firstName}`;
         </div>
       </div>
 
-      {/* Main Tabs Navigation */}
-      <div 
-        style={{ 
-          display: 'flex', 
-          gap: '8px', 
-          borderBottom: '2px solid #e8e8e3', 
-          marginBottom: '28px', 
-          overflowX: 'auto',
-          paddingBottom: '2px'
-        }}
-      >
-        <button
-          onClick={() => setActiveTab('referral')}
-          style={{
-            padding: '12px 20px',
-            border: 'none',
-            background: 'none',
-            fontSize: '14px',
-            fontWeight: activeTab === 'referral' ? '800' : '600',
-            color: activeTab === 'referral' ? '#00796b' : '#666660',
-            borderBottom: activeTab === 'referral' ? '3px solid #00796b' : '3px solid transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            transition: 'all 0.2s',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          <Mail size={16} /> 1. Send Referral Request (Email)
-        </button>
-
-        <button
-          onClick={() => setActiveTab('linkedin')}
-          style={{
-            padding: '12px 20px',
-            border: 'none',
-            background: 'none',
-            fontSize: '14px',
-            fontWeight: activeTab === 'linkedin' ? '800' : '600',
-            color: activeTab === 'linkedin' ? '#445cf5' : '#666660',
-            borderBottom: activeTab === 'linkedin' ? '3px solid #445cf5' : '3px solid transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            transition: 'all 0.2s',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          <Linkedin size={16} /> 2. Connect on LinkedIn with Note
-        </button>
-
-        <button
-          onClick={() => setActiveTab('tailor')}
-          style={{
-            padding: '12px 20px',
-            border: 'none',
-            background: 'none',
-            fontSize: '14px',
-            fontWeight: activeTab === 'tailor' ? '800' : '600',
-            color: activeTab === 'tailor' ? '#445cf5' : '#666660',
-            borderBottom: activeTab === 'tailor' ? '3px solid #445cf5' : '3px solid transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            transition: 'all 0.2s',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          <Sparkles size={16} /> 3. Direct Apply with Tailored Resume
-        </button>
+      {/* Guided application stepper */}
+      <div className="apply-flow-steps" role="tablist" aria-label="Application steps">
+        {STEPS.map((step, index) => {
+          const StepIcon = step.icon;
+          return (
+            <button
+              key={step.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === step.key}
+              className={`apply-flow-step ${activeTab === step.key ? 'active' : ''} ${step.done ? 'done' : ''}`}
+              onClick={() => setActiveTab(step.key)}
+            >
+              <span className="apply-flow-num">{step.done ? <Check size={12} /> : index + 1}</span>
+              <StepIcon size={15} />
+              <span className="apply-flow-label">{step.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* TAB CONTENT 1: Referral Request via Email (EXACT MATCH TO REFERENCE IMAGE) */}
@@ -1346,7 +1432,7 @@ ${firstName}`;
         <div style={{ background: '#ffffff', border: '1px solid #e5e5e0', borderRadius: '16px', padding: '28px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
           <div style={{ marginBottom: '24px' }}>
             <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#171817', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Linkedin style={{ color: '#0077b5' }} size={20} /> Option 2: Send Connection Request with Personal Note via LinkedIn
+              <Linkedin style={{ color: '#0077b5' }} size={20} /> Step 3: Connect on LinkedIn with a Personal Note
             </h2>
             <p style={{ fontSize: '13.5px', color: '#555852', margin: 0, lineHeight: '1.5' }}>
               Connect directly with hiring managers & recruiters at <strong>{job.company}</strong> on LinkedIn using automated outreach campaigns.
@@ -1681,7 +1767,7 @@ ${firstName}`;
             </button>
 
             <button
-              onClick={() => setActiveTab('tailor')}
+              onClick={() => setActiveTab('apply')}
               style={{
                 background: '#445cf5',
                 color: '#ffffff',
@@ -1698,22 +1784,25 @@ ${firstName}`;
                 boxShadow: '0 4px 14px rgba(68, 92, 245, 0.2)'
               }}
             >
-              <span>Next: Direct Apply / Tailor Resume</span>
+              <span>Next: Direct Apply</span>
               <ChevronRight size={18} />
             </button>
           </div>
         </div>
       )}
 
-      {/* TAB CONTENT 3: Direct Apply by Tailoring Resume */}
+      {/* STAGE 1: Tailor Resume + ATS report */}
       {activeTab === 'tailor' && (
         <div style={{ background: '#ffffff', border: '1px solid #e5e5e0', borderRadius: '16px', padding: '28px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '22px' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#eef2ff', color: '#3730a3', fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 10px', borderRadius: '20px', marginBottom: '10px' }}>
+              <Sparkles size={12} /> Step 1 · Tailor
+            </span>
             <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#171817', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Sparkles style={{ color: '#22a65b' }} size={20} /> Option 3: Direct Apply by Tailoring Resume to Job Description
+              <Sparkles style={{ color: '#445cf5' }} size={20} /> Tailor Your Resume to This Job
             </h2>
             <p style={{ fontSize: '13.5px', color: '#555852', margin: 0, lineHeight: '1.5' }}>
-              Automatically optimize your resume keywords to match the exact requirements of <strong>{job.title}</strong> at <strong>{job.company}</strong>.
+              Optimize your resume keywords for ATS scanners and align it with the exact requirements of <strong>{job.title}</strong> at <strong>{job.company}</strong>. Your tailored resume is used in the next steps.
             </p>
           </div>
 
@@ -1723,7 +1812,7 @@ ${firstName}`;
               Required Job Skills vs Your Profile
             </h4>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {(job.requiredSkills || job.skills || ['Python', 'Node.js', 'SQL', 'REST APIs']).map(skill => {
+              {jobKeywords.map(skill => {
                 const hasSkill = (profile.skills || []).some(s => s.toLowerCase().includes(skill.toLowerCase()));
                 return (
                   <span
@@ -1748,49 +1837,325 @@ ${firstName}`;
             </div>
           </div>
 
-          {/* AI Resume Tailor Action Box */}
-          <div style={{ border: '2px dashed #445cf5', borderRadius: '14px', padding: '24px', textAlign: 'center', background: '#f8f9ff', marginBottom: '24px' }}>
-            <Sparkles size={32} style={{ color: '#445cf5', marginBottom: '10px' }} />
+          {/* Tailor action box */}
+          <div style={{ border: tailorResult ? '1px solid #bbf7d0' : '2px dashed #445cf5', borderRadius: '14px', padding: '22px 24px', textAlign: 'center', background: tailorResult ? '#f0fdf4' : '#f8f9ff', marginBottom: '20px' }}>
+            {tailorResult ? <CheckCircle2 size={30} style={{ color: '#059669', marginBottom: '8px' }} /> : <Sparkles size={30} style={{ color: '#445cf5', marginBottom: '8px' }} />}
             <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#171817', margin: '0 0 6px' }}>
-              {tailoredDone ? 'Resume Tailored & Optimized!' : 'Tailor Resume for ' + job.title}
+              {tailorResult ? 'Resume Tailored & Optimized!' : `Tailor Resume for ${job.title}`}
             </h3>
-            <p style={{ fontSize: '13px', color: '#555852', maxWidth: '540px', margin: '0 auto 16px' }}>
-              {tailoredDone 
-                ? 'Your resume summary and bullet points have been optimized for ATS scanners and aligned with ' + job.company + '\'s target keywords.'
-                : 'Click below to automatically re-align your resume highlights and cover letter to maximize ATS score.'}
+            <p style={{ fontSize: '13px', color: '#555852', maxWidth: '560px', margin: '0 auto 14px' }}>
+              {tailorResult
+                ? `Your resume is aligned with ${job.company}'s target keywords. Review the ATS report below, then continue to the referral email.`
+                : 'Click below to re-align your resume highlights with the job description and raise your ATS score.'}
             </p>
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 className="btn-accent"
                 onClick={handleTailorResume}
                 disabled={isTailoring}
-                style={{ padding: '12px 24px', fontSize: '14px', gap: '8px' }}
+                style={{ padding: '11px 22px', fontSize: '13.5px', gap: '8px' }}
               >
                 {isTailoring ? <RefreshCw size={16} className="spin" /> : <Sparkles size={16} />}
-                {isTailoring ? 'Optimizing Resume...' : tailoredDone ? 'Re-Tailor Resume' : 'Tailor Resume Now'}
+                {isTailoring ? 'Optimizing Resume...' : tailorResult ? 'Re-Tailor Resume' : 'Tailor Resume Now'}
               </button>
-
-              {tailoredDone && (
-                <button
-                  className="btn-ghost"
-                  onClick={() => {
-                    if (!tailoredPdfBase64) return alert('No PDF available to download');
-                    const binary = atob(tailoredPdfBase64.includes(',') ? tailoredPdfBase64.split(',')[1] : tailoredPdfBase64);
-                    const bytes = new Uint8Array(binary.length);
-                    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-                    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-                    const a = document.createElement('a');
-                    a.href = blobUrl;
-                    a.download = tailoredFileName || 'tailored-resume.pdf';
-                    a.click();
-                  }}
-                  style={{ padding: '12px 20px', fontSize: '14px', gap: '8px' }}
-                >
-                  <Download size={16} /> Download Tailored Resume (PDF)
-                </button>
+              {tailorResult && (
+                <>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => setEditorState({ formatId, format: chosenFormat })}
+                    style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
+                  >
+                    <Eye size={16} /> View / Edit
+                  </button>
+                  <button
+                    className="btn-ghost"
+                    onClick={handleDownloadTailored}
+                    style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
+                  >
+                    <Download size={16} /> Download PDF
+                  </button>
+                </>
               )}
             </div>
+
+            {tailorError && (
+              <div role="alert" style={{ marginTop: '14px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', color: '#991b1b', fontSize: '12.5px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <AlertCircle size={15} /> {tailorError}
+              </div>
+            )}
+          </div>
+
+          {tailorResult && (
+            <>
+              {/* ATS before/after */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#171817', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Target size={17} style={{ color: '#445cf5' }} /> ATS Report
+                </h3>
+                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
+                  {matchedCount}/{totalKeywords ?? '—'} job keywords covered after tailoring
+                </span>
+              </div>
+
+              <div className="ats-comparison-card">
+                <div className="ats-comparison-side">
+                  <div className="ats-score-ring before">
+                    <svg width="74" height="74" viewBox="0 0 36 36">
+                      <path stroke="#dbe3ee" strokeWidth="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      <path stroke="#64748b" strokeWidth="3.5" strokeDasharray={`${beforeScore ?? 0}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    </svg>
+                    <strong>{beforeScore === null ? 'N/A' : `${beforeScore}%`}</strong>
+                  </div>
+                  <div>
+                    <strong>Before</strong>
+                    <span>ATS score</span>
+                  </div>
+                </div>
+                <div className="ats-comparison-message">
+                  {scoreDelta !== null && scoreDelta > 0 && <span className="ats-delta-badge">+{scoreDelta}%</span>}
+                  <span aria-hidden="true">→</span>
+                  <p>{scoreLabel(beforeScore, afterScore)}</p>
+                </div>
+                <div className="ats-comparison-side improved">
+                  <div>
+                    <strong>After</strong>
+                    <span>ATS score</span>
+                  </div>
+                  <div className="ats-score-ring after">
+                    <svg width="74" height="74" viewBox="0 0 36 36">
+                      <path stroke="#dbe3ee" strokeWidth="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      <path stroke="#10b981" strokeWidth="3.5" strokeDasharray={`${afterScore ?? 0}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    </svg>
+                    <strong>{afterScore === null ? 'N/A' : `${afterScore}%`}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Keyword summary pills */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px' }}>
+                <div className="keyword-stat-pill stat-present">
+                  <span className="keyword-stat-dot" style={{ background: '#10b981' }} />
+                  Already Present: <strong>{reportPresent.length}</strong>
+                </div>
+                <div className="keyword-stat-pill stat-added">
+                  <span className="keyword-stat-dot" style={{ background: '#4f46e5' }} />
+                  Newly Added: <strong>{reportAdded.length}</strong>
+                </div>
+                {reportPartial.length > 0 && (
+                  <div className="keyword-stat-pill">
+                    <span className="keyword-stat-dot" style={{ background: '#f59e0b' }} />
+                    Partial: <strong>{reportPartial.length}</strong>
+                  </div>
+                )}
+                {reportRemoved.length > 0 && (
+                  <div className="keyword-stat-pill stat-removed">
+                    <span className="keyword-stat-dot" style={{ background: '#94a3b8' }} />
+                    Removed: <strong>{reportRemoved.length}</strong>
+                  </div>
+                )}
+                {reportMissing.length > 0 && (
+                  <div className="keyword-stat-pill stat-missing">
+                    <span className="keyword-stat-dot" style={{ background: '#ef4444' }} />
+                    Missing: <strong>{reportMissing.length}</strong>
+                  </div>
+                )}
+                <div className="keyword-stat-pill stat-total">
+                  <Target size={12} color="#4f46e5" />
+                  Total: <strong>{totalKeywords ?? 'N/A'}</strong>
+                </div>
+              </div>
+
+              <div className="apply-report-grid" style={{ marginTop: '18px' }}>
+                {/* Left: keyword audit */}
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', background: '#fff' }}>
+                  <h4 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>Keyword Analysis</h4>
+                  <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#64748b', lineHeight: 1.45 }}>
+                    Which job-description keywords were already present, newly added, removed, or still missing after tailoring.
+                  </p>
+                  {!keywordRows.length ? (
+                    <p style={{ fontSize: '13px', color: '#94a3b8', margin: 0 }}>No keyword audit was returned for this job.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', maxHeight: '320px', overflowY: 'auto', paddingRight: '2px' }}>
+                      {keywordRows.map(({ keyword, status, tagIcon }) => (
+                        <div key={keyword} className={`keyword-row-enhanced keyword-row-${status.toLowerCase().replace(/\s+/g, '-')}`}>
+                          <span className="keyword-name">{keyword}</span>
+                          <span className={`keyword-status-badge status-${status.toLowerCase().replace(/\s+/g, '-')}`}>
+                            {tagIcon} {status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {ats.details && (
+                    <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#94a3b8', lineHeight: 1.4 }}>{ats.details}</p>
+                  )}
+                </div>
+
+                {/* Right: tailored resume */}
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+                  <h4 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>Tailored Resume</h4>
+                  <p style={{ margin: '0 0 12px', fontSize: '11.5px', color: '#64748b' }}>
+                    Tailored for {job.title} at {job.company}
+                  </p>
+
+                  {tailorResult.formats?.length > 1 && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                      {tailorResult.formats.map(f => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => handleSelectFormat(f.id)}
+                          style={{
+                            padding: '5px 11px', borderRadius: '8px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                            border: formatId === f.id ? '2px solid #4f46e5' : '1px solid #e2e8f0',
+                            background: formatId === f.id ? '#eef2ff' : '#ffffff',
+                            color: formatId === f.id ? '#4338ca' : '#64748b',
+                          }}
+                        >
+                          {f.label || f.name || f.id}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', marginBottom: '12px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#eef2ff', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <FileText size={17} />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <strong style={{ display: 'block', fontSize: '12px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {tailoredFileName || 'tailored-resume.pdf'}
+                      </strong>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                        PDF{chosenFormat?.pageCount ? ` · ${chosenFormat.pageCount} page${chosenFormat.pageCount > 1 ? 's' : ''}` : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => chosenFormat?.pdfBase64 && window.open(pdfObjectUrl(chosenFormat.pdfBase64), '_blank')}
+                      disabled={!chosenFormat?.pdfBase64}
+                      style={{ padding: '9px 14px', fontSize: '12.5px', gap: '6px' }}
+                    >
+                      <Eye size={14} /> Preview PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => setEditorState({ formatId, format: chosenFormat })}
+                      style={{ padding: '9px 14px', fontSize: '12.5px', gap: '6px' }}
+                    >
+                      <FileText size={14} /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={handleDownloadTailored}
+                      style={{ padding: '9px 14px', fontSize: '12.5px', gap: '6px' }}
+                    >
+                      <Download size={14} /> Download
+                    </button>
+                  </div>
+
+                  {/* What changed */}
+                  <div style={{ marginTop: '14px', padding: '12px 14px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', color: '#4338ca', marginBottom: '6px' }}>
+                      <Sparkles size={13} /> What was added
+                    </div>
+                    <p style={{ margin: 0, fontSize: '11.5px', color: '#475569', lineHeight: 1.55 }}>
+                      {reportAdded.length ? reportAdded.map(r => r.keyword).join(', ') : 'No new keywords were required — your resume already covered the job keywords.'}
+                    </p>
+                    {tailorResult.removedKeywords?.length > 0 && (
+                      <p style={{ margin: '6px 0 0', fontSize: '11.5px', color: '#94a3b8', lineHeight: 1.5 }}>
+                        Removed: {tailorResult.removedKeywords.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Stage navigation */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #e8e8e3' }}>
+            <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', maxWidth: '420px', lineHeight: 1.45 }}>
+              {tailorResult ? 'Your tailored resume will be attached to referral emails in the next step.' : 'Tailoring is recommended before outreach so recruiters see the most relevant resume.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('referral')}
+              style={{ background: '#445cf5', color: '#fff', border: 'none', borderRadius: '30px', padding: '12px 26px', fontSize: '13px', fontWeight: '800', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(68, 92, 245, 0.2)' }}
+            >
+              <span>Continue to Referral Email</span>
+              <ArrowRight size={17} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Resume rich-text editor (view/edit tailored resume) */}
+      {editorState && (
+        <ResumeRichEditor
+          plainText={editorState.format?.editedPlainText || editorState.format?.plainText || tailorResult?.plainText || ''}
+          initialHtml={editorState.format?.editedHtml || tailorResult?.editableHtml || ''}
+          onClose={() => setEditorState(null)}
+          onSave={({ html, text }) => {
+            setTailorResult(previous => previous ? {
+              ...previous,
+              plainText: text,
+              formats: (previous.formats || []).map(format => format.id === editorState.formatId
+                ? { ...format, editedHtml: html, editedPlainText: text }
+                : format),
+            } : previous);
+            setEditorState(null);
+          }}
+        />
+      )}
+
+      {/* STAGE 4: Direct Apply */}
+      {activeTab === 'apply' && (
+        <div style={{ background: '#ffffff', border: '1px solid #e5e5e0', borderRadius: '16px', padding: '28px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
+          <div style={{ marginBottom: '22px' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#ecfdf5', color: '#047857', fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', padding: '4px 10px', borderRadius: '20px', marginBottom: '10px' }}>
+              <Zap size={12} /> Step 4 · Direct Apply
+            </span>
+            <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#171817', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Zap style={{ color: '#22a65b' }} size={20} /> Direct Apply with Your Tailored Resume
+            </h2>
+            <p style={{ fontSize: '13.5px', color: '#555852', margin: 0, lineHeight: '1.5' }}>
+              Open the application for <strong>{job.title}</strong> at <strong>{job.company}</strong>, fill the form with your profile, and review before submitting.
+            </p>
+          </div>
+
+          {/* Tailored resume summary */}
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px 18px', marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: resumeReady ? '#ecfdf5' : '#fef2f2', color: resumeReady ? '#059669' : '#b91c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {resumeReady ? <FileText size={19} /> : <AlertCircle size={19} />}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <strong style={{ display: 'block', fontSize: '13px', color: '#0f172a' }}>
+                  {resumeReady ? (resumeReadyName || 'Tailored resume ready') : 'No tailored resume yet'}
+                </strong>
+                <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                  {resumeReady
+                    ? `This resume will be attached to your application${tailorResult && afterScore !== null ? ` · ATS ${afterScore}%` : ''}`
+                    : 'Tailor your resume first for the best ATS match, or apply with your active resume.'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setActiveTab('tailor')}
+              style={{ padding: '9px 16px', fontSize: '12.5px', gap: '6px', whiteSpace: 'nowrap' }}
+            >
+              <Sparkles size={14} /> {resumeReady ? 'View report / re-tailor' : 'Tailor resume'}
+            </button>
           </div>
 
           {/* Extension Status & Auto-Submit Settings */}
@@ -1840,6 +2205,18 @@ ${firstName}`;
                 <><Zap size={16} /> Auto Apply with AI</>
               )}
             </button>
+          </div>
+
+          {/* Stage navigation */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #e8e8e3' }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('linkedin')}
+              style={{ background: '#ffffff', color: '#64748b', border: '1px solid #cbd5e0', borderRadius: '30px', padding: '11px 22px', fontSize: '12.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            >
+              <ArrowLeft size={16} /> Back to LinkedIn
+            </button>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: '#94a3b8' }}>Step 4 of 4</span>
           </div>
         </div>
       )}

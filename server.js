@@ -139,6 +139,22 @@ function writeJobs(jobs) {
   fs.writeFileSync(jobsFilePath, JSON.stringify(jobs, null, 2), 'utf8');
 }
 
+// Canonical form of a job link so tracking params/protocol/case do not hide duplicates.
+function normalizeJobLinkKey(value) {
+  try {
+    const url = new URL(String(value));
+    url.hash = '';
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'utm_id', 'gclid', 'fbclid', 'ref', 'source']
+      .forEach((p) => url.searchParams.delete(p));
+    let s = url.toString();
+    while (s.endsWith('/')) s = s.slice(0, -1);
+    return s.toLowerCase();
+  } catch {
+    const raw = String(value || '').trim().toLowerCase();
+    return raw || null;
+  }
+}
+
 // ─── Admin Dashboard Route ───
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
@@ -229,6 +245,23 @@ app.post('/api/jobs', (req, res) => {
     return res.status(400).json({ error: 'role, company, applyLink, and description are required.' });
   }
 
+  // Duplicate guard: the same link, or the same role+company pair, must never
+  // create a second posting. The existing job is returned so the caller can
+  // reuse its id instead of posting again.
+  const jobs = readJobs();
+  const incomingLinks = [normalizeJobLinkKey(applyLink), normalizeJobLinkKey(sourceUrl)].filter(Boolean);
+  const roleKey = String(role).toLowerCase().trim();
+  const companyKey = String(company).toLowerCase().trim();
+  const existing = jobs.find((job) => {
+    const jobLinks = [job.applyLink, job.sourceUrl].filter(Boolean).map(normalizeJobLinkKey);
+    if (incomingLinks.length && jobLinks.some((link) => incomingLinks.includes(link))) return true;
+    return String(job.role || job.title || '').toLowerCase().trim() === roleKey
+      && String(job.company || '').toLowerCase().trim() === companyKey;
+  });
+  if (existing) {
+    return res.json({ message: 'This job is already posted — reusing the existing listing.', existing: true, job: existing });
+  }
+
   const job = {
     id: crypto.randomUUID(),
     logo: logo || '',
@@ -244,7 +277,6 @@ app.post('/api/jobs', (req, res) => {
     postedAt: new Date().toISOString(),
   };
 
-  const jobs = readJobs();
   jobs.push(job);
   writeJobs(jobs);
 
@@ -2006,9 +2038,14 @@ function editableResumeHtml(profile, resume) {
   return `<div class="resume-page"><header><h1>${esc(resume.name || profile.fullName || 'Candidate')}</h1><div>${esc(resume.location || profile.location)}</div><div>${esc(resume.phone || profile.phone)} · ${esc(resume.email || profile.email)}${link('LinkedIn', resume.linkedin || profile.linkedin || profile.links?.linkedin)}${link('GitHub', resume.github || profile.github || profile.links?.github)}</div></header>${section('PROFESSIONAL SUMMARY', `<p>${esc(resume.summary)}</p>`)}${section('TECHNICAL SKILLS', skills)}${section('INTERNSHIPS', internships)}${section('PROJECTS', projects)}${section('EDUCATION', education)}${section('ACHIEVEMENTS & ADDITIONAL INFORMATION', extras)}</div>`;
 }
 
+// Resume templates the app can tailor into. `classic` is the template the
+// system has always used, so it stays the default when nothing is selected.
+const RESUME_TEMPLATE_FORMATS = { classic: 'recommended', modern: 'modern', compact: 'compact' };
+
 app.post('/api/external-job/tailor', async (req, res) => {
   try {
-    const { url, profile, resumeText, profileResumeText, jobDescription, title, company } = req.body || {};
+    const { url, profile, resumeText, profileResumeText, jobDescription, title, company, template } = req.body || {};
+    const preferredFormatId = RESUME_TEMPLATE_FORMATS[String(template || '').toLowerCase()] || RESUME_TEMPLATE_FORMATS.classic;
     const jobUrl = publicJobUrl(url);
     if (!jobUrl && !jobDescription) return res.status(400).json({ error: 'Enter a public job link or paste the complete job description.' });
     const pastedPosting = jobDescription ? validateJobDescription({ title, company, description: jobDescription }) : null;
@@ -2092,11 +2129,17 @@ Job description: ${jobText.slice(0, 16000)}`;
       const retryTargeted = addTargetedJobKeywords(atsSafeFitted, sourceKeywords, sourceResume);
       atsSafeFitted = retryTargeted.resume;
     }
-    const formats = [
-      { id: 'recommended', name: 'Recommended one page', style: 'recommended' },
+    const formatDefs = [
+      { id: 'recommended', name: 'Classic (Default)', style: 'recommended' },
       { id: 'modern', name: 'Modern sections', style: 'modern' },
       { id: 'compact', name: 'Compact one page', style: 'compact' },
     ];
+    // The user's selected template drives the resume: its format comes first
+    // and is the recommended one; the rest stay available for preview.
+    const formats = [
+      formatDefs.find((f) => f.id === preferredFormatId),
+      ...formatDefs.filter((f) => f.id !== preferredFormatId),
+    ].filter(Boolean);
     for (const format of formats) {
       format.pdfBase64 = await renderResumePdf(safeProfile, atsSafeFitted, format.style);
       const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(format.pdfBase64, 'base64')));
@@ -2182,7 +2225,7 @@ Job description: ${jobText.slice(0, 16000)}`;
       warnings: [],
       plainText: finalPlainText,
       formats,
-      recommendedId: 'recommended',
+      recommendedId: preferredFormatId,
     });
   } catch (err) {
     console.error('External resume tailor failed:', err);
@@ -2362,6 +2405,7 @@ app.get('/api/gmail/callback', async (req, res) => {
       displayName: displayName || currentTokens.displayName || '',
       picture: avatarUrl || currentTokens.picture || '',
       connected: true,
+      disconnected: false,
       connectedAt: new Date().toISOString()
     };
 
@@ -2383,14 +2427,19 @@ app.get('/api/gmail/callback', async (req, res) => {
 });
 
 app.post('/api/gmail/disconnect', (req, res) => {
+  // Wipe the session and remember the intent, so a stale .env app password
+  // can never make the account look connected again until the user reconnects.
   const tokens = readGmailTokens();
   writeGmailTokens({
     ...tokens,
     connected: false,
+    disconnected: true,
+    disconnectedAt: new Date().toISOString(),
     access_token: '',
     refresh_token: '',
     expiry_date: 0
   });
+  delete process.env.GMAIL_USER;
   res.json({ ok: true, connected: false });
 });
 
@@ -2448,8 +2497,9 @@ app.get('/api/config/gmail', (req, res) => {
     });
   }
 
-  // Priority 2: App password if manually set
-  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASS) {
+  // Priority 2: App password if manually set — but never after an explicit
+  // disconnect, otherwise .env credentials make the account look reconnected.
+  if (!tokens.disconnected && process.env.GMAIL_USER && process.env.GMAIL_APP_PASS) {
     return res.json({
       configured: true,
       connected: true,
@@ -2475,6 +2525,7 @@ app.post('/api/config/gmail', (req, res) => {
   const cleanPass = appPassword.replace(/\s+/g, '');
   process.env.GMAIL_USER = email.trim();
   process.env.GMAIL_APP_PASS = cleanPass;
+  writeGmailTokens({ ...readGmailTokens(), disconnected: false });
 
   try {
     const envPath = path.join(__dirname, '.env');
@@ -2844,7 +2895,14 @@ async function triggerStatusSync(isAuto = false) {
 
   const existingBrowser = (activeBotInstance && activeBotInstance.isRunning && activeBotInstance.browser) ? activeBotInstance.browser : null;
 
-  const activeSessionDir = sessionManager.getActiveSessionDir();
+  // Resolve the connected account first: without it the tracker would create a
+  // fresh legacy profile with no LinkedIn cookies and hit a login wall even
+  // though the user's saved session is perfectly valid.
+  const activeUserId = sessionManager.resolveActiveUser();
+  if (activeUserId) {
+    setLiveSearchSessionDir(sessionManager.getSessionDir(activeUserId));
+  }
+  const activeSessionDir = activeUserId ? sessionManager.getSessionDir(activeUserId) : null;
   activeTrackerInstance = new LinkedInTrackerEngine({
     headless: true,
     existingBrowser,
@@ -2855,7 +2913,35 @@ async function triggerStatusSync(isAuto = false) {
     pushLog(logObj);
   });
 
+  // A successful background check is a real verification: keep the
+  // "Verified" timestamp honest instead of letting it go stale forever.
+  activeTrackerInstance.on('session_ok', ({ at }) => {
+    if (!activeUserId) return;
+    const account = sessionManager.getAccount(activeUserId);
+    if (!account.connected) return;
+    sessionManager.saveAccount(activeUserId, { ...account, lastVerified: at });
+  });
+
   activeTrackerInstance.on('status_change', ({ status, error }) => {
+    // A background (automatic) sync must never turn a healthy connected account
+    // into "Login required" in the UI. The saved profile is left untouched; the
+    // user is only nudged if they run a sync manually or verify the session.
+    const accountStillConnected = activeUserId ? sessionManager.getAccount(activeUserId).connected : false;
+    if (isAuto && status === 'requires_login' && accountStillConnected) {
+      pushLog({
+        timestamp: new Date().toLocaleTimeString('en-IN', { hour12: true }),
+        message: '⚠️ Background sync paused: LinkedIn asked for a sign-in while checking invites. Your saved session was not changed — use "Verify session" if this repeats.',
+        level: 'warning',
+      });
+      // Never leave the page stuck on "Syncing" after an abandoned auto-sync.
+      if (!activeBotInstance || !activeBotInstance.isRunning) {
+        currentStatus = 'idle';
+        broadcast('status_change', { status: 'idle' });
+      }
+      broadcast('connections_updated', { connections: db.getAllConnections(), analytics: db.getAnalytics() });
+      return;
+    }
+
     // Only update main status pill to syncing if campaign is not active
     if (!activeBotInstance || !activeBotInstance.isRunning) {
       currentStatus = status;

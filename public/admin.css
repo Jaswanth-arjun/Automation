@@ -661,6 +661,13 @@ textarea {
   margin-top: 6px;
 }
 
+.pj-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pj-edit,
 .pj-delete {
   border: 1px solid var(--line);
   background: #fff;
@@ -671,6 +678,12 @@ textarea {
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s;
+}
+
+.pj-edit:hover {
+  color: var(--violet);
+  border-color: #d8cdfd;
+  background: var(--violet-soft);
 }
 
 .pj-delete:hover {

@@ -5,6 +5,7 @@ import {
   ShieldCheck, ShieldAlert, Sparkles, GraduationCap, FolderGit2, Briefcase, Lightbulb,
 } from 'lucide-react';
 import MatchScore from '../components/MatchScore';
+import CompanyLogo from '../components/CompanyLogo';
 import ApplyOptionsModal from '../components/ApplyOptionsModal';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
@@ -139,11 +140,11 @@ export default function JobDetail() {
       <div className="job-detail-layout">
         <div className="job-detail-main">
           <div className="job-detail-header">
-            {job.companyLogoUrl ? (
-              <img src={job.companyLogoUrl} alt={job.company} style={{ width: '52px', height: '52px', borderRadius: '12px', objectFit: 'cover', border: '1px solid #e5e5e0', flexShrink: 0 }} />
-            ) : (
-              <div className="job-card-company-mark large">{job.companyMark || job.company?.[0] || '?'}</div>
-            )}
+            <CompanyLogo
+              job={job}
+              className="job-card-company-mark large"
+              style={{ flexShrink: 0 }}
+            />
             <div>
               <h1>{job.title}</h1>
               <p className="job-detail-company">{job.company}</p>

@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let importedLogoUrl = '';
   let importedSourceUrl = '';
   let allJobs = [];
+  let editingJobId = null;
 
   // DOM Elements
   const logoUpload = document.getElementById('logoUpload');
@@ -63,6 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function applyImportedJob(job, sourceUrl) {
+    editingJobId = null;
+    updateFormMode();
     jobRole.value = job.title || '';
     jobCompany.value = job.company || '';
     applyLink.value = job.applyLink || sourceUrl || '';
@@ -333,6 +336,11 @@ document.addEventListener('DOMContentLoaded', () => {
     descriptionPreview.innerHTML = html;
   }
 
+  function updateFormMode() {
+    postJobBtn.textContent = editingJobId ? 'Save changes' : 'Publish job';
+    clearFormBtn.textContent = editingJobId ? 'Cancel edit' : 'Clear form';
+  }
+
   // ─── Post Job ───
   postJobBtn.addEventListener('click', async () => {
     const role = jobRole.value.trim();
@@ -345,8 +353,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const editingId = editingJobId;
     postJobBtn.disabled = true;
-    postJobBtn.innerHTML = '<span class="btn-icon">⏳</span> Posting...';
+    postJobBtn.textContent = editingId ? 'Saving...' : 'Posting...';
 
     try {
       // Upload logo first if present
@@ -378,8 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ...(importedSourceUrl ? { sourceUrl: importedSourceUrl } : {}),
       };
 
-      const res = await fetch('/api/jobs', {
-        method: 'POST',
+      const res = await fetch(editingId ? `/api/jobs/${encodeURIComponent(editingId)}` : '/api/jobs', {
+        method: editingId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(jobPayload),
       });
@@ -387,7 +396,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const json = await res.json();
 
       if (res.ok) {
-        showToast('🎉 Job posted successfully!');
+        showToast(editingId
+          ? 'Job updated successfully.'
+          : json.existing
+            ? 'ℹ️ This job is already posted — no duplicate created.'
+            : '🎉 Job posted successfully!');
         clearForm();
         fetchJobs();
       } else {
@@ -397,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Network error: ' + err.message, true);
     } finally {
       postJobBtn.disabled = false;
-      postJobBtn.innerHTML = '<span class="btn-icon">🚀</span> Post Job';
+      updateFormMode();
     }
   });
 
@@ -405,6 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
   clearFormBtn.addEventListener('click', clearForm);
 
   function clearForm() {
+    editingJobId = null;
     jobRole.value = '';
     jobCompany.value = '';
     applyLink.value = '';
@@ -426,6 +440,41 @@ document.addEventListener('DOMContentLoaded', () => {
     renderSkillTags(mustHaveTagsContainer, mustHaveSkills, 'must');
     renderSkillTags(goodToHaveTagsContainer, goodToHaveSkills, 'good');
     renderDescriptionPreview('');
+    updateFormMode();
+  }
+
+  function editJob(job) {
+    clearForm();
+    editingJobId = String(job.id);
+
+    jobRole.value = job.role || '';
+    jobCompany.value = job.company || '';
+    applyLink.value = job.applyLink || '';
+    jobDescription.value = job.description || '';
+
+    const filters = job.filters || {};
+    setSelectValue(filterExperience, filters.experience || filters.category || 'Freshers');
+    setSelectValue(filterVisibility, filters.visibility || 'Confidential');
+    setSelectValue(filterWorkMode, filters.workMode || filters.location || 'Remote');
+    setSelectValue(filterType, filters.type || 'Full Time');
+
+    mustHaveSkills = Array.isArray(job.mustHaveSkills) ? [...job.mustHaveSkills] : [];
+    goodToHaveSkills = Array.isArray(job.goodToHaveSkills) ? [...job.goodToHaveSkills] : [];
+    renderSkillTags(mustHaveTagsContainer, mustHaveSkills, 'must');
+    renderSkillTags(goodToHaveTagsContainer, goodToHaveSkills, 'good');
+    renderDescriptionPreview(jobDescription.value);
+
+    importedLogoUrl = job.logo || '';
+    importedSourceUrl = job.sourceUrl || '';
+    if (importedLogoUrl) {
+      logoPreview.src = importedLogoUrl;
+      logoPreview.classList.remove('hidden');
+      logoPlaceholder.classList.add('hidden');
+    }
+
+    updateFormMode();
+    document.querySelector('.post-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    jobRole.focus({ preventScroll: true });
   }
 
   // ─── Fetch & Render Posted Jobs ───
@@ -467,7 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const filters = job.filters || {};
       const filterTags = Object.values(filters)
-        .filter(Boolean)
+        .filter((value) => typeof value === 'string' && value.trim())
         .map(f => `<span class="pj-filter-tag">${escapeHtml(f)}</span>`)
         .join('');
 
@@ -483,10 +532,20 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="pj-filters">${filterTags}</div>
           <div class="pj-date">Posted: ${posted}</div>
         </div>
-        <button class="pj-delete" data-id="${escapeHtml(job.id)}" title="Delete this job">🗑️</button>
+        <div class="pj-actions">
+          <button class="pj-edit" data-id="${escapeHtml(job.id)}" title="Edit this job" aria-label="Edit this job">✏️</button>
+          <button class="pj-delete" data-id="${escapeHtml(job.id)}" title="Delete this job" aria-label="Delete this job">🗑️</button>
+        </div>
       `;
 
       postedJobsList.appendChild(item);
+    });
+
+    postedJobsList.querySelectorAll('.pj-edit').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        const job = allJobs.find((item) => String(item.id) === event.currentTarget.dataset.id);
+        if (job) editJob(job);
+      });
     });
 
     // Delete handlers
@@ -497,14 +556,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
           const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });
-          if (res.ok) {
+          // 404 means the posting is already gone server-side (e.g. a stale
+          // cached entry) — still clean it up locally so the card disappears.
+          if (res.ok || res.status === 404) {
             try {
               const saved = JSON.parse(localStorage.getItem('hamzo_admin_jobs') || '[]');
               const updated = saved.filter((j) => String(j.id) !== String(id));
               localStorage.setItem('hamzo_admin_jobs', JSON.stringify(updated));
               window.dispatchEvent(new Event('admin_jobs_updated'));
             } catch {}
-            showToast('Job deleted.');
+            showToast(res.ok ? 'Job deleted.' : 'Job was already removed.');
             fetchJobs();
           } else {
             const json = await res.json();
@@ -681,9 +742,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ─── Helpers ───
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // ─── Init ───

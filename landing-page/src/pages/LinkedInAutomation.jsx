@@ -10,14 +10,12 @@ import {
   Clock,
   Copy,
   ExternalLink,
-  Eye,
   Gauge,
   Hourglass,
   Info,
   KeyRound,
   Link2,
   Loader2,
-  MessageCircle,
   MessageSquare,
   PauseCircle,
   Play,
@@ -34,10 +32,8 @@ import {
   Terminal,
   Timer,
   TrendingUp,
-  UserCheck,
   Users,
   X,
-  Zap,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { api, profileStore } from '../lib/api';
@@ -145,21 +141,6 @@ function formatEstimate(seconds) {
   return rest ? `~${hours}h ${rest}m` : `~${hours}h`;
 }
 
-function StatCard({ icon: Icon, value, label, foot, tone = 'neutral' }) {
-  return (
-    <div className={`liq-stat tone-${tone}`}>
-      <div className="liq-stat-top">
-        <span className="liq-stat-icon"><Icon size={15} /></span>
-      </div>
-      <div>
-        <strong>{value}</strong>
-        <span>{label}</span>
-      </div>
-      {foot && <div className="liq-stat-foot">{foot}</div>}
-    </div>
-  );
-}
-
 const TONE_DOT = {
   indigo: '#445cf5',
   blue: '#1d63c9',
@@ -244,6 +225,7 @@ export default function LinkedInAutomation() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [companyScope, setCompanyScope] = useState('all');
   const [visibleCount, setVisibleCount] = useState(60);
+  const connCardRef = useRef(null);
 
   // Activity filters
   const [logLevel, setLogLevel] = useState('all');
@@ -544,6 +526,24 @@ export default function LinkedInAutomation() {
 
   const visibleConnections = filteredConnections.slice(0, visibleCount);
 
+  // Give the tracker a near-full-screen height and scroll the rows inside it,
+  // so the page only scrolls far enough to bring the card into view.
+  useEffect(() => {
+    if (tab !== 'connections') return undefined;
+    const fit = () => {
+      const el = connCardRef.current;
+      if (!el) return;
+      el.style.height = `${Math.max(420, Math.round(window.innerHeight - 96))}px`;
+    };
+    fit();
+    const id = setTimeout(fit, 80);
+    window.addEventListener('resize', fit);
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener('resize', fit);
+    };
+  }, [tab, visibleCount, statusFilter, companyScope, search]);
+
   const filteredLogs = useMemo(() => {
     const query = logQuery.trim().toLowerCase();
     return logs.filter((log) => {
@@ -557,8 +557,12 @@ export default function LinkedInAutomation() {
   const batchTotal = roles.length * perRole;
   const estimateSeconds = batchTotal * 27.5 + Math.max(0, roles.length - 1) * 11.5;
 
-  const needsLogin = liAccount?.status === 'expired' || statusInfo?.status === 'requires_login';
+  const accountNeedsLogin = liAccount?.status === 'expired' || liAccount?.status === 'requires_login';
+  const needsLogin = accountNeedsLogin;
   const connected = Boolean(liAccount?.connected);
+  // A login wall hit by the *background* tracker does not invalidate a session
+  // the account itself still reports as connected, so it gets a calmer notice.
+  const backgroundLoginWall = Boolean(statusInfo?.status === 'requires_login' && connected && !accountNeedsLogin);
   const pending = connectPending || liAccount?.status === 'pending_login';
   // The account file is fetched separately from the campaign data, so avoid
   // flashing "not connected" while that request is still in flight.
@@ -761,12 +765,20 @@ export default function LinkedInAutomation() {
     ? (scopeCompany.accepted || 0) + (scopeCompany.seen || 0) + (scopeCompany.replied || 0)
     : 0;
 
+  const heroSub =
+    scoped.sent === 0
+      ? 'Launch your first campaign to start sending personalized connection requests.'
+      : engaged > 0
+        ? `${connectedCount} accepted the invite · ${scoped.replied} replied — signals update on every status sync.`
+        : scoped.pending > 0
+          ? 'No signals yet — your invites are still waiting on a response from LinkedIn.'
+          : 'Invites are out. Sync to pick up the latest connection states.';
+
   if (loading) {
     return (
       <div className="liq-page">
         <header className="liq-head">
           <div>
-            <div className="liq-eyebrow"><LinkedinIcon size={12} /> LinkedIn outreach</div>
             <h1>LinkedIn Automation</h1>
             <p>Checking your automation server and LinkedIn session…</p>
           </div>
@@ -783,7 +795,6 @@ export default function LinkedInAutomation() {
     <div className="liq-page">
       <header className="liq-head">
         <div>
-          <div className="liq-eyebrow"><LinkedinIcon size={12} /> LinkedIn outreach</div>
           <h1>LinkedIn Automation</h1>
           <p>
             Launch consent-first connection requests from your own LinkedIn session and see exactly
@@ -808,9 +819,6 @@ export default function LinkedInAutomation() {
               </button>
             </>
           )}
-          <span className={`liq-pill ${serverOnline ? meta.tone : 'tone-danger'}`}>
-            <Radio size={11} /> {serverOnline ? meta.label : 'Server offline'}
-          </span>
         </div>
       </header>
 
@@ -864,9 +872,28 @@ export default function LinkedInAutomation() {
             </div>
           )}
 
+          {backgroundLoginWall && (
+            <div className="liq-alert is-soft" role="status">
+              <div className="liq-alert-icon"><ShieldAlert size={18} /></div>
+              <div className="liq-alert-body">
+                <strong>Background sync paused</strong>
+                <p>
+                  LinkedIn asked for a sign-in while checking pending invites. Your saved session is unchanged and
+                  campaigns can still launch — verify it once, and only reconnect if verification fails.
+                </p>
+              </div>
+              <div className="liq-alert-actions">
+                <button type="button" className="liq-btn" onClick={handleVerify} disabled={verifying || isRunning}>
+                  <ShieldCheck size={13} className={verifying ? 'spin' : ''} />
+                  {verifying ? 'Verifying…' : 'Verify session'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <section className={`liq-session ${accountLoading ? 'is-checking' : connected ? 'is-on' : pending ? 'is-warn' : 'is-off'}`}>
             <div className="liq-session-icon">
-              {accountLoading ? <Loader2 className="spin" size={20} /> : connected ? <CheckCircle2 size={20} /> : pending ? <Loader2 className="spin" size={20} /> : <Link2 size={20} />}
+              <LinkedinIcon size={20} />
             </div>
             <div className="liq-session-body">
               {accountLoading ? (
@@ -877,10 +904,6 @@ export default function LinkedInAutomation() {
               ) : connected ? (
                 <>
                   <strong>Connected as {liAccount?.memberName || 'LinkedIn Member'}</strong>
-                  <small>
-                    Requests run inside your own saved Chrome profile. Nothing is posted on your behalf
-                    beyond the invites you launch here.
-                  </small>
                   <div className="liq-session-meta">
                     <span><ShieldCheck size={11} /> <b>{liAccount?.method === 'li_at' ? 'li_at cookie' : 'Login window'}</b></span>
                     <span><Clock size={11} /> Connected <b>{timeAgo(liAccount?.connectedAt)}</b></span>
@@ -913,6 +936,9 @@ export default function LinkedInAutomation() {
             <div className="liq-session-actions">
               {accountLoading ? null : connected ? (
                 <>
+                  <span className="liq-pill tone-success">
+                    <CheckCircle2 size={11} /> Connected
+                  </span>
                   <button type="button" className="liq-btn" onClick={handleVerify} disabled={verifying || isRunning}>
                     <ShieldCheck size={13} className={verifying ? 'spin' : ''} />
                     {verifying ? 'Verifying…' : 'Verify session'}
@@ -923,6 +949,9 @@ export default function LinkedInAutomation() {
                 </>
               ) : pending ? (
                 <>
+                  <span className="liq-pill tone-warn">
+                    <Loader2 className="spin" size={11} /> Signing in…
+                  </span>
                   <button type="button" className="liq-btn" onClick={handleConnect}>
                     <ExternalLink size={13} /> Reopen window
                   </button>
@@ -932,6 +961,7 @@ export default function LinkedInAutomation() {
                 </>
               ) : (
                 <>
+                  <span className="liq-pill tone-neutral">Not connected</span>
                   <button type="button" className="liq-btn primary" onClick={handleConnect}>
                     <Link2 size={13} /> Connect LinkedIn
                   </button>
@@ -998,16 +1028,64 @@ export default function LinkedInAutomation() {
             </div>
           )}
 
-          <section className="liq-stats" aria-label={`Invitation stats${companyScope !== 'all' ? ` for ${companyScope}` : ''}`}>
-            <StatCard icon={Users} value={scoped.sent} label="Requests sent" foot="Personalized invites" tone="accent" />
-            <StatCard icon={Zap} value={engaged} label="Engaged" foot={`${engagementPct}% of sent · any signal`} tone="blue" />
-            <StatCard icon={UserCheck} value={connectedCount} label="Accepted invite" foot={`${acceptancePct}% acceptance · replies included`} tone="success" />
-            <StatCard icon={MessageCircle} value={scoped.replied} label="Replied" foot={`${replyPct}% reply rate`} tone="purple" />
-            <StatCard icon={Eye} value={scoped.seen} label="Seen, not accepted" foot="Opened the note while pending" tone="warn" />
-            <StatCard icon={Clock} value={scoped.pending} label="Pending" foot="No signal yet" tone="neutral" />
-            {scoped.declined > 0 && (
-              <StatCard icon={AlertTriangle} value={scoped.declined} label="Declined" foot="Invite declined or withdrawn" tone="danger" />
-            )}
+          <section className="liq-hero" aria-label={`Invitation summary${companyScope !== 'all' ? ` for ${companyScope}` : ''}`}>
+            <div className="liq-hero-main">
+              <span className="liq-hero-eyebrow">Invitation pipeline</span>
+              <div className="liq-hero-figure">
+                <strong>{engaged}</strong>
+                <span>{engaged === 1 ? 'invite showed a signal' : 'invites showed a signal'}</span>
+              </div>
+              <p className="liq-hero-sub">{heroSub}</p>
+              <div className="liq-hero-actions">
+                <button type="button" className="liq-btn primary" onClick={() => setTab('campaign')}>
+                  Launch campaign <ChevronRight size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="liq-btn"
+                  onClick={handleSync}
+                  disabled={syncing || isRunning}
+                  title={isRunning ? 'Stop the running automation before syncing again.' : 'Sync connection statuses from LinkedIn'}
+                >
+                  <RefreshCw size={13} className={syncing ? 'spin' : ''} />
+                  {syncing ? 'Syncing…' : 'Sync status'}
+                </button>
+              </div>
+            </div>
+            <div className="liq-hero-kpis">
+              <div className="liq-kpi is-indigo">
+                <span>Sent</span>
+                <strong>{scoped.sent}</strong>
+                <small>Personalized invites</small>
+              </div>
+              <div className="liq-kpi is-green">
+                <span>Accepted</span>
+                <strong>{connectedCount}</strong>
+                <small>{acceptancePct}% of sent</small>
+              </div>
+              <div className="liq-kpi is-purple">
+                <span>Replied</span>
+                <strong>{scoped.replied}</strong>
+                <small>{replyPct}% of sent</small>
+              </div>
+              <div className="liq-kpi is-amber">
+                <span>Seen</span>
+                <strong>{scoped.seen}</strong>
+                <small>Viewed, not accepted</small>
+              </div>
+              <div className="liq-kpi is-slate">
+                <span>Pending</span>
+                <strong>{scoped.pending}</strong>
+                <small>No signal yet</small>
+              </div>
+              {scoped.declined > 0 && (
+                <div className="liq-kpi is-red">
+                  <span>Declined</span>
+                  <strong>{scoped.declined}</strong>
+                  <small>Invite withdrawn</small>
+                </div>
+              )}
+            </div>
           </section>
 
           {companyScope !== 'all' && scopeCompany && (
@@ -1469,7 +1547,7 @@ export default function LinkedInAutomation() {
                 </div>
               )}
 
-              <section className="liq-conn-card">
+              <section className="liq-conn-card" ref={connCardRef}>
                 <header className="liq-card-head">
                   <div className="liq-card-title"><Users size={14} /> Connection tracker</div>
                   <span className="liq-muted" style={{ fontSize: 10.5, fontWeight: 700 }}>
@@ -1545,7 +1623,7 @@ export default function LinkedInAutomation() {
                   </div>
                 ) : (
                   <>
-                    <div>
+                    <div className="liq-conn-list">
                       {visibleConnections.map((item) => (
                         <div key={item.id} className="liq-conn-row">
                           <div className="liq-avatar">{initials(item.name)}</div>

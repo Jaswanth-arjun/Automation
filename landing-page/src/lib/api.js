@@ -270,11 +270,20 @@ export const applicationStore = {
   },
   add(application) {
     const all = this.getAll();
-    all.unshift({ ...application, id: Date.now().toString(), appliedAt: new Date().toISOString(), status: 'Applied' });
+    all.unshift({
+      ...application,
+      id: Date.now().toString(),
+      appliedAt: new Date().toISOString(),
+      status: application.status || 'Applied',
+    });
     return saveApplications(all);
   },
   updateStatus(id, status) {
     const all = this.getAll().map(a => a.id === id ? { ...a, status, lastActivity: new Date().toISOString() } : a);
+    return saveApplications(all);
+  },
+  update(id, patch) {
+    const all = this.getAll().map(a => a.id === id ? { ...a, ...patch, lastActivity: new Date().toISOString() } : a);
     return saveApplications(all);
   },
   remove(id) {
@@ -282,3 +291,50 @@ export const applicationStore = {
     return saveApplications(all);
   },
 };
+
+// Per-job progress through the 4-stage apply flow (tailor → referral → LinkedIn
+// → direct apply). This is what the Job Tracker uses to resume where the user
+// paused. Kept separate from applications because outreach is not an application.
+const APPLY_PROGRESS_KEY = 'wayin_apply_progress';
+
+function readApplyProgress() {
+  try {
+    const raw = localStorage.getItem(APPLY_PROGRESS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export const applyProgressStore = {
+  getAll() {
+    const value = readApplyProgress();
+    return value && typeof value === 'object' ? value : {};
+  },
+  get(jobId) {
+    if (!jobId) return {};
+    return this.getAll()[String(jobId)] || {};
+  },
+  mark(jobId, stage, meta = {}) {
+    if (!jobId || !stage) return {};
+    const all = this.getAll();
+    const key = String(jobId);
+    const current = all[key] || {};
+    all[key] = {
+      ...current,
+      ...(meta || {}),
+      [stage]: new Date().toISOString(),
+    };
+    localStorage.setItem(APPLY_PROGRESS_KEY, JSON.stringify(all));
+    window.dispatchEvent(new Event('apply_progress_updated'));
+    return all[key];
+  },
+  clear(jobId) {
+    if (!jobId) return;
+    const all = this.getAll();
+    delete all[String(jobId)];
+    localStorage.setItem(APPLY_PROGRESS_KEY, JSON.stringify(all));
+    window.dispatchEvent(new Event('apply_progress_updated'));
+  },
+};
+

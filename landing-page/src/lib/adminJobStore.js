@@ -91,14 +91,13 @@ export const adminJobStore = {
       const serverJobs = apiJobs.map((j) => this.normalizeBackendJob(j));
       const currentLocal = this.getAll();
 
-      // Check if serverJobs differ from currentLocal (added, deleted, or changed)
+      // Signature catches added/deleted jobs AND edits (e.g. cleaned
+      // descriptions) that keep the same ids — so stale local copies heal.
+      const signature = (jobs) => jobs
+        .map((j) => `${j.id}:${String(j.description || '').length}:${j.applyLink || ''}`)
+        .join('|');
+      const hasChanged = signature(serverJobs) !== signature(currentLocal);
       const serverIds = new Set(serverJobs.map((j) => String(j.id)));
-      const localIds = new Set(currentLocal.map((j) => String(j.id)));
-
-      const hasChanged =
-        serverJobs.length !== currentLocal.length ||
-        serverJobs.some((j) => !localIds.has(String(j.id))) ||
-        currentLocal.some((j) => !serverIds.has(String(j.id)));
 
       if (hasChanged) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(serverJobs));

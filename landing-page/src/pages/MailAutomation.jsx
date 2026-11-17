@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { refreshConnectStatus } from '../lib/connectStatus';
 import {
   SIGNAL_META,
   PIPELINE_SIGNALS,
@@ -115,7 +116,9 @@ function searchMatch(mail, query) {
 export default function MailAutomation() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get('tab') || 'overview';
+  const tabParam = searchParams.get('tab') || 'overview';
+  // The Job updates tab was removed; old links fall back to Overview.
+  const tab = tabParam === 'updates' ? 'overview' : tabParam;
 
   const setTab = (next) => {
     const params = new URLSearchParams(searchParams);
@@ -126,6 +129,8 @@ export default function MailAutomation() {
 
   const [connected, setConnected] = useState(false);
   const [account, setAccount] = useState({ email: '', method: '' });
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [inbox, setInbox] = useState([]);
   const [sent, setSent] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -147,9 +152,49 @@ export default function MailAutomation() {
   const [copiedId, setCopiedId] = useState('');
 
   const searchRef = useRef(null);
+  const splitRef = useRef(null);
   const inflightBodies = useRef(new Set());
 
   const notify = useCallback((type, text) => setFlash({ type, text }), []);
+
+  // Inbox/Sent: size the mail pane so it ends exactly at the bottom of the
+  // viewport. The list then scrolls inside its own scrollbar instead of
+  // stretching the page to the full length of the mailbox.
+  useEffect(() => {
+    if (tab !== 'inbox' && tab !== 'sent') return undefined;
+    const fit = () => {
+      const el = splitRef.current;
+      if (!el) return;
+      if (window.innerWidth < 1180) {
+        el.style.height = '';
+        el.style.marginBottom = '';
+        return;
+      }
+              el.style.marginBottom = '0px';
+        const top = Math.max(0, el.getBoundingClientRect().top);
+        // Fill to the bottom of the screen plus ~2 extra rows, so a short page
+        // scroll reveals them instead of only showing three at a time.
+        const extra = 520;
+        const next = Math.max(240, Math.round(window.innerHeight - top - 18 + extra));
+        el.style.height = `${next}px`;
+        // Cancel whatever trailing space the shell adds below the pane, so the
+        // box ends at the viewport bottom and the page itself never scrolls.
+        const paneBottom = el.getBoundingClientRect().bottom;
+        const trailing = document.documentElement.scrollHeight - paneBottom;
+        if (trailing > 18) el.style.marginBottom = `${18 - Math.round(trailing)}px`;
+    };
+    fit();
+    const timer = setTimeout(fit, 120);
+    window.addEventListener('resize', fit);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', fit);
+      if (splitRef.current) {
+        splitRef.current.style.height = '';
+        splitRef.current.style.marginBottom = '';
+      }
+    };
+  }, [tab, loading]);
 
   const loadMail = useCallback(async () => {
     const [inboxRes, sentRes] = await Promise.allSettled([
@@ -240,6 +285,8 @@ export default function MailAutomation() {
         setLoading(false);
 
         if (justConnected) {
+          // Dashboard checklist + sidebar dot should reflect the new account.
+          refreshConnectStatus(user?.id, { force: true }).catch(() => {});
           notify('ok', `Gmail connected${connectedEmail ? ` — ${connectedEmail}` : ''}. Syncing your inbox…`);
           try {
             await api.triggerSync();
@@ -288,6 +335,8 @@ export default function MailAutomation() {
   }, []);
 
   const handleConnect = async () => {
+    if (connecting) return;
+    setConnecting(true);
     try {
       const res = await api.getAuthUrl();
       if (res?.authUrl) {
@@ -298,23 +347,48 @@ export default function MailAutomation() {
     } catch (err) {
       notify('err', err.message || 'Could not start Gmail sign-in. Is the backend running?');
     }
+    setConnecting(false);
   };
 
   const handleDisconnect = async () => {
+    if (disconnecting) return;
     if (!window.confirm('Disconnect this Gmail account? MailMind will stop syncing until you reconnect.')) return;
+
+    setDisconnecting(true);
+    let failed = false;
     try {
       await api.disconnectGmail();
     } catch {
-      // Local state is still cleared so the user is never stuck.
+      failed = true;
     }
+
     setConnected(false);
     setAccount({ email: '', method: '' });
     setInbox([]);
     setSent([]);
+    setMailError('');
     setSelectedId(null);
     setDetailOpen(false);
     setSummaries({});
-    notify('ok', 'Gmail disconnected. You can reconnect any time.');
+    setComposer(null);
+    setAi(null);
+    localStorage.removeItem('mailmind_last_sync');
+    setLastSync('');
+    setDisconnecting(false);
+
+    // Keep the dashboard checklist and the sidebar dot in sync immediately.
+    try {
+      await refreshConnectStatus(user?.id, { force: true });
+    } catch {
+      // A status refresh failure must never look like a failed disconnect.
+    }
+
+    notify(
+      failed ? 'err' : 'ok',
+      failed
+        ? 'Signed out in this tab, but the server did not confirm it. Reload the page before connecting again.'
+        : 'Gmail disconnected. You can reconnect any time.',
+    );
   };
 
   const handleSync = async () => {
@@ -563,16 +637,6 @@ export default function MailAutomation() {
     return [...sent.filter((mail) => searchMatch(mail, query))].sort(byDate);
   }, [sent, query]);
 
-  const lanes = useMemo(
-    () =>
-      PIPELINE_SIGNALS.map((signal) => ({
-        signal,
-        label: SIGNAL_META[signal].label,
-        mails: inbox.filter((mail) => mail.signal === signal).sort(byDate),
-      })),
-    [inbox],
-  );
-
   const displayName = user?.displayName || user?.email?.split('@')[0] || 'there';
   const lastSyncLabel = lastSync ? `Last sync ${formatWhen(lastSync)}` : 'Not synced yet';
 
@@ -583,12 +647,9 @@ export default function MailAutomation() {
   };
 
   return (
-    <div className="mm-page">
+    <div className={`mm-page ${tab === 'inbox' || tab === 'sent' ? 'is-mail-list' : ''}`}>
       <header className="mm-head">
         <div>
-          <div className="mm-eyebrow">
-            <Sparkles size={12} /> MailMind AI
-          </div>
           <h1>Email command center</h1>
           <p>
             Job threads, recruiter replies and follow-ups — sorted by what needs you next, {displayName}.
@@ -613,7 +674,9 @@ export default function MailAutomation() {
         </div>
       )}
 
-      <section className={`mm-account ${connected ? '' : 'is-off'}`}>
+      <section
+        className={`mm-account ${connected ? '' : 'is-off'} ${tab === 'inbox' || tab === 'sent' ? 'is-compact' : ''}`}
+      >
         <div className="mm-account-icon">
           <Mail size={19} />
         </div>
@@ -627,28 +690,39 @@ export default function MailAutomation() {
         </div>
         {connected ? (
           <>
-            <div className="mm-account-scopes">
-              <span className="mm-scope">read</span>
-              <span className="mm-scope">send</span>
-              <span className="mm-scope">label</span>
-            </div>
             <div className="mm-account-actions">
               <span className="mm-status-pill">
                 <CheckCircle2 size={13} /> Connected
               </span>
-              <button type="button" className="mm-btn" onClick={handleConnect}>
-                Reconnect
+              <button
+                type="button"
+                className="mm-btn"
+                onClick={handleConnect}
+                disabled={connecting || disconnecting}
+                title="Pick a different Google account"
+              >
+                {connecting ? 'Opening Google…' : 'Switch account'}
               </button>
-              <button type="button" className="mm-btn danger" onClick={handleDisconnect}>
-                Disconnect
+              <button
+                type="button"
+                className="mm-btn danger"
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+              >
+                {disconnecting ? 'Disconnecting…' : 'Disconnect'}
               </button>
             </div>
           </>
         ) : (
           <div className="mm-account-actions">
             <span className="mm-status-pill off">Not connected</span>
-            <button type="button" className="mm-btn primary" onClick={handleConnect}>
-              Connect Gmail
+            <button
+              type="button"
+              className="mm-btn primary"
+              onClick={handleConnect}
+              disabled={connecting}
+            >
+              {connecting ? 'Opening Google…' : 'Connect Gmail'}
             </button>
           </div>
         )}
@@ -668,30 +742,52 @@ export default function MailAutomation() {
             </div>
           )}
 
-          <section className="mm-stats">
-            <StatCard icon={Inbox} value={inbox.length} label="Inbox" foot={`${stats.unread} unread · latest ${inbox.length}`} tone="accent" />
-            <StatCard
-              icon={CornerUpLeft}
-              value={stats.needsReply}
-              label="Needs reply"
-              foot="Recruiter, interview or offer"
-              tone="warn"
-            />
-            <StatCard
-              icon={Briefcase}
-              value={stats.interviews}
-              label="Interviews"
-              foot="Invites and scheduling"
-              tone="success"
-            />
-            <StatCard
-              icon={CheckCircle2}
-              value={stats.offers}
-              label="Offers"
-              foot="Offer letters detected"
-              tone="success"
-            />
-            <StatCard icon={Send} value={sent.length} label="Sent" foot="Outreach and replies" tone="accent" />
+          {/* The same daily header on every Mail tab. */}
+          <section className="mm-hero" aria-label="Mail summary">
+            <div className="mm-hero-main">
+              <span className="mm-hero-eyebrow">Today</span>
+              <div className="mm-hero-figure">
+                <strong>{stats.needsReply}</strong>
+                <span>{stats.needsReply === 1 ? 'email needs your reply' : 'emails need your reply'}</span>
+              </div>
+              <p className="mm-hero-sub">
+                {stats.needsReply > 0
+                  ? 'Recruiter replies, interview invites and offer mails are waiting in your inbox.'
+                  : 'Nothing is waiting on you right now. New recruiter mail lands here after a sync.'}
+              </p>
+              <div className="mm-hero-actions">
+                <button type="button" className="mm-btn primary" onClick={() => setTab('inbox')}>
+                  Open inbox <ChevronRight size={13} />
+                </button>
+                <button type="button" className="mm-btn" onClick={handleSync} disabled={syncing}>
+                  <RefreshCw size={13} className={syncing ? 'spin' : ''} />
+                  {syncing ? 'Syncing…' : 'Sync inbox'}
+                </button>
+              </div>
+            </div>
+
+              <div className="mm-hero-kpis">
+                <div className="mm-kpi is-indigo">
+                  <span>Inbox</span>
+                  <strong>{inbox.length}</strong>
+                  <small>{stats.unread} unread</small>
+                </div>
+                <div className="mm-kpi is-green">
+                  <span>Interviews</span>
+                  <strong>{stats.interviews}</strong>
+                  <small>Invites &amp; scheduling</small>
+                </div>
+                <div className="mm-kpi is-amber">
+                  <span>Offers</span>
+                  <strong>{stats.offers}</strong>
+                  <small>Offer letters</small>
+                </div>
+              <div className="mm-kpi is-slate">
+                <span>Sent</span>
+                <strong>{sent.length}</strong>
+                <small>Outreach &amp; replies</small>
+              </div>
+            </div>
           </section>
 
           <div className="mm-tabs" role="tablist" aria-label="Mail views">
@@ -699,7 +795,6 @@ export default function MailAutomation() {
               { key: 'overview', label: 'Overview', icon: Sparkles },
               { key: 'inbox', label: 'Inbox', icon: Inbox, count: inbox.length },
               { key: 'sent', label: 'Sent', icon: Send, count: sent.length },
-              { key: 'updates', label: 'Job updates', icon: Briefcase, count: stats.needsReply + stats.interviews },
             ].map((item) => {
               const Icon = item.icon;
               return (
@@ -777,7 +872,7 @@ export default function MailAutomation() {
                   )}
                 </section>
 
-                <section className="mm-card">
+                <section className="mm-card mm-card-grow">
                   <header className="mm-card-head">
                     <div className="mm-card-title">
                       <Mail size={15} /> Recent received
@@ -796,7 +891,7 @@ export default function MailAutomation() {
                       action={<button type="button" className="mm-btn primary" onClick={handleSync}>Sync now</button>}
                     />
                   ) : (
-                    <div>
+                    <div className="mm-card-body-grow is-list">
                       {[...inbox].sort(byDate).slice(0, 5).map((mail) => (
                         <MailRow
                           key={mail.id}
@@ -824,7 +919,7 @@ export default function MailAutomation() {
                     </span>
                   </header>
                   <div className="mm-card-body">
-                    <div className="mm-pipeline">
+                    <div className="mm-signal-grid">
                       {PIPELINE_SIGNALS.map((signal) => {
                         const meta = SIGNAL_META[signal];
                         const count = inbox.filter((mail) => mail.signal === signal).length;
@@ -832,49 +927,19 @@ export default function MailAutomation() {
                           <button
                             key={signal}
                             type="button"
-                            className="mm-pipe-row"
+                            className={`mm-signal-tile ${count > 0 ? 'has-mail' : ''}`}
+                            style={{ '--mm-signal': signalColor(signal) }}
                             onClick={() => {
                               setFilter(signal.toLowerCase());
                               setTab('inbox');
                             }}
                           >
-                            <span
-                              className="mm-pipe-dot"
-                              style={{ background: signalColor(signal) }}
-                            />
-                            <span className="mm-pipe-label">{meta.label}</span>
-                            <span className="mm-pipe-value">{count}</span>
+                            <span className="mm-signal-tile-top">
+                              <span className="mm-signal-tile-dot" />
+                              <strong>{count}</strong>
+                            </span>
+                            <span className="mm-signal-tile-label">{meta.label}</span>
                           </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </section>
-
-                <section className="mm-card">
-                  <header className="mm-card-head">
-                    <div className="mm-card-title">
-                      <Inbox size={15} /> Inbox mix
-                    </div>
-                  </header>
-                  <div className="mm-card-body">
-                    <div className="mm-bars">
-                      {categoryRows.map((row) => {
-                        const total = Math.max(1, inbox.length);
-                        const pct = Math.round((row.count / total) * 100);
-                        return (
-                          <div className="mm-bar-row" key={row.key}>
-                            <div className="mm-bar-top">
-                              <span>{row.label}</span>
-                              <span>{row.count}</span>
-                            </div>
-                            <div className="mm-bar-track">
-                              <div
-                                className="mm-bar-fill"
-                                style={{ width: `${pct}%`, background: row.color }}
-                              />
-                            </div>
-                          </div>
                         );
                       })}
                     </div>
@@ -900,7 +965,7 @@ export default function MailAutomation() {
                     />
                   ) : (
                     <div>
-                      {[...sent].sort(byDate).slice(0, 4).map((mail) => (
+                      {[...sent].sort(byDate).slice(0, 6).map((mail) => (
                         <div key={mail.id} className="mm-attn-row" onClick={() => openMail(mail)}>
                           <Avatar mail={mail} />
                           <div className="mm-attn-body">
@@ -914,6 +979,42 @@ export default function MailAutomation() {
                       ))}
                     </div>
                   )}
+                </section>
+
+                <section className="mm-card mm-card-grow">
+                  <header className="mm-card-head">
+                    <div className="mm-card-title">
+                      <Inbox size={15} /> Inbox mix
+                    </div>
+                    <span className="mm-muted" style={{ fontSize: 10.5, fontWeight: 700 }}>
+                      {inbox.length} threads
+                    </span>
+                  </header>
+                  <div className="mm-card-body mm-card-body-grow">
+                    {categoryRows.every((row) => !row.count) && (
+                      <p className="mm-empty-note">No categorized mail yet — sync your inbox to see the mix.</p>
+                    )}
+                    <div className="mm-bars">
+                      {categoryRows.map((row) => {
+                        const total = Math.max(1, inbox.length);
+                        const pct = Math.round((row.count / total) * 100);
+                        return (
+                          <div className="mm-bar-row" key={row.key}>
+                            <div className="mm-bar-top">
+                              <span>{row.label}</span>
+                              <span>{row.count}</span>
+                            </div>
+                            <div className="mm-bar-track">
+                              <div
+                                className="mm-bar-fill"
+                                style={{ width: `${pct}%`, background: row.color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </section>
               </div>
             </div>
@@ -931,7 +1032,7 @@ export default function MailAutomation() {
                 inbox={inbox}
                 searchRef={searchRef}
               />
-              <div className="mm-split">
+              <div className="mm-split" ref={splitRef}>
                 <div className="mm-list">
                   {loading ? (
                     <SkeletonRows />
@@ -998,7 +1099,7 @@ export default function MailAutomation() {
                 searchRef={searchRef}
                 simple
               />
-              <div className="mm-split">
+              <div className="mm-split" ref={splitRef}>
                 <div className="mm-list">
                   {loading ? (
                     <SkeletonRows />
@@ -1052,44 +1153,6 @@ export default function MailAutomation() {
             </>
           )}
 
-          {tab === 'updates' && (
-            <section>
-              <div className="mm-spread" style={{ marginBottom: 12 }}>
-                <p className="mm-muted" style={{ margin: 0, fontSize: 12 }}>
-                  Every recruiter signal MailMind found in your inbox. Open a card to read the email and reply.
-                </p>
-              </div>
-              <div className="mm-board">
-                {lanes.map((lane) => (
-                  <div className="mm-lane" key={lane.signal}>
-                    <header className="mm-lane-head">
-                      <span className="mm-lane-title">
-                        <span
-                          className="mm-pipe-dot"
-                          style={{ background: signalColor(lane.signal) }}
-                        />
-                        {lane.label}
-                      </span>
-                      <span className="mm-lane-count">{lane.mails.length}</span>
-                    </header>
-                    <div className="mm-lane-list">
-                      {lane.mails.length === 0 ? (
-                        <div className="mm-lane-empty">Nothing here yet</div>
-                      ) : (
-                        lane.mails.slice(0, 5).map((mail) => (
-                          <div key={mail.id} className="mm-lane-card" onClick={() => openMail(mail)}>
-                            <strong>{mail.company || senderLabel(mail)}</strong>
-                            <small>{mail.subject || '(No subject)'}</small>
-                            <small style={{ color: '#a0a29a' }}>{formatWhen(mail.receivedAt)}</small>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
         </>
       )}
 
@@ -1098,7 +1161,7 @@ export default function MailAutomation() {
         screen it becomes a fixed sheet, so we also render it here when a mail
         was opened from Overview/Job updates and the user is not on those tabs.
       */}
-      {(tab === 'overview' || tab === 'updates') && detailOpen && selected && (
+      {tab === 'overview' && detailOpen && selected && (
         <div className="mm-overlay mm-sheet-overlay" onClick={() => setDetailOpen(false)}>
           <div className="mm-sheet" onClick={(event) => event.stopPropagation()}>
             <ReadingPane
@@ -1196,23 +1259,6 @@ export default function MailAutomation() {
 /* ------------------------------------------------------------------ */
 /* Presentational components                                          */
 /* ------------------------------------------------------------------ */
-
-function StatCard({ icon: Icon, value, label, foot, tone = 'neutral' }) {
-  return (
-    <div className={`mm-stat tone-${tone}`}>
-      <div className="mm-stat-top">
-        <span className="mm-stat-icon">
-          <Icon size={15} />
-        </span>
-      </div>
-      <div>
-        <strong>{value}</strong>
-        <span>{label}</span>
-      </div>
-      {foot && <div className="mm-stat-foot">{foot}</div>}
-    </div>
-  );
-}
 
 function SignalChip({ signal }) {
   const meta = SIGNAL_META[signal] || SIGNAL_META.OTHER;

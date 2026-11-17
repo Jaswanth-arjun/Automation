@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Upload, FileText, Trash2, CheckCircle, Clock, Plus, X } from 'lucide-react';
-import EmptyState from '../components/EmptyState';
+import { Upload, FileText, Trash2, CheckCircle, Clock, Plus, X, Eye, LayoutTemplate } from 'lucide-react';
 import { resumeStore, profileStore, api } from '../lib/api';
+import { RESUME_TEMPLATES, getSelectedTemplateId, setSelectedTemplateId, DEFAULT_TEMPLATE_ID } from '../lib/resumeTemplates';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 
 const ANSWERS_KEY = 'hamzo_apply_answers';
@@ -89,6 +89,48 @@ function downloadPdf(base64, filename) {
   link.click();
 }
 
+/** Small stylised preview of a template's layout (pure CSS, no PDF render). */
+function TemplatePreview({ variant }) {
+  const line = (width, opacity = 1, height = 4) => (
+    <div style={{ height, borderRadius: 2, background: '#d9d7d0', width, opacity, marginBottom: 5 }} />
+  );
+  const accent = '#445cf5';
+  const body = (
+    <div style={{ padding: '10px 12px' }}>
+      {variant === 'compact' ? (
+        <>
+          {line('58%', 1, 3)}{line('40%', 0.8, 3)}
+          <div style={{ height: 6 }} />
+          {line('30%', 1, 3)}{line('92%', 0.8, 3)}{line('86%', 0.8, 3)}{line('78%', 0.8, 3)}{line('90%', 0.8, 3)}{line('64%', 0.8, 3)}
+          <div style={{ height: 5 }} />
+          {line('34%', 1, 3)}{line('88%', 0.8, 3)}{line('94%', 0.8, 3)}{line('72%', 0.8, 3)}{line('83%', 0.8, 3)}
+        </>
+      ) : (
+        <>
+          {line('62%')}{line('44%', 0.85)}
+          <div style={{ height: 8 }} />
+          {line('32%')}
+          {line('90%', 0.85)}{line('80%', 0.85)}{line('64%', 0.85)}
+          <div style={{ height: 7 }} />
+          {line('38%')}
+          {line('84%', 0.85)}{line('92%', 0.85)}{line('70%', 0.85)}
+        </>
+      )}
+    </div>
+  );
+  const header = variant === 'modern'
+    ? <div style={{ height: 22, background: accent, opacity: 0.9 }} />
+    : variant === 'classic'
+      ? <div style={{ height: 22, background: '#171817', opacity: 0.9 }} />
+      : null;
+  return (
+    <div style={{ aspectRatio: '1 / 1.25', background: '#fff', border: '1px solid #d9d9d2', borderRadius: 8, overflow: 'hidden' }}>
+      {header}
+      {body}
+    </div>
+  );
+}
+
 export default function ResumeManager() {
   const [resumes, setResumes] = useState(() => resumeStore.getAll());
   const fileRef = useRef(null);
@@ -100,6 +142,9 @@ export default function ResumeManager() {
   const [tailored, setTailored] = useState(null);
   const [applyUrl, setApplyUrl] = useState('');
   const [formatId, setFormatId] = useState('recommended');
+  const [profileResume, setProfileResume] = useState(() => profileStore.get()?.resume || null);
+  const [selectedTemplate, setSelectedTemplate] = useState(() => getSelectedTemplateId());
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     const onMessage = (event) => {
@@ -182,6 +227,7 @@ export default function ResumeManager() {
         url,
         profile: mappedProfile,
         resumeText,
+        template: selectedTemplate,
       });
       setTailored(result);
       setFormatId(result.recommendedId || 'recommended');
@@ -266,27 +312,65 @@ export default function ResumeManager() {
     setStatus('The job page opened with your tailored PDF ready to attach. Hamzo Apply will fill the form on that tab.');
   };
 
-  const handleUpload = async (e) => {
+  const handleResumeUpload = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    let text = '';
-    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-      const body = new FormData();
-      body.append('file', file);
-      try {
+    setUploading(true);
+    setError('');
+    setStatus('');
+    try {
+      let text = '';
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        const body = new FormData();
+        body.append('file', file);
         const res = await fetch('/api/resume/extract-text', { method: 'POST', body });
         const data = await res.json();
         text = data.text || '';
-      } catch {}
+      }
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const resumeMeta = {
+        fileName: file.name,
+        fileSize: `${(file.size / 1024).toFixed(1)} KB`,
+        uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        dataUrl,
+        fileType: file.type || 'application/pdf',
+        text,
+      };
+      // One master resume everywhere: the Profile section card and the
+      // tailoring store stay in sync with whichever page uploaded it.
+      const current = profileStore.get() || {};
+      profileStore.save({ ...current, resume: resumeMeta });
+      setProfileResume(resumeMeta);
+      setResumes(resumeStore.add({
+        name: file.name,
+        size: resumeMeta.fileSize,
+        type: file.type,
+        text,
+      }));
+      setStatus('Resume uploaded. Applications will be tailored in your selected template.');
+    } catch (err) {
+      setError('Could not read that resume. Try a text-based PDF.');
+    } finally {
+      setUploading(false);
     }
-    setResumes(resumeStore.add({
-      name: file.name,
-      size: (file.size / 1024).toFixed(1) + ' KB',
-      type: file.type,
-      text,
-    }));
   };
+
+  const viewProfileResume = () => {
+    if (!profileResume?.dataUrl) return;
+    const win = window.open();
+    if (!win) return;
+    win.document.write(
+      `<iframe src="${profileResume.dataUrl}" frameborder="0" style="border:0; top:0; left:0; bottom:0; right:0; width:100%; height:100%;" allowfullscreen></iframe>`
+    );
+  };
+
+  const chooseTemplate = (id) => setSelectedTemplate(setSelectedTemplateId(id));
 
   const handleSetActive = (id) => setResumes(resumeStore.setActive(id));
   const handleRemove = (id) => setResumes(resumeStore.remove(id));
@@ -296,7 +380,7 @@ export default function ResumeManager() {
       <header className="page-header">
         <div>
           <h1>Resume</h1>
-          <p>Manage your master resume and job-specific versions.</p>
+          <p>Manage your master resume, pick a template, and tailor it for every application.</p>
         </div>
         <div className="header-actions">
           <button className="btn-ghost" onClick={() => { setError(''); setLinkOpen(true); }}>
@@ -306,55 +390,157 @@ export default function ResumeManager() {
             <Upload size={16} /> Upload Resume
           </button>
         </div>
-        <input ref={fileRef} type="file" accept=".pdf,.doc,.docx" onChange={handleUpload} style={{ display: 'none' }} />
+        <input ref={fileRef} type="file" accept=".pdf,.doc,.docx" onChange={handleResumeUpload} style={{ display: 'none' }} />
       </header>
 
-      {resumes.length === 0 ? (
-        <EmptyState
-          icon={FileText}
-          title="No resume uploaded"
-          description="Upload your master resume to unlock job matching and streamline applications."
-          actionLabel="Upload Resume"
-          onAction={() => fileRef.current?.click()}
-        />
-      ) : (
-        <div className="resume-list">
-          {resumes.map(r => (
-            <article key={r.id} className={`resume-card ${r.isActive ? 'active' : ''}`} onClick={() => openPdf(r.pdfBase64)} style={{ cursor: r.pdfBase64 ? 'pointer' : 'default' }}>
-              <div className="resume-card-icon"><FileText size={24} /></div>
-              <div className="resume-card-info">
-                <strong>{r.name}</strong>
-                <div className="resume-card-meta">
-                  <span>{r.size}</span>
-                  <span><Clock size={12} /> {new Date(r.uploadedAt).toLocaleDateString()}</span>
+      {/* Master resume — shown from the Profile upload, or uploaded right here */}
+      <section className="profile-section">
+        <h2>Your resume</h2>
+        {profileResume ? (
+          <article className="resume-card active" onClick={viewProfileResume} style={{ cursor: 'pointer' }}>
+            <div className="resume-card-icon"><FileText size={24} /></div>
+            <div className="resume-card-info">
+              <strong>{profileResume.fileName}</strong>
+              <div className="resume-card-meta">
+                <span>{profileResume.fileSize}</span>
+                <span><Clock size={12} /> Uploaded on {profileResume.uploadedAt}</span>
+              </div>
+            </div>
+            <div className="resume-card-actions" onClick={(event) => event.stopPropagation()}>
+              <span className="status-badge connected"><CheckCircle size={14} /> Master</span>
+              <button className="btn-ghost sm" onClick={viewProfileResume}><Eye size={14} /> View</button>
+              <button className="btn-ghost sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Replace</button>
+            </div>
+          </article>
+        ) : (
+          <div
+            onClick={() => fileRef.current?.click()}
+            style={{
+              border: '2px dashed #c9c8c0',
+              borderRadius: 16,
+              background: '#fbfbf8',
+              padding: '30px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ width: 52, height: 52, borderRadius: 14, background: '#f0efe9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Upload size={24} />
+            </div>
+            <strong style={{ fontSize: 16 }}>{uploading ? 'Reading your resume…' : 'Upload your resume'}</strong>
+            <p style={{ fontSize: 13, color: '#666', margin: 0, maxWidth: 440, lineHeight: 1.5 }}>
+              Upload the master resume here (or from your Profile section). HAMZO tailors it for every application in the template you select below.
+            </p>
+            <span
+              className="btn-accent"
+              style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10, fontSize: 13 }}
+            >
+              <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload Resume'}
+            </span>
+          </div>
+        )}
+      </section>
+
+      {/* Template gallery — the selected template drives every tailored resume */}
+      <section className="profile-section" style={{ marginTop: 20 }}>
+        <h2>Resume templates</h2>
+        <p style={{ fontSize: 13.5, color: '#666', margin: '4px 0 14px', lineHeight: 1.5 }}>
+          Select a template once — every application resume HAMZO tailors will use it until you change it.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+          {RESUME_TEMPLATES.map((t) => {
+            const selected = selectedTemplate === t.id;
+            return (
+              <div
+                key={t.id}
+                onClick={() => chooseTemplate(t.id)}
+                style={{
+                  border: selected ? '2px solid #445cf5' : '1px solid #d9d9d2',
+                  borderRadius: 14,
+                  background: selected ? '#f4f6ff' : '#fff',
+                  padding: 14,
+                  cursor: 'pointer',
+                  boxShadow: selected ? '0 8px 24px rgba(68, 92, 245, 0.12)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                  transition: 'border-color 0.15s, background 0.15s, box-shadow 0.15s',
+                  position: 'relative',
+                }}
+              >
+                <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 6, zIndex: 1 }}>
+                  {selected && (
+                    <span style={{ fontSize: 10, fontWeight: 800, background: '#445cf5', color: '#fff', padding: '3px 8px', borderRadius: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <CheckCircle size={11} /> Selected
+                    </span>
+                  )}
+                  {!selected && t.isDefault && (
+                    <span style={{ fontSize: 10, fontWeight: 800, background: '#f0efe9', color: '#555852', padding: '3px 8px', borderRadius: 12 }}>
+                      Default
+                    </span>
+                  )}
                 </div>
+                <TemplatePreview variant={t.id} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
+                  <LayoutTemplate size={14} />
+                  <strong style={{ fontSize: 14.5 }}>{t.name}</strong>
+                </div>
+                <p style={{ fontSize: 12, color: '#666', margin: '4px 0 0', lineHeight: 1.45 }}>{t.description}</p>
               </div>
-              <div className="resume-card-actions" onClick={(event) => event.stopPropagation()}>
-                {r.pdfBase64 && (
-                  <button className="btn-ghost sm" onClick={() => downloadPdf(r.pdfBase64, r.name)}>Download PDF</button>
-                )}
-                {r.isActive ? (
-                  <span className="status-badge connected"><CheckCircle size={14} /> Active</span>
-                ) : (
-                  <button className="btn-ghost sm" onClick={() => handleSetActive(r.id)}>Set Active</button>
-                )}
-                <button className="btn-ghost danger sm" onClick={() => handleRemove(r.id)}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </article>
-          ))}
+            );
+          })}
         </div>
-      )}
+      </section>
+
+      {/* Tailored + uploaded resume versions */}
+      <section className="profile-section" style={{ marginTop: 20 }}>
+        <h2>Resume versions</h2>
+        {resumes.length === 0 ? (
+          <p style={{ fontSize: 13.5, color: '#666', margin: 0 }}>
+            Tailored versions appear here after you apply with a job link.
+          </p>
+        ) : (
+          <div className="resume-list">
+            {resumes.map(r => (
+              <article key={r.id} className={`resume-card ${r.isActive ? 'active' : ''}`} onClick={() => openPdf(r.pdfBase64)} style={{ cursor: r.pdfBase64 ? 'pointer' : 'default' }}>
+                <div className="resume-card-icon"><FileText size={24} /></div>
+                <div className="resume-card-info">
+                  <strong>{r.name}</strong>
+                  <div className="resume-card-meta">
+                    <span>{r.size}</span>
+                    <span><Clock size={12} /> {new Date(r.uploadedAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+                <div className="resume-card-actions" onClick={(event) => event.stopPropagation()}>
+                  {r.pdfBase64 && (
+                    <button className="btn-ghost sm" onClick={() => downloadPdf(r.pdfBase64, r.name)}>Download PDF</button>
+                  )}
+                  {r.isActive ? (
+                    <span className="status-badge connected"><CheckCircle size={14} /> Active</span>
+                  ) : (
+                    <button className="btn-ghost sm" onClick={() => handleSetActive(r.id)}>Set Active</button>
+                  )}
+                  <button className="btn-ghost danger sm" onClick={() => handleRemove(r.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       <section className="resume-info">
         <h3>How resume management works</h3>
         <div className="resume-flow">
           <div className="flow-step"><span>1</span><p>Upload your master resume</p></div>
           <div className="flow-arrow">→</div>
-          <div className="flow-step"><span>2</span><p>Paste an external job link to tailor one page</p></div>
+          <div className="flow-step"><span>2</span><p>Select the resume template you like</p></div>
           <div className="flow-arrow">→</div>
-          <div className="flow-step"><span>3</span><p>Attached to applications</p></div>
+          <div className="flow-step"><span>3</span><p>Paste an external job link to tailor one page</p></div>
+          <div className="flow-arrow">→</div>
+          <div className="flow-step"><span>4</span><p>Attached to applications</p></div>
         </div>
       </section>
 

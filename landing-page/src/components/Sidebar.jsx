@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { profileStore, getUserName } from '../lib/api';
+import { useConnectStatus } from '../lib/connectStatus';
 import PawLogo from './PawLogo';
 
 const LinkedinIcon = ({ size = 18 }) => (
@@ -50,8 +51,8 @@ const navSections = [
   {
     title: 'AUTOMATION',
     items: [
-      { to: '/dashboard/mail', icon: Mail, label: 'Mail' },
-      { to: '/dashboard/linkedin', icon: LinkedinIcon, label: 'LinkedIn' },
+      { to: '/dashboard/mail', icon: Mail, label: 'Mail', health: 'mail' },
+      { to: '/dashboard/linkedin', icon: LinkedinIcon, label: 'LinkedIn', health: 'linkedin' },
     ],
   },
   {
@@ -77,6 +78,20 @@ export default function Sidebar({ open, onClose }) {
       .toUpperCase() || 'U';
 
   const [completionPct, setCompletionPct] = useState(40);
+  const { mail: mailHealth, linkedin: liHealth, error: healthError } = useConnectStatus(user?.id);
+
+  const healthOf = (key) => {
+    if (healthError) return null;
+    const channel = key === 'mail' ? mailHealth : liHealth;
+    if (!channel) return null;
+    if (channel.state === 'connected') {
+      return { tone: 'is-on', label: `${key === 'mail' ? 'Gmail' : 'LinkedIn'} connected` };
+    }
+    if (channel.state === 'expired' || channel.state === 'pending') {
+      return { tone: 'is-warn', label: `${key === 'mail' ? 'Gmail' : 'LinkedIn'} needs a re-login` };
+    }
+    return { tone: 'is-off', label: `Connect ${key === 'mail' ? 'Gmail' : 'LinkedIn'} to use this` };
+  };
 
   useEffect(() => {
     const calculatePct = () => {
@@ -135,7 +150,7 @@ export default function Sidebar({ open, onClose }) {
         {/* Sidebar Header Brand */}
         <div className="sidebar-header">
           <NavLink to="/dashboard" className="sidebar-brand" onClick={onClose}>
-            <PawLogo size={28} />
+            <span className="sidebar-brand-mark"><PawLogo size={26} /></span>
             <span className="sidebar-brand-text">HAMZO</span>
           </NavLink>
           <button className="sidebar-close" onClick={onClose} aria-label="Close sidebar">
@@ -150,6 +165,7 @@ export default function Sidebar({ open, onClose }) {
               <div className="sidebar-section-label">{section.title}</div>
               {section.items.map((item) => {
                 const Icon = item.icon;
+                const health = item.health ? healthOf(item.health) : null;
                 return (
                   <NavLink
                     key={item.to}
@@ -160,8 +176,16 @@ export default function Sidebar({ open, onClose }) {
                     }
                     onClick={onClose}
                   >
-                    <Icon size={18} />
+                    <Icon size={19} />
                     <span>{item.label}</span>
+                    {health && (
+                      <span
+                        className={`sidebar-health ${health.tone}`}
+                        title={health.label}
+                        aria-label={health.label}
+                        role="img"
+                      />
+                    )}
                   </NavLink>
                 );
               })}
