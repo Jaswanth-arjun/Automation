@@ -36,7 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import { api, profileStore, campaignPrefsStore } from '../lib/api';
+import { api, profileStore, resumeStore, campaignPrefsStore } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import CampaignStatus from '../components/CampaignStatus';
 import './LinkedInAutomation.css';
@@ -737,6 +737,9 @@ export default function LinkedInAutomation() {
 
     setStarting(true);
     try {
+      const profile = profileStore.get() || {};
+      const resumes = resumeStore.getAll();
+      const activeResume = resumes.find((resume) => resume.isActive) || resumes[0];
       campaignPrefsStore.save({
         company: company.trim(),
         role: jobRole.trim(),
@@ -754,7 +757,13 @@ export default function LinkedInAutomation() {
         sendInvites: true,
         useAINotes: useAI,
         connectionNote: note.trim(),
-        userProfile: profileStore.get() || {},
+        userProfile: {
+          ...profile,
+          resume: {
+            ...(profile.resume || {}),
+            text: String(activeResume?.text || profile.resume?.text || '').slice(0, 4000),
+          },
+        },
       });
       if (res?.campaign) setCampaign(res.campaign);
       setLogs([]);

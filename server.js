@@ -318,6 +318,7 @@ app.post('/api/resume/render-edited-pdf', async (req, res) => {
          width and point-sized typography, matching the PDFKit renderer. */
       body { font-family: "Times New Roman", Times, serif; font-size: 10pt; line-height: 1.18; }
       .resume-page { width: 100%; min-height: 100%; padding: 8.6pt 28.8pt 8pt; margin: 0; }
+      .resume-page.modern { --u: 1pt; }
       .resume-page header { text-align: center; border: 0; padding: 0; margin: 0; }
       .resume-page h1 { font-size: 16.5pt; line-height: 1; margin: 0 0 3pt; text-transform: uppercase; }
       .resume-page h2 { font-size: 10.5pt; line-height: 1; border-bottom: 1px solid #222; padding: 0 0 2pt; margin: 3.2pt 0 2pt; }

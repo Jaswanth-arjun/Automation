@@ -323,6 +323,9 @@ export default function Apply() {
         useAI: liUseAI,
         note: liNote,
       });
+      const profile = profileStore.get() || {};
+      const resumes = resumeStore.getAll();
+      const activeResume = resumes.find((resume) => resume.isActive) || resumes[0];
       const res = await api.startCampaign({
         userId: liUserId,
         company: liCompany.trim(),
@@ -332,7 +335,13 @@ export default function Apply() {
         sendInvites: true,
         useAINotes: liUseAI,
         connectionNote: liNote.trim(),
-        userProfile: profileStore.get() || {},
+        userProfile: {
+          ...profile,
+          resume: {
+            ...(profile.resume || {}),
+            text: String(activeResume?.text || profile.resume?.text || '').slice(0, 4000),
+          },
+        },
       });
       if (res?.campaign) setLiCampaign(res.campaign);
       liFlash(

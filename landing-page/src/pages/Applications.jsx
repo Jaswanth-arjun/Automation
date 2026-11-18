@@ -5,7 +5,6 @@ import {
   X, RefreshCw, AlertCircle, Sparkles, Search, ExternalLink,
 } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
-import CampaignStatus from '../components/CampaignStatus';
 import {
   buildTrackerEntries, fetchTrackerSources, matchesTrackerFilter,
   TRACKER_FILTERS, TRACKER_STATUS_META, STAGE_ORDER, STAGE_LABELS,
@@ -243,15 +242,6 @@ export default function Applications() {
           <button type="button" onClick={() => setNotice(null)}><X size={14} /></button>
         </div>
       )}
-
-      {/* Synchronized live LinkedIn campaign banner (Requirement 6B) */}
-      <div style={{ marginBottom: 16 }}>
-        <CampaignStatus
-          variant="compact"
-          onNavigate={() => navigate('/dashboard/linkedin')}
-          showLog={false}
-        />
-      </div>
 
       {trackable.length === 0 && !sourcesLoading ? (
         <EmptyState
