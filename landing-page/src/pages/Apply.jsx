@@ -2254,7 +2254,7 @@ ${firstName}`;
       {editorState && (
         <ResumeRichEditor
           plainText={editorState.format?.editedPlainText || editorState.format?.plainText || tailorResult?.plainText || ''}
-          initialHtml={editorState.format?.editedHtml || tailorResult?.editableHtml || ''}
+          initialHtml={editorState.format?.editedHtml || editorState.format?.editableHtml || tailorResult?.editableHtml || ''}
           onClose={() => setEditorState(null)}
           onSave={({ html, text }) => {
             setTailorResult(previous => previous ? {

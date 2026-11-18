@@ -68,5 +68,42 @@
       "name": "Nelluru Jaswanth"
     },
     "postedAt": "2026-11-17T03:53:06.619Z"
+  },
+  {
+    "id": "6cb3bc31-3f5c-4bae-9ffa-723db16a9b31",
+    "logo": "https://www.gstatic.com/hiring/CportalUi/meta/og_image_google_careers.png",
+    "role": "Forward Deployed Engineer Intern, 2027",
+    "company": "Google",
+    "filters": {
+      "experience": "Freshers",
+      "visibility": "Confidential",
+      "workMode": "Bengaluru, India",
+      "type": "Internship",
+      "category": "Freshers",
+      "location": "Bengaluru, India",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "Python",
+      "Data Structures and Algorithms (DSA)"
+    ],
+    "goodToHaveSkills": [
+      "React",
+      "AI",
+      "GCP",
+      "Debugging",
+      "Communication / Teamwork"
+    ],
+    "applyLink": "https://www.google.com/about/careers/applications/jobs/results/96299220855595718-forward-deployed-engineer-intern/",
+    "description": "Careers Careers\nSkip navigation links home home work_outline work_outline\nnoogler_hat noogler_hat\nStudents\nStudents google google\nHow we work\nHow we work handyman handyman person_outline person_outline\nYour career\nYour career help_outline\nHelp link feedback Send feedback more_vert\n• Help\n• Send Feedback\nCareers Careers home Home work_outline Jobs expand_more noogler_hat Students expand_more google How we work expand_more handyman How we hire expand_more person_outline Your career expand_more\n\n## About us open_in_new Contact us open_in_new Press open_in_new\n\nRelated Information\nInvestor relations open_in_new Blog open_in_new\n\n## Minimum qualifications\n\n• Currently pursuing a Bachelor's or Master's degree in Computer Science, Engineering, or a related technical field.\n• Enrolled in the [penultimate academic year] of a Bachelor's or Master's degree.\n• Experience in Python programming language, and data structures and algorithms.\n• Experience taking production-grade AI-driven solutions from conception to launch and architecting AI systems on cloud platforms (e.g., Google Cloud Platform).\n• Experience building pipelines for structured and unstructured data using both vector databases and RAG-like architectures to power enterprise AI solutions.\n\n## Preferred qualifications\n\n• Experience implementing multi-agent systems using frameworks (e.g., LangGraph, CrewAI, ADK) and complex patterns (e.g., ReAct, self-reflection, hierarchical delegation).\n• Experience leading technical discovery sessions.\n• Knowledge of Large Language Model (LLM) native metrics (e.g., tokens/sec, cost-per-request) and techniques for optimizing state management and granular tracing.\n\n## About the job\n\nIt’s an exciting time to join our Google Cloud Consulting team, leading the AI and cloud revolution for businesses worldwide. In this role, you’ll work hand-in-hand with our customers as an embedded builder, bridging the gap between frontier AI products and production-grade reality. We are looking for early-career, high-agency engineers with a founder’s mindset. Moving beyond high-level architecture, you will code, debug, and jointly ship bespoke agentic solutions directly within customer environments while helping solve integration, data readiness, and state-management challenges. Joining a collaborative culture with direct access to Google's engineering minds, you will act as an innovator-builder, providing white-glove deployment of complex AI systems and serving as a critical feedback loop to shape Google Cloud’s future product roadmap.\nGoogle Cloud accelerates every organization’s ability to digitally transform its business and industry. We deliver enterprise-grade solutions that leverage Google’s technology, and tools that help developers build more sustainably. Customers in more than 200 countries and territories turn to Google Cloud as their trusted partner to enable growth and solve their most critical business problems.\n\n## Responsibilities\n\n• Scale rapid proofs-of-concept into robust, production-grade multi-agent workflows and cloud solutions.\n• Write pristine, efficient code and enforce rigorous standards in code reviews.\n• Build secure APIs and data pipelines connecting Google AI and cloud tech to enterprise infrastructure.\n• Develop high-performance evaluation and debugging frameworks to guarantee system accuracy, safety, and low latency. Partner with client engineering teams to foster Google-grade development practices and ensure long-term adoption.\n• Translate field insights and roadblocks into formal feature requests and reusable core modules. Drive full-stack project priorities and infrastructure challenges end-to-end with enthusiasm and accountability.\nIf you have a need that requires accommodation, please let us know by completing our Accommodations for Applicants form .\n• Google is a global company and, in order to facilitate efficient collaboration and communication globally, English proficiency is a requirement for all roles unless stated otherwise in the job posting.\n• To all recruitment agencies: Google does not accept agency resumes.\n• Please do not forward resumes to our jobs alias, Google employees, or any other organization location.\n• Google is not responsible for any fees related to unsolicited resumes.\n• Equity is granted exclusively and discretionarily by Alphabet Inc. on the basis of an agreement concluded between you and Alphabet Inc.\n• Alphabet Inc. is your sole contractual partner with respect to equity grants.\n• GSU grants are not guaranteed, are discretionary, are subject to approval by the Alphabet Inc. board of directors or its delegate, the terms of the relevant Alphabet Inc. stock plan, and your grant agreement.\n• They have no impact on statutory payments.\n• Current or past grants do not confer an acquired right.\nFollow Life at Google on\nMore about us\n\n## About us open_in_new Contact us open_in_new Press open_in_new\n\nRelated Information\nInvestor relations open_in_new Blog open_in_new\nRelated Information\nInvestor relations open_in_new Blog open_in_new",
+    "sourceUrl": "https://www.google.com/about/careers/applications/jobs/results/96299220855595718-forward-deployed-engineer-intern/",
+    "postedBy": {
+      "id": "google-nlr.jaswanth2004@gmail.com",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "Nelluru Jaswanth"
+    },
+    "postedAt": "2026-11-18T07:34:56.400Z"
   }
 ]

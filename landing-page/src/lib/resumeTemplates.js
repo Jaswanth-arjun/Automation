@@ -15,7 +15,7 @@ export const RESUME_TEMPLATES = [
   {
     id: 'modern',
     name: 'Modern',
-    description: 'Accent-styled section headings with a contemporary look.',
+    description: 'Centered navy name with contact icons, navy section headings with rules, bulleted experience and a three-column skills grid.',
   },
   {
     id: 'compact',

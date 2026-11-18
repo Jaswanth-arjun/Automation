@@ -131,7 +131,7 @@ export function ResumeRichEditor({ plainText, initialHtml = '', onSave, onClose,
   const printResume = () => printResumeHtml(editorRef.current?.innerHTML || '');
   return <div style={editorOverlayStyle} onClick={onClose}>
     <div style={editorDialogStyle} onClick={event => event.stopPropagation()}>
-      <style>{`.resume-page{width:100%;margin:0 auto}.resume-page header{text-align:center;border:0;padding:0;margin:0}.resume-page h1{font-family:"Times New Roman",Times,serif;font-size:16.5px;line-height:1;margin:0 0 3px;text-transform:uppercase}.resume-page h2{font-size:10.5px;line-height:1;border-bottom:1px solid #222;padding:0 0 2px;margin:3.2px 0 2px}.resume-page p{font-size:10px;line-height:1.18;margin:0 0 1px}.resume-page article{margin:0 0 2px}.resume-page .entry-title{display:flex;justify-content:space-between;gap:10px;line-height:1.1}.resume-page .entry-link{margin:0}.resume-page a{color:#1649d8;text-decoration:none}.resume-page .skill-row{display:grid;grid-template-columns:140px 1fr;gap:0;margin:0;line-height:1.12}.resume-page i{font-weight:normal}`}</style>
+      <style>{`.resume-page{width:100%;margin:0 auto}.resume-page header{text-align:center;border:0;padding:0;margin:0}.resume-page h1{font-family:"Times New Roman",Times,serif;font-size:16.5px;line-height:1;margin:0 0 3px;text-transform:uppercase}.resume-page h2{font-size:10.5px;line-height:1;border-bottom:1px solid #222;padding:0 0 2px;margin:3.2px 0 2px}.resume-page p{font-size:10px;line-height:1.18;margin:0 0 1px}.resume-page article{margin:0 0 2px}.resume-page .entry-title{display:flex;justify-content:space-between;gap:10px;line-height:1.1}.resume-page .entry-link{margin:0}.resume-page a{color:#1649d8;text-decoration:none}.resume-page .skill-row{display:grid;grid-template-columns:140px 1fr;gap:0;margin:0;line-height:1.12}.resume-page i{font-weight:normal}div>.resume-page.modern{padding:0}`}</style>
       <div style={editorHeaderStyle}><div><strong>{readOnly ? 'Resume preview' : 'Edit resume'}</strong><span>{readOnly ? 'Read-only view. Use the Edit button to make changes.' : 'Changes are saved to this tailored version.'}</span></div><button onClick={onClose} style={closeButtonStyle}><X size={18} /></button></div>
       {!readOnly && (
         <div style={editorToolbarStyle}>
@@ -868,7 +868,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
          {editorState && (
            <ResumeRichEditor
              plainText={editorState.format?.plainText || tailoredData?.plainText || ''}
-             initialHtml={editorState.format?.editedHtml || tailoredData?.editableHtml || ''}
+             initialHtml={editorState.format?.editedHtml || editorState.format?.editableHtml || tailoredData?.editableHtml || ''}
              onClose={() => setEditorState(null)}
              onSave={({ html, text }) => {
                setTailoredData(previous => ({

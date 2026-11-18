@@ -21,7 +21,7 @@ import puppeteer from 'puppeteer-core';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
-import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
+import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
 import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
@@ -1841,7 +1841,7 @@ app.get('/api/contact/thread', async (req, res) => {
  */
 app.post('/api/linkedin/thread', async (req, res) => {
   try {
-    const { personName, profileUrl } = req.body || {};
+    const { personName, profileUrl, refresh = false } = req.body || {};
     const name = String(personName || '').trim();
     if (!name) return res.status(400).json({ error: 'A contact name is required.' });
 
@@ -1850,6 +1850,21 @@ app.post('/api/linkedin/thread', async (req, res) => {
       return res.status(400).json({ error: 'Connect your LinkedIn account first, then try again.' });
     }
     setLiveSearchSessionDir(sessionManager.getSessionDir(userId));
+
+    const cacheDir = path.join(sessionManager.sessionsRoot, String(userId).replace(/[^a-z0-9_-]/gi, '_'));
+    const cacheFile = path.join(cacheDir, 'linkedin-threads.json');
+    const cacheKey = String(profileUrl || name).split('?')[0].replace(/\/$/, '').toLowerCase();
+    const readCache = () => {
+      try {
+        const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+        return cache && typeof cache === 'object' ? cache : {};
+      } catch { return {}; }
+    };
+    const cache = readCache();
+    const cachedThread = cache[cacheKey];
+    if (cachedThread && !refresh) {
+      return res.json({ messages: cachedThread.messages || [], cached: true, syncedAt: cachedThread.syncedAt });
+    }
 
     // Whichever engine already owns the Chrome profile must hand over its
     // browser. Launching a second Chrome on the same profile fails with a
@@ -1863,10 +1878,22 @@ app.post('/api/linkedin/thread', async (req, res) => {
 
     const result = await readLinkedInThread(name, existingBrowser, String(profileUrl || ''));
     if (result.code === 'no_thread') {
-      return res.json({ messages: [], noThread: true, notice: result.error });
+      return res.json({ messages: cachedThread?.messages || [], cached: Boolean(cachedThread), noThread: !cachedThread, notice: result.error });
     }
-    if (result.error) return res.status(502).json({ error: result.error });
-    res.json({ messages: result.messages || [] });
+    if (result.error) {
+      if (cachedThread) return res.json({ messages: cachedThread.messages || [], cached: true, refreshError: result.error });
+      return res.status(502).json({ error: result.error });
+    }
+    const byId = new Map();
+    for (const message of [...(cachedThread?.messages || []), ...(result.messages || [])]) {
+      const key = message.id || `${message.at || ''}|${message.direction || ''}|${message.text || message.body || ''}`;
+      byId.set(key, message);
+    }
+    const messages = [...byId.values()].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    fs.mkdirSync(cacheDir, { recursive: true });
+    cache[cacheKey] = { personName: name, profileUrl: String(profileUrl || ''), messages, syncedAt: new Date().toISOString() };
+    fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2), 'utf8');
+    res.json({ messages, cached: false, syncedAt: cache[cacheKey].syncedAt });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not read the LinkedIn conversation.' });
   }
@@ -2492,6 +2519,8 @@ function restoreOriginalExperience(resume, profile = {}, sourceResume = '') {
     : (Array.isArray(profile.internships) ? profile.internships : []))
     .map((item) => ({
       title: item.title || item.role || '',
+      company: item.company || item.organization || '',
+      location: item.location || '',
       linkLabel: item.linkLabel || '',
       url: item.url || item.link || '',
       dates: item.dates || item.duration || '',
@@ -2543,7 +2572,7 @@ function restoreResumeExtras(resume, profile = {}, sourceResume = '') {
     : [];
 
   const fromProfile = (Array.isArray(profile.extras) ? profile.extras : [])
-    .map((item) => ({ label: item.label || '', value: item.value || '' }))
+    .map((item) => ({ label: item.label || '', value: item.value || '', dates: item.dates || '' }))
     .filter((item) => item.value);
   const backups = fromProfile.length ? fromProfile : extrasFromResumeText(sourceResume);
   if (!backups.length) return resume;
@@ -2639,7 +2668,14 @@ RETURN these JSON keys:
 - projects: array of {name, stack, linkLabel, url, detail}
 - education: array of {degree, school, dates, detail}
 - extras: array of {label, value}
-
+${preferredFormatId === 'modern' ? `
+SELECTED TEMPLATE: Modern. Fill these extra fields exactly so the layout is correct:
+- internships: also return "company" (employer only) and "location" (city, country or "Remote"); "title" must then be the role only, never the employer.
+- internships and projects "detail": 3-4 complete sentences, each one achievement that ends with a period. Each sentence becomes one bullet point, so never join two achievements with a semicolon.
+- projects: also return "dates" when the resume shows them.
+- extras: put every certification in its own entry with label "Certifications", value "<certificate name> by <issuer>", and "dates" when shown. Other rows (Achievements, Leadership, Languages, ...) keep their own label.
+- Only use values that appear in the candidate's resume or profile; leave a field empty when it is not there.
+` : ''}
 Candidate profile: ${JSON.stringify(profile || {}).slice(0, 4000)}
 Full resume text: ${sourceResume}
 Job description: ${jobText.slice(0, 16000)}`;
@@ -2701,7 +2737,7 @@ Job description: ${jobText.slice(0, 16000)}`;
     }
     const formatDefs = [
       { id: 'recommended', name: 'Classic (Default)', style: 'recommended' },
-      { id: 'modern', name: 'Modern sections', style: 'modern' },
+      { id: 'modern', name: 'Modern', style: 'modern' },
       { id: 'compact', name: 'Compact one page', style: 'compact' },
     ];
     // The user's selected template drives the resume: its format comes first
@@ -2717,6 +2753,11 @@ Job description: ${jobText.slice(0, 16000)}`;
       format.pdfBase64 = rendered.base64;
       format.plainText = rendered.text;
       format.pageCount = rendered.pageCount;
+      // Built from the same fitted copy as the PDF, in the same layout, so
+      // editing or printing never switches the resume to another template.
+      format.editableHtml = format.style === 'modern'
+        ? modernResumeHtml(safeProfile, rendered.resume)
+        : editableResumeHtml(safeProfile, rendered.resume);
       format.ats = calculateKeywordCoverage(sourceKeywords, sourceResume, format.plainText);
     }
     // Guard: never let a stale/hallucinated company (e.g. old Cloudflare default)
@@ -2791,7 +2832,7 @@ Job description: ${jobText.slice(0, 16000)}`;
       },
       baselineSource,
       targetedKeywords: targeted.added,
-      editableHtml: editableResumeHtml(safeProfile, atsSafeFitted),
+      editableHtml: formats[0]?.editableHtml || editableResumeHtml(safeProfile, atsSafeFitted),
       warnings: [],
       plainText: finalPlainText,
       formats,
@@ -3923,6 +3964,18 @@ function attachCampaignEngine(engine) {  engine.on('log', (entry) => pushLog(ent
   return engine;
 }
 
+async function releaseLinkedInProfileForCampaign() {
+  if (!activeTrackerInstance || (!activeTrackerInstance.isRunning && !activeTrackerInstance.browser)) return;
+  pushLog({
+    timestamp: new Date().toLocaleTimeString('en-IN', { hour12: true }),
+    message: 'Pausing the background LinkedIn status sync so the referral campaign can use the saved Chrome profile.',
+    level: 'info',
+  });
+  const tracker = activeTrackerInstance;
+  await tracker.stop();
+  if (activeTrackerInstance === tracker) activeTrackerInstance = null;
+}
+
 app.get('/api/campaigns', (req, res) => {
   res.json({ campaigns: campaignStore.list(), active: campaignStore.findActive() });
 });
@@ -3966,6 +4019,8 @@ app.post('/api/campaigns', async (req, res) => {
     if (activeBotInstance && activeBotInstance.isRunning) {
       return res.status(400).json({ error: 'The connection-request campaign is running. Stop it before starting a referral campaign.' });
     }
+
+    await releaseLinkedInProfileForCampaign();
 
     // A paused or recovery-paused campaign for the exact same company + role is
     // the same job: resume it instead of starting a duplicate that would message
@@ -4061,6 +4116,7 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
     if (activeBotInstance && activeBotInstance.isRunning) {
       return res.status(400).json({ error: 'The connection-request campaign is running. Stop it before resuming.' });
     }
+    await releaseLinkedInProfileForCampaign();
     const resumed = campaignStore.update(campaign.id, {
       status: 'queued',
       error: '',

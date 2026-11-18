@@ -177,7 +177,6 @@ export default function Applications() {
           <p>Every job you tailored a resume for, with outreach and replies in one place.</p>
         </div>
       </header>
-      <CampaignStatus variant="compact" onNavigate={() => navigate('/dashboard/linkedin?tab=campaign')} showLog={false} />
 
       <section className="jt-hero">
         <div className="jt-hero-main">
@@ -244,6 +243,15 @@ export default function Applications() {
           <button type="button" onClick={() => setNotice(null)}><X size={14} /></button>
         </div>
       )}
+
+      {/* Synchronized live LinkedIn campaign banner (Requirement 6B) */}
+      <div style={{ marginBottom: 16 }}>
+        <CampaignStatus
+          variant="compact"
+          onNavigate={() => navigate('/dashboard/linkedin')}
+          showLog={false}
+        />
+      </div>
 
       {trackable.length === 0 && !sourcesLoading ? (
         <EmptyState

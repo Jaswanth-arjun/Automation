@@ -76,6 +76,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
   const [liForceLive, setLiForceLive] = useState(false);
   const noticeTimer = useRef(null);
   const threadEndRef = useRef(null);
+  const liRefreshFor = useRef('');
 
   const emailContacts = useMemo(
     () => (row?.contacts || []).filter((contact) => contact.emails?.length),
@@ -206,20 +207,34 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       return undefined;
     }
     let alive = true;
-    setLiLoading(true);
+    const refreshing = liRefreshFor.current === selectedContact.id;
+    if (refreshing) liRefreshFor.current = '';
+    setLiLoading(refreshing);
     api.getLinkedInThread({
       personName: selectedContact.name,
       profileUrl: selectedContact.linkedin.profileUrl,
+      refresh: refreshing,
     })
       .then((result) => {
         if (!alive) return;
         setLiMessages(Array.isArray(result?.messages) ? result.messages : []);
         setLiThreadNote(result?.noThread ? (result.notice || 'No LinkedIn conversation yet.') : '');
-        setLiThreadError('');
+        setLiThreadError(result?.refreshError || '');
+        // Show the saved thread first, then quietly check LinkedIn for newer messages.
+        if (result?.cached && !refreshing) {
+          api.getLinkedInThread({
+            personName: selectedContact.name,
+            profileUrl: selectedContact.linkedin.profileUrl,
+            refresh: true,
+          }).then((latest) => {
+            if (!alive) return;
+            if (Array.isArray(latest?.messages)) setLiMessages(latest.messages);
+            setLiThreadError(latest?.refreshError || '');
+          }).catch(() => {});
+        }
       })
       .catch((err) => {
         if (!alive) return;
-        setLiMessages([]);
         setLiThreadNote('');
         setLiThreadError(err?.message || 'Could not read the LinkedIn conversation.');
       })
@@ -548,7 +563,12 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                   <div className="atd-head-actions">
                     <button
                       className="atd-refresh"
-                      onClick={() => (isLinkedIn ? setLiNonce((value) => value + 1) : setThreadNonce((value) => value + 1))}
+                      onClick={() => {
+                        if (isLinkedIn) {
+                          liRefreshFor.current = selectedContact.id;
+                          setLiNonce((value) => value + 1);
+                        } else setThreadNonce((value) => value + 1);
+                      }}
                       title="Refresh the conversation"
                     >
                       <RefreshCw size={12} className={isLinkedIn ? (liLoading ? 'spin' : '') : (threadLoading ? 'spin' : '')} /> Refresh
@@ -581,7 +601,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
 
                 <div className="atd-thread atd-thread-full">
                   {isLinkedIn ? (
-                    liLoading ? (
+                    liLoading && liMessages.length === 0 ? (
                       <div className="atd-thread-loading"><Loader2 size={16} className="spin" /> Loading your LinkedIn conversation…</div>
                     ) : (
                       <>
@@ -589,7 +609,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                           <div className="atd-thread-notice error">
                             <AlertCircle size={14} />
                             <span>{liThreadError}</span>
-                            <button className="atd-thread-retry" onClick={() => setLiNonce((value) => value + 1)}>
+                            <button className="atd-thread-retry" onClick={() => { liRefreshFor.current = selectedContact.id; setLiNonce((value) => value + 1); }}>
                               Try again
                             </button>
                           </div>
@@ -598,7 +618,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                             <Info size={14} />
                             <span>{liThreadNote}</span>
                             {!liForceLive && ['pending', 'seen', 'declined'].includes(String(selectedContact.linkedin?.status || '').toLowerCase()) && (
-                              <button className="atd-thread-retry" onClick={() => setLiForceLive(true)}>
+                              <button className="atd-thread-retry" onClick={() => { liRefreshFor.current = selectedContact.id; setLiForceLive(true); setLiNonce((value) => value + 1); }}>
                                 Check LinkedIn
                               </button>
                             )}
