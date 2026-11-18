@@ -1,5 +1,5 @@
 /**
- * MailMind mail signals.
+ * Hamzo mail signals.
  *
  * These helpers are deliberately deterministic. They do not call an LLM, so
  * every row can show a label and a reason instantly. The backend computes the

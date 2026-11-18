@@ -136,7 +136,7 @@ export default function MailAutomation() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [flash, setFlash] = useState(null);
-  const [lastSync, setLastSync] = useState(() => localStorage.getItem('mailmind_last_sync') || '');
+  const [lastSync, setLastSync] = useState(() => localStorage.getItem('hamzo_last_sync') || localStorage.getItem('mailmind_last_sync') || '');
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
@@ -218,6 +218,7 @@ export default function MailAutomation() {
     }
     // A successful mailbox load means we just read Gmail, so record it.
     const stamp = new Date().toISOString();
+    localStorage.setItem('hamzo_last_sync', stamp);
     localStorage.setItem('mailmind_last_sync', stamp);
     setLastSync(stamp);
     return true;
@@ -292,6 +293,7 @@ export default function MailAutomation() {
             await api.triggerSync();
             await loadMail();
             const stamp = new Date().toISOString();
+            localStorage.setItem('hamzo_last_sync', stamp);
             localStorage.setItem('mailmind_last_sync', stamp);
             setLastSync(stamp);
             notify('ok', 'Inbox synced.');
@@ -352,7 +354,7 @@ export default function MailAutomation() {
 
   const handleDisconnect = async () => {
     if (disconnecting) return;
-    if (!window.confirm('Disconnect this Gmail account? MailMind will stop syncing until you reconnect.')) return;
+    if (!window.confirm('Disconnect this Gmail account? Hamzo will stop syncing until you reconnect.')) return;
 
     setDisconnecting(true);
     let failed = false;
@@ -372,6 +374,7 @@ export default function MailAutomation() {
     setSummaries({});
     setComposer(null);
     setAi(null);
+    localStorage.removeItem('hamzo_last_sync');
     localStorage.removeItem('mailmind_last_sync');
     setLastSync('');
     setDisconnecting(false);
@@ -401,6 +404,7 @@ export default function MailAutomation() {
       const res = await api.triggerSync();
       await loadMail();
       const stamp = new Date().toISOString();
+      localStorage.setItem('hamzo_last_sync', stamp);
       localStorage.setItem('mailmind_last_sync', stamp);
       setLastSync(stamp);
       notify('ok', `Inbox synced — ${res?.received ?? 0} received, ${res?.sent ?? 0} sent.`);
@@ -684,7 +688,7 @@ export default function MailAutomation() {
           <strong>Gmail account</strong>
           <small>
             {connected
-              ? `${account.email || account.method || 'Connected'} · MailMind reads job mail only`
+              ? `${account.email || account.method || 'Connected'} · Hamzo reads job mail only`
               : 'Connect an inbox to read recruiter threads, draft replies and track application updates.'}
           </small>
         </div>
@@ -961,7 +965,7 @@ export default function MailAutomation() {
                     <EmptyBlock
                       icon={Send}
                       title="No sent mail yet"
-                      description="Replies and follow-ups you send from MailMind appear here."
+                      description="Replies and follow-ups you send from Hamzo appear here."
                     />
                   ) : (
                     <div>
@@ -1110,7 +1114,7 @@ export default function MailAutomation() {
                       description={
                         query
                           ? `No sent email matches “${query}”.`
-                          : 'Replies and follow-ups you send from MailMind appear here.'
+                          : 'Replies and follow-ups you send from Hamzo appear here.'
                       }
                     />
                   ) : (
@@ -1323,7 +1327,7 @@ function ConnectPanel({ loading, onConnect }) {
           Turn your inbox into a job pipeline
         </h2>
         <p style={{ margin: '0 0 16px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.6 }}>
-          MailMind reads recruiter threads, interviews, assessments and offers, then links them to your
+          Hamzo reads recruiter threads, interviews, assessments and offers, then links them to your
           applications. You keep full control: every reply is editable before it is sent, and you can
           disconnect in one click.
         </p>

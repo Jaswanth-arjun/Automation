@@ -1,8 +1,8 @@
-const MAILMIND_API = '';
+const HAMZO_API = '';
 const LINKEDIN_API = '/linkedin-api';
 
 function getToken() {
-  return localStorage.getItem('mailmind_token');
+  return localStorage.getItem('hamzo_token') || localStorage.getItem('mailmind_token');
 }
 
 async function apiFetch(baseUrl, path, options = {}) {
@@ -37,48 +37,48 @@ async function apiFetch(baseUrl, path, options = {}) {
 
 export const api = {
   // Auth
-  getAuthUrl: () => apiFetch(MAILMIND_API, '/api/gmail/auth-url'),
+  getAuthUrl: () => apiFetch(HAMZO_API, '/api/gmail/auth-url'),
 
   // Dashboard / User
-  getDashboard: () => apiFetch(MAILMIND_API, '/api/dashboard'),
+  getDashboard: () => apiFetch(HAMZO_API, '/api/dashboard'),
 
-  // Gmail & MailMind AI
-  triggerSync: () => apiFetch(MAILMIND_API, '/api/gmail/sync', { method: 'POST' }),
-  getSyncStatus: () => apiFetch(MAILMIND_API, '/api/gmail/sync-status'),
-  summarizeMail: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/summarize', { method: 'POST', body: JSON.stringify(mail) }),
-  generateMailReply: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/reply', { method: 'POST', body: JSON.stringify(mail) }),
-  generateFollowUp: (mail) => apiFetch(MAILMIND_API, '/api/ai/mail/followup', { method: 'POST', body: JSON.stringify(mail) }),
-  sendFollowUp: (payload) => apiFetch(MAILMIND_API, '/api/ai/mail/followup/send', { method: 'POST', body: JSON.stringify(payload) }),
-  generateConversationReply: (payload) => apiFetch(MAILMIND_API, '/api/ai/conversation/reply', { method: 'POST', body: JSON.stringify(payload) }),
-  getContactThread: (email) => apiFetch(MAILMIND_API, `/api/contact/thread?email=${encodeURIComponent(email)}`),
-  sendReply: (payload) => apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
+  // Gmail & Hamzo AI
+  triggerSync: () => apiFetch(HAMZO_API, '/api/gmail/sync', { method: 'POST' }),
+  getSyncStatus: () => apiFetch(HAMZO_API, '/api/gmail/sync-status'),
+  summarizeMail: (mail) => apiFetch(HAMZO_API, '/api/ai/mail/summarize', { method: 'POST', body: JSON.stringify(mail) }),
+  generateMailReply: (mail) => apiFetch(HAMZO_API, '/api/ai/mail/reply', { method: 'POST', body: JSON.stringify(mail) }),
+  generateFollowUp: (mail) => apiFetch(HAMZO_API, '/api/ai/mail/followup', { method: 'POST', body: JSON.stringify(mail) }),
+  sendFollowUp: (payload) => apiFetch(HAMZO_API, '/api/ai/mail/followup/send', { method: 'POST', body: JSON.stringify(payload) }),
+  generateConversationReply: (payload) => apiFetch(HAMZO_API, '/api/ai/conversation/reply', { method: 'POST', body: JSON.stringify(payload) }),
+  getContactThread: (email) => apiFetch(HAMZO_API, `/api/contact/thread?email=${encodeURIComponent(email)}`),
+  sendReply: (payload) => apiFetch(HAMZO_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
   getEmails: (page = 0, size = 20, category = '', mailbox = '', label = '', q = '') => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (category) params.set('category', category);
     if (mailbox) params.set('mailbox', mailbox);
     if (label) params.set('label', label);
     if (q) params.set('q', q);
-    return apiFetch(MAILMIND_API, `/api/emails?${params}`);
+    return apiFetch(HAMZO_API, `/api/emails?${params}`);
   },
-  getEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}`),
-  getThread: (threadId) => apiFetch(MAILMIND_API, `/api/threads/${threadId}`),
-  toggleStar: (id, starred) => apiFetch(MAILMIND_API, `/api/emails/${id}/star?starred=${starred}`, { method: 'POST' }),
-  markRead: (id, read = true) => apiFetch(MAILMIND_API, `/api/emails/${id}/read?read=${read}`, { method: 'POST' }),
-  trashEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}/trash`, { method: 'POST' }),
-  snoozeEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}/snooze`, { method: 'POST' }),
-  archiveEmail: (id) => apiFetch(MAILMIND_API, `/api/emails/${id}/archive`, { method: 'POST' }),
-  disconnectGmail: () => apiFetch(MAILMIND_API, '/api/gmail/disconnect', { method: 'POST' }),
-  summarizeEmail: (emailId) => apiFetch(MAILMIND_API, `/api/ai/summarize/email/${emailId}`, { method: 'POST' }),
-  summarizeThread: (threadId) => apiFetch(MAILMIND_API, `/api/ai/summarize/thread/${threadId}`, { method: 'POST' }),
+  getEmail: (id) => apiFetch(HAMZO_API, `/api/emails/${id}`),
+  getThread: (threadId) => apiFetch(HAMZO_API, `/api/threads/${threadId}`),
+  toggleStar: (id, starred) => apiFetch(HAMZO_API, `/api/emails/${id}/star?starred=${starred}`, { method: 'POST' }),
+  markRead: (id, read = true) => apiFetch(HAMZO_API, `/api/emails/${id}/read?read=${read}`, { method: 'POST' }),
+  trashEmail: (id) => apiFetch(HAMZO_API, `/api/emails/${id}/trash`, { method: 'POST' }),
+  snoozeEmail: (id) => apiFetch(HAMZO_API, `/api/emails/${id}/snooze`, { method: 'POST' }),
+  archiveEmail: (id) => apiFetch(HAMZO_API, `/api/emails/${id}/archive`, { method: 'POST' }),
+  disconnectGmail: () => apiFetch(HAMZO_API, '/api/gmail/disconnect', { method: 'POST' }),
+  summarizeEmail: (emailId) => apiFetch(HAMZO_API, `/api/ai/summarize/email/${emailId}`, { method: 'POST' }),
+  summarizeThread: (threadId) => apiFetch(HAMZO_API, `/api/ai/summarize/thread/${threadId}`, { method: 'POST' }),
   generateDraft: (prompt, recipientEmails = [], subject = '') =>
-    apiFetch(MAILMIND_API, '/api/drafts/generate', { method: 'POST', body: JSON.stringify({ prompt, recipientEmails, subject }) }),
+    apiFetch(HAMZO_API, '/api/drafts/generate', { method: 'POST', body: JSON.stringify({ prompt, recipientEmails, subject }) }),
   sendDraft: (draftId, subject, bodyText, recipientEmails) =>
-    apiFetch(MAILMIND_API, '/api/drafts/send', { method: 'POST', body: JSON.stringify({ draftId, subject, bodyText, recipientEmails }) }),
+    apiFetch(HAMZO_API, '/api/drafts/send', { method: 'POST', body: JSON.stringify({ draftId, subject, bodyText, recipientEmails }) }),
   generateReply: (emailId, threadId, instruction) =>
-    apiFetch(MAILMIND_API, '/api/reply/generate', { method: 'POST', body: JSON.stringify({ emailId, threadId, instruction }) }),
-  replySend: (payload) => apiFetch(MAILMIND_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
+    apiFetch(HAMZO_API, '/api/reply/generate', { method: 'POST', body: JSON.stringify({ emailId, threadId, instruction }) }),
+  replySend: (payload) => apiFetch(HAMZO_API, '/api/reply/send', { method: 'POST', body: JSON.stringify(payload) }),
   chatMail: (question, sessionId = '', threadId = '') =>
-    apiFetch(MAILMIND_API, '/api/chat/query', { method: 'POST', body: JSON.stringify({ question, sessionId, threadId }) }),
+    apiFetch(HAMZO_API, '/api/chat/query', { method: 'POST', body: JSON.stringify({ question, sessionId, threadId }) }),
 
   // LinkedIn automation
   getLinkedInStatus: () => apiFetch(LINKEDIN_API, '/api/status'),
@@ -181,7 +181,7 @@ export const candidateStore = {
       skills: Array.isArray(profile.skills) ? profile.skills : [],
     };
     if (!payload.email) return Promise.resolve({ ok: false, skipped: true });
-    return apiFetch(MAILMIND_API, '/api/candidates/sync', {
+    return apiFetch(HAMZO_API, '/api/candidates/sync', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -191,16 +191,16 @@ export const candidateStore = {
     if (batch && batch !== 'ALL') params.set('batch', batch);
     if (search) params.set('search', search);
     const query = params.toString();
-    return apiFetch(MAILMIND_API, `/api/candidates${query ? `?${query}` : ''}`);
+    return apiFetch(HAMZO_API, `/api/candidates${query ? `?${query}` : ''}`);
   },
   broadcast(payload) {
-    return apiFetch(MAILMIND_API, '/api/admin/broadcast-batch-mail', {
+    return apiFetch(HAMZO_API, '/api/admin/broadcast-batch-mail', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   },
   sentBroadcasts() {
-    return apiFetch(MAILMIND_API, '/api/admin/sent-broadcasts');
+    return apiFetch(HAMZO_API, '/api/admin/sent-broadcasts');
   },
 };
 

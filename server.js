@@ -15,6 +15,7 @@ import { handleRagChat } from './lib/rag-assistant.js';
 import { askFreeLLM, askNara, askNvidia, askRadox } from './lib/ai-provider.js';
 import { AutoApplyEngine } from './lib/auto-apply-engine.js';
 import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion } from './lib/vault-manager.js';
+import { inferFromProfile } from './lib/apply-intelligence.js';
 
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer-core';
@@ -304,6 +305,13 @@ wss.on('error', () => {
 
 const PORT = process.env.PORT || 3000;
 
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -1077,7 +1085,7 @@ async function fetchGoogleUserInfo(accessToken) {
 
 function getGeminiKey() {
   if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY.trim();
-  const files = [path.join(__dirname, '.env'), path.join(__dirname, 'MailMind AI', '.env')];
+  const files = [path.join(__dirname, '.env'), path.join(__dirname, 'Hamzo', '.env'), path.join(__dirname, 'MailMind AI', '.env')];
   for (const file of files) {
     if (!fs.existsSync(file)) continue;
     const match = fs.readFileSync(file, 'utf8').match(/^GEMINI_API_KEY=(.*)$/m);
@@ -1438,7 +1446,7 @@ const GMAIL_LIST_TTL_MS = 60 * 1000;
 function friendlyGmailError(err) {
   const message = String(err?.message || '');
   if (/quota/i.test(message)) {
-    return 'Gmail rate limit reached. Wait a minute, then retry — MailMind caches results so the next load is cheap.';
+    return 'Gmail rate limit reached. Wait a minute, then retry — Hamzo caches results so the next load is cheap.';
   }
   if (/invalid_grant|invalid credentials/i.test(message)) {
     return 'The Gmail connection expired. Reconnect the account to continue.';
@@ -2906,10 +2914,20 @@ app.post('/api/auth/request-otp', async (req, res) => {
         auth: { user: gmailUser, pass: gmailAppPass },
       });
       await transporter.sendMail({
-        from: `"${gmailUser.split('@')[0]}" <${gmailUser}>`,
+        from: `"Hamzo" <${gmailUser}>`,
         to: email,
-        subject: 'Your MailMind login code',
-        text: `Your MailMind login code is ${otp}. It expires in 10 minutes.`,
+        subject: 'Your Hamzo login code',
+        text: `Your Hamzo login code is ${otp}. It expires in 10 minutes.`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
+            <h2 style="margin: 0 0 16px; color: #0f172a; font-size: 22px; font-weight: 700;">Welcome to Hamzo</h2>
+            <p style="margin: 0 0 24px; color: #475569; font-size: 15px; line-height: 1.5;">Here is your secure one-time verification code to sign in to Hamzo:</p>
+            <div style="background: #f1f5f9; padding: 18px 24px; border-radius: 8px; text-align: center; margin-bottom: 24px;">
+              <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #0f172a; font-family: monospace;">${otp}</span>
+            </div>
+            <p style="margin: 0; color: #94a3b8; font-size: 13px;">This code expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>
+          </div>
+        `,
       });
       return res.json({ success: true, message: 'OTP sent to your email.' });
     } catch (err) {
@@ -4215,51 +4233,32 @@ app.post('/api/vault/infer-answer', async (req, res) => {
     // 1. Check existing vault answers first
     const vaultMatch = findSimilarAnswer(question, 0.45);
     if (vaultMatch && vaultMatch.answer) {
-      return res.json({ answer: vaultMatch.answer, source: 'vault', confidence: 0.95 });
+      return res.json({ answer: vaultMatch.answer, source: 'vault', confidence: 0.95, canInfer: true });
     }
 
-    // 2. High-precision heuristic pattern matching
-    const qLower = String(question).toLowerCase();
-
-    // Work Authorization / Sponsorship
-    if (/require.*sponsorship|need.*sponsorship|visa.*sponsorship|immigration.*sponsorship/i.test(qLower)) {
-      const ans = profile?.requireSponsorship ? 'Yes' : (profile?.visaStatus ? 'Yes' : 'No');
-      return res.json({ answer: ans, source: 'profile-heuristic', confidence: 0.95 });
+    // 2. Profile / deterministic inference — never invent personal facts
+    const local = inferFromProfile({ question, options, profile, jobTitle, company });
+    if (local.canInfer && local.answer) {
+      return res.json({
+        answer: local.answer,
+        source: local.source,
+        confidence: local.confidence || 0.9,
+        canInfer: true,
+      });
     }
-    if (/legally.*authorized|authorized to work|eligible to work/i.test(qLower)) {
-      return res.json({ answer: 'Yes', source: 'profile-heuristic', confidence: 0.95 });
-    }
-    if (/18.*years|age.*18|over.*18|at least 18/i.test(qLower)) {
-      return res.json({ answer: 'Yes', source: 'profile-heuristic', confidence: 0.99 });
-    }
-    if (/notice.*period|how soon can you start|earliest start date|available to start/i.test(qLower)) {
-      if (Array.isArray(options) && options.length > 0) {
-        const found = options.find((o) => /immediate|15 days|1 month|asap|2 weeks/i.test(String(o)));
-        if (found) return res.json({ answer: found, source: 'profile-heuristic', confidence: 0.9 });
-      }
-      return res.json({ answer: 'Immediately', source: 'profile-heuristic', confidence: 0.9 });
-    }
-    if (/willing to relocate|open to relocation|comfortable working (hybrid|remote|on-site)/i.test(qLower)) {
-      return res.json({ answer: 'Yes', source: 'profile-heuristic', confidence: 0.9 });
-    }
-    if (/how did you hear|referral source|source of application/i.test(qLower)) {
-      if (Array.isArray(options) && options.length > 0) {
-        const found = options.find((o) => /linkedin|job board|company website|careers site|online/i.test(String(o)));
-        if (found) return res.json({ answer: found, source: 'source-heuristic', confidence: 0.95 });
-      }
-      return res.json({ answer: 'LinkedIn', source: 'source-heuristic', confidence: 0.95 });
-    }
-    if (/gender|race|ethnicity|veteran|disability|sexual orientation/i.test(qLower)) {
-      if (Array.isArray(options) && options.length > 0) {
-        const found = options.find((o) => /decline|prefer not|choose not|don't wish|not wish/i.test(String(o)));
-        if (found) return res.json({ answer: found, source: 'eeo-default', confidence: 0.95 });
-      }
-      return res.json({ answer: 'Decline to state', source: 'eeo-default', confidence: 0.95 });
+    if (local.reason && String(local.reason).startsWith('missing-')) {
+      return res.json({
+        answer: null,
+        canInfer: false,
+        reason: local.reason,
+        message: local.message || 'Ask the candidate for this information.',
+      });
     }
 
-    // 3. AI Reasoning using Radox / Nara
-    const prompt = `You are an automated job application assistant filling out a job form for a candidate.
-Question from application: "${question}"
+    // 3. AI reasoning only for non-sensitive unknown questions grounded in the profile/resume
+    const prompt = `You are filling a job application for a real candidate. Use ONLY facts in the profile and resume. Never invent work authorization, visa/sponsorship, citizenship, salary, criminal history, disability, age, or other personal legal facts.
+
+Question: "${question}"
 ${Array.isArray(options) && options.length > 0 ? `Available options: ${JSON.stringify(options)}` : ''}
 Target Job: ${jobTitle || 'Role'} at ${company || 'Company'}
 
@@ -4267,19 +4266,19 @@ Candidate Profile:
 - Full Name: ${profile?.fullName || ''}
 - Headline: ${profile?.headline || ''}
 - Location: ${profile?.location || ''}
-- Experience: ${JSON.stringify(profile?.experience || []).slice(0, 500)}
-- Education: ${JSON.stringify(profile?.education || []).slice(0, 300)}
+- Experience: ${JSON.stringify(profile?.experience || []).slice(0, 800)}
+- Education: ${JSON.stringify(profile?.education || []).slice(0, 400)}
 - Skills: ${(profile?.skills || []).join(', ')}
+- Projects: ${JSON.stringify(profile?.projects || []).slice(0, 400)}
 
 Resume text excerpt:
 ${String(resumeText || '').slice(0, 1500)}
 
 Rules:
 1. If options are provided, select the EXACT text of the most appropriate option from the list.
-2. If it is a Yes/No question, answer "Yes" or "No".
-3. If it asks for years of experience, estimate accurately from experience dates or skills.
-4. If it is personal and completely unknown (e.g. government ID, SSN, personal secret), return {"answer": null, "canInfer": false}.
-5. Otherwise provide the best concise answer.
+2. If the answer is not clearly supported by the profile/resume, return {"answer": null, "canInfer": false}.
+3. Do not guess Yes/No for legal or eligibility questions.
+4. Keep text answers concise and relevant to this job.
 
 Return ONLY JSON:
 {
@@ -4308,16 +4307,9 @@ Return ONLY JSON:
         if (parsed?.canInfer && parsed?.answer) {
           let finalAns = String(parsed.answer).trim();
           if (Array.isArray(options) && options.length > 0) {
-            const exactOpt = options.find((o) => String(o).toLowerCase() === finalAns.toLowerCase());
-            if (exactOpt) finalAns = exactOpt;
-            else {
-              const partial = options.find((o) => String(o).toLowerCase().includes(finalAns.toLowerCase()) || finalAns.toLowerCase().includes(String(o).toLowerCase()));
-              if (partial) finalAns = partial;
-            }
-          }
-          // Automatically remember high-confidence answers in the vault
-          if ((parsed.confidence || 0.85) >= 0.8) {
-            saveVaultAnswer(question, finalAns, true);
+            const exact = options.find((option) => String(option).toLowerCase() === finalAns.toLowerCase());
+            if (!exact) return res.json({ answer: null, canInfer: false, reason: 'no-matching-option' });
+            finalAns = exact;
           }
           return res.json({ answer: finalAns, source: 'ai-reasoning', confidence: parsed.confidence || 0.85 });
         }

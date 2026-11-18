@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = 'mailmind_token';
+const TOKEN_KEY = 'hamzo_token';
+const LEGACY_TOKEN_KEY = 'mailmind_token';
 const USER_KEY = 'wayin_user';
 const API_URL = '';
 
@@ -14,8 +15,10 @@ export function AuthProvider({ children }) {
   const setToken = useCallback((t) => {
     if (t) {
       localStorage.setItem(TOKEN_KEY, t);
+      localStorage.setItem(LEGACY_TOKEN_KEY, t);
     } else {
       localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(LEGACY_TOKEN_KEY);
     }
     setTokenState(t);
   }, []);
@@ -51,7 +54,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY);
+    const stored = localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY);
     if (stored) {
       setTokenState(stored);
       fetchUser(stored).finally(() => setLoading(false));

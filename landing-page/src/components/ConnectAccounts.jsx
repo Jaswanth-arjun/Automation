@@ -95,7 +95,7 @@ export default function ConnectAccounts() {
             <strong>Gmail</strong>
             <span>
               {mailConnected
-                ? mail.email || 'Connected — MailMind can draft and send recruiter replies.'
+                ? mail.email || 'Connected — Hamzo can draft and send recruiter replies.'
                 : 'Draft and send recruiter replies straight from your inbox.'}
             </span>
           </div>

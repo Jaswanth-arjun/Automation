@@ -98,7 +98,6 @@ export default function Apply() {
   const [autoApplyProgress, setAutoApplyProgress] = useState([]);
   const [autoApplyResult, setAutoApplyResult] = useState(null);
   const [showAutoApplyModal, setShowAutoApplyModal] = useState(false);
-  const [autoSubmitEnabled, setAutoSubmitEnabled] = useState(false);
   const [extensionReady, setExtensionReady] = useState(false);
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
@@ -158,6 +157,7 @@ export default function Apply() {
           setGmailConnected(true);
           setConnectedGmailEmail(cfg.email || '');
           if (cfg.email) {
+            localStorage.setItem('hamzo_gmail_email', cfg.email);
             localStorage.setItem('mailmind_gmail_email', cfg.email);
           }
         }
@@ -796,7 +796,7 @@ ${firstName}`;
       }
     }, 400);
 
-    const stopTimer = setTimeout(() => clearInterval(interval), 5000);
+    const stopTimer = setTimeout(() => clearInterval(interval), 12000);
 
     return () => {
       alive = false;
@@ -826,6 +826,7 @@ ${firstName}`;
           filledFields: [],
           filledCount: event.data.filledCount || 0,
           emptyCount: event.data.emptyCount || 0,
+          skipped: event.data.skipped || [],
         });
         setAutoApplying(false);
         if (event.data.status === 'submitted') {
@@ -854,9 +855,11 @@ ${firstName}`;
 
   // Handle Direct Apply — Extension-based auto-apply (opens new tab in same browser)
   const handleProceedDirectApply = async () => {
-    const link = job?.applyLink && job.applyLink.trim() !== '' 
-      ? job.applyLink 
-      : `https://www.google.com/search?q=${encodeURIComponent(job?.company + ' ' + job?.title + ' apply careers')}`;
+    const link = [job?.applyLink, job?.url, job?.sourceUrl].map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
+    if (!link) {
+      alert('This job has no application URL. Add an Apply link on the job, then try Auto Apply again.');
+      return;
+    }
 
     if (!extensionReady) {
       alert('Hamzo Apply extension is not detected. Please load the extension in chrome://extensions (Load unpacked → select the extension folder), then reload this page.');
@@ -879,25 +882,11 @@ ${firstName}`;
       }
     } catch {}
 
-    // Listen for the ready response
-    const readyPromise = new Promise((resolve) => {
-      const onMsg = (event) => {
-        if (event.data?.source === 'hamzo-extension' && event.data.type === 'HAMZO_APPLY_READY') {
-          window.removeEventListener('message', onMsg);
-          resolve(event.data);
-        }
-      };
-      window.addEventListener('message', onMsg);
-      setTimeout(() => {
-        window.removeEventListener('message', onMsg);
-        resolve({ ok: false, error: 'Hamzo Apply did not respond. Reload the extension, then refresh this page.' });
-      }, 15000);
-    });
-
     // Ensure we have a valid PDF base64 for resume attachment.
     // Priority: just-tailored this session > resume saved for THIS job > global active.
     const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
     let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || '';
+    if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
     let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
 
     // If no PDF exists yet, generate one on-the-fly before starting auto-apply
@@ -932,21 +921,39 @@ ${firstName}`;
       }
     }
 
-    const currentResumeText = activeResume?.text || jobResume?.text || profile?.resume?.text || '';
+    const currentResumeText = jobResume?.text || activeResume?.text || profile?.resume?.text || '';
+    const requestId = `apply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const readyPromise = new Promise((resolve) => {
+      const onMsg = (event) => {
+        if (event.source !== window || event.data?.source !== 'hamzo-extension'
+          || event.data.type !== 'HAMZO_APPLY_READY' || event.data.requestId !== requestId) return;
+        window.removeEventListener('message', onMsg);
+        clearTimeout(timeout);
+        resolve(event.data);
+      };
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', onMsg);
+        resolve({ ok: false, error: 'Hamzo Apply did not respond. Reload the extension, then refresh this page.' });
+      }, 20000);
+      window.addEventListener('message', onMsg);
+    });
 
     // Send the apply request to the extension
     window.postMessage({
       source: 'hamzo-app',
       type: 'HAMZO_START_APPLY',
+      requestId,
       url: link,
-      profile: profile || {},
+      profile: {
+        ...(profile || {}),
+        jobLocation: job?.location || job?.filters?.location || '',
+      },
       answers: savedAnswers,
       resumeBase64: pdfToAttach,
       resumeName: fileNameToAttach,
       resumeText: currentResumeText,
       jobTitle: job?.title || '',
       company: job?.company || '',
-      autoSubmit: autoSubmitEnabled,
     }, '*');
 
     const ready = await readyPromise;
@@ -1001,7 +1008,7 @@ ${firstName}`;
     );
   }
 
-  const userEmail = connectedGmailEmail || profile.email || localStorage.getItem('mailmind_gmail_email') || 'Connected Google Account';
+  const userEmail = connectedGmailEmail || profile.email || localStorage.getItem('hamzo_gmail_email') || localStorage.getItem('mailmind_gmail_email') || 'Connected Google Account';
   // Banner + sends: just-tailored (this session) > resume saved for this job > global active.
   const effectiveResume = (tailoredPdfBase64 && { name: tailoredFileName, pdfBase64: tailoredPdfBase64 }) || jobResume || activeResume;
   const resumeDisplayName = effectiveResume?.name || `${(profile.fullName || 'Jaswanth').split(' ')[0]}-resume.pdf`;
@@ -2328,10 +2335,7 @@ ${firstName}`;
                 {extensionReady ? 'Hamzo Apply extension connected' : 'Extension not detected — load it in chrome://extensions'}
               </span>
             </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#064e3b', fontWeight: '600', cursor: 'pointer' }}>
-              <input type="checkbox" checked={autoSubmitEnabled} onChange={(e) => setAutoSubmitEnabled(e.target.checked)} style={{ width: '16px', height: '16px', accentColor: '#059669' }} />
-              <span>Auto-submit (skip confirmation)</span>
-            </label>
+            <span style={{ fontSize: '12.5px', color: '#064e3b', fontWeight: '600' }}>Final submission always requires your confirmation.</span>
           </div>
 
           {/* Final Direct Apply CTA */}
@@ -2541,6 +2545,13 @@ ${firstName}`;
                       {autoApplyResult.filledCount > 0 && autoApplyResult.emptyCount > 0 && ' · '}
                       {autoApplyResult.emptyCount > 0 && `${autoApplyResult.emptyCount} need attention`}
                     </p>
+                  )}
+                  {Array.isArray(autoApplyResult.skipped) && autoApplyResult.skipped.length > 0 && (
+                    <ul style={{ margin: '8px 0 0', paddingLeft: '18px', fontSize: '12px', color: '#9a3412' }}>
+                      {autoApplyResult.skipped.slice(0, 8).map((item, idx) => (
+                        <li key={idx}>{item.field}: {item.reason}</li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               )}
