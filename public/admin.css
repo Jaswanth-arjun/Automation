@@ -872,3 +872,309 @@ textarea {
   .import-row input,
   .contacts-company-input { min-width: 0; }
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Candidates database + batch mailer
+   ────────────────────────────────────────────────────────────── */
+
+.candidates-card {
+  margin-top: 22px;
+}
+
+.candidates-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.candidates-search {
+  flex: 1 1 260px;
+  max-width: none;
+}
+
+.candidates-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.candidate-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.candidate-chip span {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.candidate-chip:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+
+.candidate-chip.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.candidate-chip.is-active span {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: transparent;
+  color: #fff;
+}
+
+.candidates-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.candidates-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.candidates-table thead th {
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.candidates-table tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #f2f0ea;
+  font-size: 12.5px;
+  color: var(--ink);
+  vertical-align: middle;
+}
+
+.candidates-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.candidates-table tbody tr:hover {
+  background: #fdfcfa;
+}
+
+.candidate-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.candidate-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(140deg, #f97316, #ff9d4d);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.candidate-person strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.candidate-person small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-email {
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.candidate-email:hover {
+  text-decoration: underline;
+}
+
+.candidate-muted {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.candidate-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--violet-soft);
+  border: 1px solid #ddd8ff;
+  color: var(--violet);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.candidate-badge.is-empty {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.candidate-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 240px;
+}
+
+.candidate-skills span {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #f7f5ff;
+  border: 1px solid #e7e2ff;
+  color: var(--violet);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.candidate-skills em {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Batch mailer */
+.batch-mail {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.batch-mail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.batch-mail-head h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.batch-mail-head p {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.batch-mail-form {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.batch-mail-form textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.batch-mail-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.batch-mail-form .action-row {
+  justify-content: flex-end;
+}
+
+.batch-mail-status {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.batch-mail-status.is-error {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.batch-mail-status.hidden {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .candidates-table .hide-sm {
+    display: none;
+  }
+
+  .candidates-table {
+    min-width: 0;
+  }
+
+  .candidates-filters {
+    width: 100%;
+  }
+
+  .candidate-chip {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}

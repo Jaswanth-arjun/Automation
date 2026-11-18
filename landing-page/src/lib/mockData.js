@@ -20,6 +20,7 @@ export const DEFAULT_PROFILE = {
   email: '',
   phone: '',
   location: '',
+  batch: '',
   skills: [],
   education: [],
   experience: [],

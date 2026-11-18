@@ -1,0 +1,43 @@
+[
+  {
+    "id": "4c6eff54-da71-464d-8de9-dd0fdf17087d",
+    "email": "nellurujaswanth2004@gmail.com",
+    "fullName": "NELLURU JASWANTH",
+    "phone": "+91 9440552825",
+    "batch": "2023",
+    "institution": "N.B.K.R. Institute of Science and Technology, Tirupati CGPA: 7.5/10",
+    "skills": [
+      "JavaScript",
+      "Python",
+      "SQL",
+      "Java",
+      "C",
+      "React",
+      "API Integration",
+      "Microservices",
+      "Spring Boot",
+      "MySQL",
+      "MongoDB",
+      "Git",
+      "GitHub",
+      "Docker",
+      "Postman",
+      "OOP",
+      "PHP",
+      "CI"
+    ],
+    "registeredAt": "2026-11-18T04:33:19.005Z",
+    "lastActiveAt": "2026-11-18T07:21:41.093Z"
+  },
+  {
+    "id": "05152a76-bdf5-41c9-a048-01e5c66a2cd5",
+    "email": "nlr.jaswanth2004@gmail.com",
+    "fullName": "",
+    "phone": "",
+    "batch": "",
+    "institution": "",
+    "skills": [],
+    "registeredAt": "2026-11-18T04:33:02.646Z",
+    "lastActiveAt": "2026-11-18T05:40:20.494Z"
+  }
+]

@@ -166,6 +166,19 @@ export default function Sidebar({ open, onClose }) {
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const health = item.health ? healthOf(item.health) : null;
+                if (item.external) {
+                  return (
+                    <a
+                      key={item.to}
+                      href={item.to}
+                      className="sidebar-link"
+                      onClick={() => onClose?.()}
+                    >
+                      <Icon size={19} />
+                      <span>{item.label}</span>
+                    </a>
+                  );
+                }
                 return (
                   <NavLink
                     key={item.to}

@@ -60,6 +60,228 @@ function writeSentEmails(records) {
   fs.writeFileSync(sentEmailsFilePath, JSON.stringify(records, null, 2), 'utf8');
 }
 
+// ─── Candidates + batch broadcast data helpers ───
+// Every verified profile becomes a candidate row so the admin panel can filter
+// by graduation batch and mail a whole cohort without exposing recipients.
+const candidatesFilePath = path.join(__dirname, 'data', 'candidates.json');
+const broadcastsFilePath = path.join(__dirname, 'data', 'sent_broadcasts.json');
+
+for (const filePath of [candidatesFilePath, broadcastsFilePath]) {
+  if (!fs.existsSync(path.dirname(filePath))) fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, '[]', 'utf8');
+}
+
+function readJsonArray(filePath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeJsonArray(filePath, records) {
+  fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf8');
+}
+
+function readCandidates() {
+  return readJsonArray(candidatesFilePath).filter((item) => item && item.email);
+}
+
+function writeCandidates(records) {
+  writeJsonArray(candidatesFilePath, records);
+}
+
+function cleanString(value, max = 160) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+// Batches are stored as a year string ("2026") whenever one is present so the
+// same student cannot end up split across "2026 batch" and "2026".
+function normalizeBatch(value) {
+  const raw = cleanString(value, 40);
+  if (!raw) return '';
+  const year = raw.match(/20\d{2}/);
+  if (year) return year[0];
+  if (/^other$/i.test(raw)) return 'Other';
+  return raw;
+}
+
+function normalizeSkills(value) {
+  const list = Array.isArray(value)
+    ? value
+    : String(value || '').split(',');
+  const seen = new Set();
+  const skills = [];
+  for (const item of list) {
+    const skill = cleanString(item, 60);
+    if (!skill) continue;
+    const key = skill.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    skills.push(skill);
+    if (skills.length >= 30) break;
+  }
+  return skills;
+}
+
+function upsertCandidate(payload) {
+  const email = cleanString(payload?.email, 200).toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'A valid email address is required.' };
+
+  const fullName = cleanString(payload?.fullName, 120);
+  const phone = cleanString(payload?.phone, 40);
+  const batch = normalizeBatch(payload?.batch);
+  const institution = cleanString(payload?.institution, 160);
+  const skills = normalizeSkills(payload?.skills);
+  const now = new Date().toISOString();
+
+  const list = readCandidates();
+  const index = list.findIndex((item) => String(item.email).toLowerCase() === email);
+
+  if (index >= 0) {
+    const existing = list[index];
+    const updated = {
+      ...existing,
+      email,
+      fullName: fullName || existing.fullName || '',
+      phone: phone || existing.phone || '',
+      batch: batch || existing.batch || '',
+      institution: institution || existing.institution || '',
+      skills: skills.length ? skills : (Array.isArray(existing.skills) ? existing.skills : []),
+      registeredAt: existing.registeredAt || now,
+      lastActiveAt: now,
+    };
+    list[index] = updated;
+    writeCandidates(list);
+    return { candidate: updated, created: false };
+  }
+
+  const candidate = {
+    id: crypto.randomUUID(),
+    email,
+    fullName,
+    phone,
+    batch,
+    institution,
+    skills,
+    registeredAt: now,
+    lastActiveAt: now,
+  };
+  list.push(candidate);
+  writeCandidates(list);
+  return { candidate, created: true };
+}
+
+function summarizeCandidates(list) {
+  const batchCounts = {};
+  for (const candidate of list) {
+    const batch = normalizeBatch(candidate.batch) || 'Unassigned';
+    batchCounts[batch] = (batchCounts[batch] || 0) + 1;
+  }
+  return { totalCandidates: list.length, batchCounts };
+}
+
+// ─── Batch broadcast helpers ───
+const BROADCAST_FROM_NAME = process.env.COMPANY_MAIL_FROM_NAME || 'Hamzo Careers';
+const BROADCAST_FROM_EMAIL = process.env.COMPANY_MAIL_USER || 'job-updates@hamzooh.com';
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function mergeTagsFor(candidate) {
+  return {
+    name: candidate.fullName || 'there',
+    firstname: (candidate.fullName || 'there').split(/\s+/)[0] || 'there',
+    email: candidate.email || '',
+    batch: candidate.batch || 'your batch',
+    phone: candidate.phone || '',
+    institution: candidate.institution || '',
+  };
+}
+
+// Applies {{name}}, {{firstname}}, {{batch}}, {{phone}}, {{institution}} and
+// {{email}} merge tags. Unknown placeholders are left untouched.
+function applyMergeTags(template, candidate) {
+  const values = mergeTagsFor(candidate);
+  return String(template || '').replace(/\{\{\s*(name|firstname|email|batch|phone|institution)\s*\}\}/gi, (match, key) => {
+    const value = values[String(key).toLowerCase()];
+    return value === undefined || value === null ? match : String(value);
+  });
+}
+
+function plainTextToHtml(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((block) => `<p style="margin:0 0 14px;">${escapeHtml(block).replace(/\n/g, '<br />')}</p>`)
+    .join('');
+}
+
+// Branded, email-client-safe wrapper. The admin's message is the inner body so
+// preview and delivery always match.
+function buildBroadcastEmailHtml({ htmlBody, plainText, candidate }) {
+  const inner = htmlBody && String(htmlBody).trim()
+    ? applyMergeTags(htmlBody, candidate)
+    : plainTextToHtml(applyMergeTags(plainText, candidate));
+
+  return `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f4f5f9;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f9;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e8e8e2;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+            <tr>
+              <td style="background:#171817;padding:20px 28px;">
+                <span style="display:inline-block;background:#445cf5;color:#ffffff;font-size:12px;font-weight:800;letter-spacing:.14em;padding:7px 11px;border-radius:8px;">HAMZO</span>
+                <span style="color:#a5a8b8;font-size:12px;font-weight:600;margin-left:10px;">Career updates</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:30px 28px 8px;color:#1f2937;font-size:15px;line-height:1.65;">
+                ${inner}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:10px 28px 30px;">
+                <a href="https://hamzooh.com" style="display:inline-block;background:#445cf5;color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:11px 20px;border-radius:10px;">Open HAMZO</a>
+              </td>
+            </tr>
+            <tr>
+              <td style="border-top:1px solid #ecece6;padding:18px 28px;color:#94a3b8;font-size:11.5px;line-height:1.6;">
+                You are receiving this because you registered on HAMZO.<br />
+                Sent by Hamzo Careers &lt;${escapeHtml(BROADCAST_FROM_EMAIL)}&gt;
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function candidateForClient(candidate) {
+  return {
+    id: candidate.id,
+    email: candidate.email,
+    fullName: candidate.fullName || '',
+    phone: candidate.phone || '',
+    batch: normalizeBatch(candidate.batch) || '',
+    institution: candidate.institution || '',
+    skills: Array.isArray(candidate.skills) ? candidate.skills : [],
+    registeredAt: candidate.registeredAt || '',
+    lastActiveAt: candidate.lastActiveAt || '',
+  };
+}
+
 // Multi-tenant LinkedIn session manager (per-user isolated Chrome profiles)
 const sessionManager = new LinkedInSessionManager();
 
@@ -2893,6 +3115,187 @@ app.post('/api/config/gmail', (req, res) => {
 
 app.get('/api/sent-emails', (req, res) => {
   res.json(readSentEmails());
+});
+
+// ─── Candidate database (profile sync) ───
+app.post('/api/candidates/sync', (req, res) => {
+  const { email, fullName, phone, batch, institution, skills } = req.body || {};
+  const result = upsertCandidate({ email, fullName, phone, batch, institution, skills });
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json({
+    ok: true,
+    created: result.created,
+    candidate: candidateForClient(result.candidate),
+    ...summarizeCandidates(readCandidates()),
+  });
+});
+
+app.get('/api/candidates', (req, res) => {
+  const all = readCandidates().map(candidateForClient);
+  const batch = normalizeBatch(req.query.batch);
+  const search = cleanString(req.query.search, 120).toLowerCase();
+
+  let candidates = all;
+  if (batch && batch !== 'ALL') {
+    candidates = candidates.filter((candidate) => (candidate.batch || 'Unassigned') === batch);
+  }
+  if (search) {
+    candidates = candidates.filter((candidate) =>
+      [candidate.fullName, candidate.email, candidate.phone, candidate.institution, ...(candidate.skills || [])]
+        .join(' ')
+        .toLowerCase()
+        .includes(search),
+    );
+  }
+  candidates.sort((a, b) => new Date(b.registeredAt || 0) - new Date(a.registeredAt || 0));
+
+  const summary = summarizeCandidates(readCandidates());
+  res.json({
+    candidates,
+    ...summary,
+    filters: { batch: batch || 'ALL', search },
+  });
+});
+
+// ─── Admin: broadcast a batch email (individual sends, never a shared To list) ───
+app.get('/api/admin/sent-broadcasts', (req, res) => {
+  res.json(readJsonArray(broadcastsFilePath).slice(0, 50));
+});
+
+app.post('/api/admin/broadcast-batch-mail', async (req, res) => {
+  const { targetBatch, subject, htmlBody, plainText, previewMode } = req.body || {};
+  const batch = normalizeBatch(targetBatch) || 'ALL';
+  const cleanSubject = cleanString(subject, 200);
+  const bodyHtml = typeof htmlBody === 'string' ? htmlBody : '';
+  const bodyText = typeof plainText === 'string' ? plainText : '';
+
+  if (!cleanSubject) return res.status(400).json({ error: 'An email subject is required.' });
+  if (!bodyHtml.trim() && !bodyText.trim()) return res.status(400).json({ error: 'Write an email body before broadcasting.' });
+
+  const recipients = readCandidates().filter((candidate) => {
+    if (batch === 'ALL') return true;
+    const value = normalizeBatch(candidate.batch) || 'Unassigned';
+    return value === batch;
+  });
+  if (!recipients.length) {
+    return res.status(400).json({ error: batch === 'ALL' ? 'No candidates found.' : `No candidates in the ${batch} batch.` });
+  }
+
+  if (previewMode) {
+    const sampleCandidate = recipients[0];
+    return res.json({
+      preview: true,
+      targetBatch: batch,
+      recipientCount: recipients.length,
+      recipients: recipients.slice(0, 50).map((candidate) => ({
+        email: candidate.email,
+        fullName: candidate.fullName || '',
+        batch: normalizeBatch(candidate.batch) || '',
+      })),
+      sample: {
+        to: sampleCandidate.email,
+        subject: applyMergeTags(cleanSubject, sampleCandidate),
+        html: buildBroadcastEmailHtml({ htmlBody: bodyHtml, plainText: bodyText, candidate: sampleCandidate }),
+      },
+    });
+  }
+
+  if (!process.env.COMPANY_MAIL_PASS) {
+    return res.status(503).json({ error: 'Company SMTP is not configured. Add COMPANY_MAIL_PASS to .env to send broadcasts.' });
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'mailserver.businessidentity.llc',
+    port: parseInt(process.env.SMTP_PORT || '465', 10),
+    secure: true,
+    auth: {
+      user: process.env.COMPANY_MAIL_USER || 'job-updates@hamzooh.com',
+      pass: process.env.COMPANY_MAIL_PASS,
+    },
+  });
+
+  try {
+    await transporter.verify();
+  } catch (error) {
+    return res.status(502).json({ error: `Could not reach the company mail server: ${error.message}` });
+  }
+
+  const broadcastId = crypto.randomUUID();
+  const record = {
+    broadcastId,
+    targetBatch: batch,
+    subject: cleanSubject,
+    recipientCount: recipients.length,
+    sentCount: 0,
+    failedCount: 0,
+    status: 'sending',
+    timestamp: new Date().toISOString(),
+    completedAt: '',
+    failures: [],
+  };
+  const broadcasts = readJsonArray(broadcastsFilePath);
+  broadcasts.unshift(record);
+  writeJsonArray(broadcastsFilePath, broadcasts);
+
+  // Three small workers keep the SMTP connection healthy without flooding it.
+  // Every candidate receives their own message, so no recipient ever sees
+  // another candidate's email address.
+  const queue = recipients.slice();
+  const failures = [];
+  let sentCount = 0;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const worker = async () => {
+    while (queue.length) {
+      const candidate = queue.shift();
+      if (!candidate) continue;
+      try {
+        await transporter.sendMail({
+          from: `"${BROADCAST_FROM_NAME}" <${BROADCAST_FROM_EMAIL}>`,
+          to: candidate.email,
+          subject: applyMergeTags(cleanSubject, candidate),
+          text: applyMergeTags(bodyText, candidate) || undefined,
+          html: buildBroadcastEmailHtml({ htmlBody: bodyHtml, plainText: bodyText, candidate }),
+        });
+        sentCount += 1;
+      } catch (error) {
+        failures.push({ email: candidate.email, error: error.message || 'send failed' });
+      }
+      await sleep(120);
+    }
+  };
+
+  try {
+    await Promise.all([worker(), worker(), worker()]);
+  } catch (error) {
+    console.warn('Broadcast worker error:', error.message);
+  }
+
+  const status = failures.length === 0 ? 'sent' : sentCount > 0 ? 'partial' : 'failed';
+  const stored = readJsonArray(broadcastsFilePath);
+  const index = stored.findIndex((item) => item.broadcastId === broadcastId);
+  if (index >= 0) {
+    stored[index] = {
+      ...stored[index],
+      sentCount,
+      failedCount: failures.length,
+      status,
+      completedAt: new Date().toISOString(),
+      failures: failures.slice(0, 50),
+    };
+    writeJsonArray(broadcastsFilePath, stored);
+  }
+
+  res.json({
+    ok: sentCount > 0,
+    broadcastId,
+    targetBatch: batch,
+    recipientCount: recipients.length,
+    sentCount,
+    failedCount: failures.length,
+    status,
+    failures: failures.slice(0, 10),
+  });
 });
 
 app.post('/api/send-email', async (req, res) => {

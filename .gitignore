@@ -1,5 +1,7 @@
 # Scratch
 scratch/
+tmp_*
+/*.py
 
 # Dependencies
 node_modules/

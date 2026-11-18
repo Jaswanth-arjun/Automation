@@ -13,10 +13,6 @@ export default defineConfig({
         timeout: 300000,
         proxyTimeout: 300000,
       },
-      '/admin': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
       '/uploads': {
         target: 'http://localhost:3000',
         changeOrigin: true,

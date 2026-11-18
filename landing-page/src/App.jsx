@@ -19,6 +19,20 @@ import AdminJobs from './pages/AdminJobs';
 import SavedJobs from './pages/SavedJobs';
 import VideoLoader from './components/VideoLoader';
 
+// The admin panel is a separate page served by the API server. While running
+// the Vite dev server on :5173, /admin only exists on :3000.
+function adminPanelUrl() {
+  const { protocol, hostname, port } = window.location;
+  return port === '5173' ? `${protocol}//${hostname}:3000/admin` : '/admin';
+}
+
+function AdminPanelRedirect() {
+  React.useEffect(() => {
+    window.location.replace(adminPanelUrl());
+  }, []);
+  return <div className="ad-boot">Opening the admin panel…</div>;
+}
+
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
   if (!isAuthenticated && !loading) return <Navigate to="/" replace />;
@@ -53,6 +67,8 @@ export default function App() {
             <Route path="linkedin" element={<LinkedInAutomation />} />
             <Route path="post-jobs" element={<AdminJobs />} />
           </Route>
+          {/* Old SPA admin URL: hand it to the real admin panel. */}
+          <Route path="/admin/*" element={<AdminPanelRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

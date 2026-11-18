@@ -1122,7 +1122,7 @@ ${firstName}`;
               onClick={() => setActiveTab(step.key)}
             >
               <span className="apply-flow-num">{step.done ? <Check size={12} /> : index + 1}</span>
-              <StepIcon size={15} />
+              <StepIcon size={13} />
               <span className="apply-flow-label">{step.label}</span>
             </button>
           );

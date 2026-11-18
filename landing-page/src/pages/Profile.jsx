@@ -1,24 +1,103 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Save, Plus, X, Edit3, FileText, Upload, Trash2, Eye, Sparkles, PenLine, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Save, Plus, X, Edit3, FileText, Upload, Trash2, Eye, Sparkles, Loader2,
+  MapPin, Phone, Briefcase, GraduationCap, FolderGit2, Award, Link2,
+  Globe, CheckCircle2, AlertCircle, ExternalLink,
+} from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { profileStore, resumeStore, getUserName } from '../lib/api';
+import { profileStore, resumeStore, candidateStore, getUserName } from '../lib/api';
 import { DEFAULT_PROFILE } from '../lib/mockData';
+import './Profile.css';
+
+const BATCH_OPTIONS = ['2024', '2025', '2026', '2027', '2028', 'Other'];
+
+const GithubMark = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+  </svg>
+);
+
+const LinkedinMark = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" />
+    <rect x="2" y="9" width="4" height="12" />
+    <circle cx="4" cy="4" r="2" />
+  </svg>
+);
 
 // Standalone ProfileField component declared outside of Profile to prevent unmounting & focus loss
-const ProfileField = ({ label, value, editing, onChange, type = 'text' }) => (
-  <div className="form-field">
-    <label>{label}</label>
+const ProfileField = ({ label, value, editing, onChange, type = 'text', placeholder, options }) => (
+  <div className="pf-field">
+    <span className="pf-field-label">{label}</span>
     {editing ? (
-      <input
-        type={type}
-        value={value || ''}
-        onChange={e => onChange(e.target.value)}
-      />
+      options ? (
+        <select value={value || ''} onChange={e => onChange(e.target.value)}>
+          <option value="">Select year…</option>
+          {options.map(option => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={type}
+          value={value || ''}
+          placeholder={placeholder || ''}
+          onChange={e => onChange(e.target.value)}
+        />
+      )
     ) : (
-      <p className="field-display">{value || <span className="placeholder">Not set</span>}</p>
+      <span className={`pf-field-value ${value ? '' : 'is-empty'}`}>{value || 'Not set'}</span>
     )}
   </div>
 );
+
+const SectionCard = ({ icon: Icon, title, count, subtitle, tone = 'indigo', action, children, id }) => (
+  <section className={`pf-card pf-tone-${tone}`} id={id}>
+    <header className="pf-card-head">
+      <span className="pf-card-icon"><Icon size={16} /></span>
+      <div className="pf-card-titles">
+        <h2>
+          {title}
+          {count > 0 && <span className="pf-count">{count}</span>}
+        </h2>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      {action && <div className="pf-card-action">{action}</div>}
+    </header>
+    <div className="pf-card-body">{children}</div>
+  </section>
+);
+
+const EmptyBlock = ({ icon: Icon, title, hint, actionLabel, onAction }) => (
+  <div className="pf-empty">
+    <span className="pf-empty-icon"><Icon size={16} /></span>
+    <div className="pf-empty-body">
+      <strong>{title}</strong>
+      <span>{hint}</span>
+    </div>
+    {actionLabel && onAction && (
+      <button type="button" className="pf-add-btn" onClick={onAction}>
+        <Plus size={12} /> {actionLabel}
+      </button>
+    )}
+  </div>
+);
+
+const withProtocol = (url) => {
+  if (!url) return '';
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+};
+
+const initialsOf = (name, email) => {
+  const clean = String(name || '').trim();
+  const source = clean || String(email || '').split('@')[0] || 'ME';
+  return source
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part.charAt(0).toUpperCase())
+    .join('') || 'ME';
+};
 
 export default function Profile() {
   const { user } = useAuth();
@@ -29,7 +108,6 @@ export default function Profile() {
   });
   const [skillInput, setSkillInput] = useState('');
   const [saved, setSaved] = useState(false);
-  const [showEditChoice, setShowEditChoice] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState('');
 
@@ -43,10 +121,12 @@ export default function Profile() {
   }, [user]);
 
   const handleSave = () => {
-    profileStore.save(profile);
+    const savedProfile = profileStore.save(profile) || profile;
     setEditing(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+    // Keep the admin's candidate database in sync with every profile change.
+    candidateStore.syncProfile(savedProfile).catch(() => {});
   };
 
   // Handle Resume File Upload
@@ -162,7 +242,7 @@ export default function Profile() {
     });
     if (/linkedin/i.test(source) && !links.linkedin) links.linkedin = urls.find(url => /linkedin/i.test(url)) || 'https://www.linkedin.com';
     if (/github/i.test(source) && !links.github) links.github = urls.find(url => /github/i.test(url)) || 'https://github.com';
-    return { ...current, fullName: nameCandidate, email, phone, location: locationCandidate, skills: skills.length ? skills : current.skills, education, experience: experience.length ? experience : current.experience, projects: projects.length ? projects : current.projects, links };
+    return { ...current, fullName: nameCandidate, email, phone, location: locationCandidate, batch: current.batch || education.find(item => item.graduationYear)?.graduationYear || '', skills: skills.length ? skills : current.skills, education, experience: experience.length ? experience : current.experience, projects: projects.length ? projects : current.projects, links };
   };
 
   const handleExtractResume = async (event) => {
@@ -194,9 +274,10 @@ export default function Profile() {
       resumeStore.add({ name: file.name, size: `${(file.size / 1024).toFixed(1)} KB`, type: file.type, text: result.text, makeActive: true });
       setProfile(updated);
       setEditing(false);
-      setShowEditChoice(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+      // Extracted profiles are synced too, so the admin's batch list never lags.
+      candidateStore.syncProfile(updated).catch(() => {});
     } catch (error) {
       setExtractError(error.message || 'Could not extract profile details.');
     } finally {
@@ -255,32 +336,166 @@ export default function Profile() {
     setProfile(p => ({ ...p, [key]: p[key].filter((_, i) => i !== idx) }));
   };
 
+  const completeness = useMemo(() => {
+    const checks = [
+      { key: 'contact', label: 'phone & location', done: Boolean(profile.phone && profile.location) },
+      { key: 'resume', label: 'resume', done: Boolean(profile.resume) },
+      { key: 'skills', label: '3+ skills', done: (profile.skills || []).length >= 3 },
+      { key: 'education', label: 'education', done: (profile.education || []).length > 0 },
+      { key: 'experience', label: 'experience', done: (profile.experience || []).length > 0 },
+      { key: 'projects', label: 'projects', done: (profile.projects || []).length > 0 },
+      { key: 'links', label: 'a profile link', done: Boolean(profile.links?.linkedin || profile.links?.github || profile.links?.portfolio) },
+    ];
+    const done = checks.filter(check => check.done).length;
+    return {
+      checks,
+      percent: Math.round((done / checks.length) * 100),
+      missing: checks.filter(check => !check.done).map(check => check.label),
+    };
+  }, [profile]);
+
+  const handleCancel = () => {
+    const savedProfile = profileStore.get();
+    setProfile(savedProfile || { ...DEFAULT_PROFILE, fullName: getUserName(user), email: user?.email || '' });
+    setEditing(false);
+    setSkillInput('');
+  };
+
+  const counts = {
+    skills: (profile.skills || []).length,
+    experience: (profile.experience || []).length,
+    education: (profile.education || []).length,
+    projects: (profile.projects || []).length,
+  };
+
+  const avatarText = initialsOf(profile.fullName, profile.email);
+  const missingHint = completeness.missing.length
+    ? `Add ${completeness.missing.slice(0, 3).join(', ')}${completeness.missing.length > 3 ? ` +${completeness.missing.length - 3} more` : ''} to improve job matching.`
+    : 'Your profile is complete — great work.';
+
   return (
-    <div className="page-profile">
-      <header className="page-header">
+    <div className="pf-page">
+      <header className="pf-header">
         <div>
           <h1>My Profile</h1>
-          <p>Your career profile for job matching and automated applications.</p>
+          <p>HAMZO uses these details to match jobs, score your fit and tailor every resume.</p>
         </div>
-        <div className="header-actions">
-          {saved && <span className="save-indicator">✓ Saved</span>}
+        <div className="pf-header-actions">
+          {saved && (
+            <span className="pf-saved"><CheckCircle2 size={14} /> Saved</span>
+          )}
           {editing ? (
-            <button className="btn-accent" onClick={handleSave}><Save size={16} /> Save Profile</button>
+            <>
+              <button type="button" className="pf-btn-ghost" onClick={handleCancel}>Cancel</button>
+              <button type="button" className="pf-btn-primary" onClick={handleSave}><Save size={15} /> Save profile</button>
+            </>
           ) : (
-            <button className="btn-ghost" onClick={() => setShowEditChoice(true)}><Edit3 size={16} /> Edit Profile</button>
+            <>
+              <button
+                type="button"
+                className="pf-btn-ghost"
+                onClick={() => extractInputRef.current?.click()}
+                disabled={extracting}
+              >
+                {extracting ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
+                {extracting ? 'Extracting…' : 'Auto-fill from resume'}
+              </button>
+              <button type="button" className="pf-btn-primary" onClick={() => setEditing(true)}>
+                <Edit3 size={15} /> Edit profile
+              </button>
+            </>
           )}
         </div>
       </header>
 
-      <div className="profile-sections space-y-6">
+      {extractError && (
+        <div className="pf-alert">
+          <AlertCircle size={15} />
+          <span>{extractError}</span>
+          <button type="button" onClick={() => setExtractError('')} aria-label="Dismiss error"><X size={14} /></button>
+        </div>
+      )}
+
+      <section className="pf-hero">
+        <div className="pf-identity">
+          <div className="pf-avatar" aria-hidden="true">{avatarText}</div>
+          <div className="pf-identity-body">
+            <span className="pf-eyebrow">Candidate profile</span>
+            <h2 className="pf-name">{profile.fullName || 'Your name'}</h2>
+            <p className="pf-contact">{profile.email || 'Add your email address'}</p>
+
+            <div className="pf-meta">
+              {profile.location && (
+                <span className="pf-meta-chip" title={profile.location}><MapPin size={12} /> {profile.location}</span>
+              )}
+              {profile.phone && (
+                <span className="pf-meta-chip" title={profile.phone}><Phone size={12} /> {profile.phone}</span>
+              )}
+              {profile.links?.linkedin && (
+                <a className="pf-meta-chip pf-meta-link" href={withProtocol(profile.links.linkedin)} target="_blank" rel="noreferrer" title="LinkedIn profile">
+                  <LinkedinMark size={12} /> LinkedIn <ExternalLink size={11} />
+                </a>
+              )}
+              {!profile.location && !profile.phone && !profile.links?.linkedin && (
+                <span className="pf-meta-chip pf-meta-muted"><MapPin size={12} /> Add location &amp; phone</span>
+              )}
+            </div>
+
+            <div className="pf-strength">
+              <div className="pf-strength-top">
+                <span>Profile strength</span>
+                <strong>{completeness.percent}%</strong>
+              </div>
+              <div className="pf-strength-track">
+                <span
+                  className={`pf-strength-fill ${completeness.percent === 100 ? 'is-full' : ''}`}
+                  style={{ width: `${completeness.percent}%` }}
+                />
+              </div>
+              <span className="pf-strength-hint">{missingHint}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="pf-stats">
+          <div className="pf-stat">
+            <span className="pf-stat-label">Skills</span>
+            <strong className="pf-stat-value is-indigo">{counts.skills}</strong>
+            <span className="pf-stat-caption">Listed skills</span>
+          </div>
+          <div className="pf-stat">
+            <span className="pf-stat-label">Experience</span>
+            <strong className="pf-stat-value is-green">{counts.experience}</strong>
+            <span className="pf-stat-caption">Roles added</span>
+          </div>
+          <div className="pf-stat">
+            <span className="pf-stat-label">Education</span>
+            <strong className="pf-stat-value is-amber">{counts.education}</strong>
+            <span className="pf-stat-caption">Degrees added</span>
+          </div>
+          <div className="pf-stat">
+            <span className="pf-stat-label">Projects</span>
+            <strong className="pf-stat-value is-violet">{counts.projects}</strong>
+            <span className="pf-stat-caption">Projects added</span>
+          </div>
+        </div>
+      </section>
+
+      <div className="pf-layout">
+        <div className="pf-main">
         {/* Personal Information */}
-        <section className="profile-section">
-          <h2>Personal Information</h2>
-          <div className="form-grid">
+        <SectionCard
+          icon={Award}
+          title="Personal information"
+          subtitle="Used on tailored resumes and in outreach emails."
+          tone="indigo"
+        >
+          <div className="pf-field-grid">
             <ProfileField
-              label="Full Name"
+              label="Full name"
               value={profile.fullName}
               editing={editing}
+              placeholder="Your full name"
               onChange={val => setProfile(p => ({ ...p, fullName: val }))}
             />
             <ProfileField
@@ -288,6 +503,7 @@ export default function Profile() {
               value={profile.email}
               editing={editing}
               type="email"
+              placeholder="you@example.com"
               onChange={val => setProfile(p => ({ ...p, email: val }))}
             />
             <ProfileField
@@ -295,260 +511,364 @@ export default function Profile() {
               value={profile.phone}
               editing={editing}
               type="tel"
+              placeholder="+91 90000 00000"
               onChange={val => setProfile(p => ({ ...p, phone: val }))}
             />
             <ProfileField
               label="Location"
               value={profile.location}
               editing={editing}
+              placeholder="City, Country"
               onChange={val => setProfile(p => ({ ...p, location: val }))}
             />
+            <ProfileField
+              label="Graduation year / Batch"
+              value={profile.batch}
+              editing={editing}
+              options={BATCH_OPTIONS}
+              onChange={val => setProfile(p => ({ ...p, batch: val }))}
+            />
           </div>
-        </section>
-
-        {/* RESUME UPLOAD SECTION (Requires Edit Profile mode to add/upload/replace) */}
-        <section className="profile-section">
-          <div className="section-header" style={{ marginBottom: '16px' }}>
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '16px', fontWeight: '800' }}>
-              <FileText size={18} style={{ color: 'var(--accent)' }} /> Resume / CV Document
-            </h2>
-          </div>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept=".pdf,.doc,.docx"
-            style={{ display: 'none' }}
-          />
-
-          {profile.resume ? (
-            <div className="entry-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', flexWrap: 'wrap', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#eef0ff', color: '#445cf5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', shrink: 0 }}>
-                  <FileText size={22} />
-                </div>
-                <div>
-                  <strong style={{ fontSize: '14px', color: '#171817', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {profile.resume.fileName}
-                    <span style={{ fontSize: '10px', background: '#e5f5e9', color: '#2a7645', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' }}>
-                      ✓ Active
-                    </span>
-                  </strong>
-                  <p style={{ fontSize: '12px', color: '#666', margin: '4px 0 0' }}>
-                    {profile.resume.fileSize} · Uploaded on {profile.resume.uploadedAt}
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button type="button" onClick={handleViewResume} className="btn-ghost sm" style={{ fontSize: '12px' }}>
-                  <Eye size={14} /> View
-                </button>
-                {editing && (
-                  <>
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-ghost sm" style={{ fontSize: '12px' }}>
-                      <Upload size={14} /> Replace
-                    </button>
-                    <button type="button" onClick={handleRemoveResume} className="btn-ghost danger sm" style={{ fontSize: '12px' }} title="Delete Resume">
-                      <Trash2 size={14} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ) : editing ? (
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                border: '2px dashed #d9d9d2',
-                borderRadius: '12px',
-                padding: '30px 20px',
-                textAlign: 'center',
-                background: '#fafaf7',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justify: 'center'
-              }}
-            >
-              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#eef0ff', color: '#445cf5', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-                <Upload size={22} />
-              </div>
-              <strong style={{ fontSize: '14px', color: '#171817', display: 'block', marginBottom: '4px' }}>
-                Click to upload your resume
-              </strong>
-              <span style={{ fontSize: '12px', color: '#777', display: 'block', marginBottom: '16px' }}>
-                Supports PDF, DOC, DOCX files (Up to 10MB)
-              </span>
-              <button type="button" className="btn-accent sm" style={{ pointerEvents: 'none' }}>
-                <Plus size={14} /> Select Resume File
-              </button>
-            </div>
-          ) : (
-            <p className="placeholder">
-              No resume uploaded yet. Click <strong>Edit Profile</strong> at the top right to upload your resume.
-            </p>
-          )}
-        </section>
-
-        {/* Skills */}
-        <section className="profile-section">
-          <h2>Skills</h2>
-          {editing && (
-            <div className="skill-input-row">
-              <input placeholder="Add a skill…" value={skillInput} onChange={e => setSkillInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSkill()} />
-              <button className="btn-ghost" onClick={addSkill}><Plus size={16} /></button>
-            </div>
-          )}
-          <div className="job-card-skills">
-            {profile.skills.map(s => (
-              <span key={s} className="skill-tag">
-                {s}
-                {editing && <button onClick={() => removeSkill(s)}><X size={12} /></button>}
-              </span>
-            ))}
-            {profile.skills.length === 0 && <p className="placeholder">No skills added yet.</p>}
-          </div>
-        </section>
+        </SectionCard>
 
         {/* Education */}
-        <section className="profile-section">
-          <div className="section-header">
-            <h2>Education</h2>
-            {editing && <button className="btn-ghost sm" onClick={() => addEntry('education')}><Plus size={14} /> Add</button>}
-          </div>
+        <SectionCard
+          icon={GraduationCap}
+          title="Education"
+          count={counts.education}
+          subtitle="Degrees and coursework that back your applications."
+          tone="amber"
+          action={editing ? (
+            <button type="button" className="pf-add-btn" onClick={() => addEntry('education')}>
+              <Plus size={12} /> Add
+            </button>
+          ) : null}
+        >
           {profile.education.map((e, i) => (
-            <div key={i} className="entry-card">
+            <div key={i} className="pf-entry">
               {editing ? (
                 <>
-                  <div className="form-grid">
-                    <div className="form-field"><label>Institution</label><input value={e.institution} onChange={ev => updateEntry('education', i, 'institution', ev.target.value)} /></div>
-                    <div className="form-field"><label>Degree</label><input value={e.degree} onChange={ev => updateEntry('education', i, 'degree', ev.target.value)} /></div>
-                    <div className="form-field"><label>Branch</label><input value={e.branch} onChange={ev => updateEntry('education', i, 'branch', ev.target.value)} /></div>
-                    <div className="form-field"><label>Year</label><input value={e.graduationYear} onChange={ev => updateEntry('education', i, 'graduationYear', ev.target.value)} /></div>
-                    <div className="form-field"><label>CGPA</label><input value={e.cgpa} onChange={ev => updateEntry('education', i, 'cgpa', ev.target.value)} /></div>
+                  <button type="button" className="pf-remove" onClick={() => removeEntry('education', i)} title="Remove education">
+                    <Trash2 size={13} />
+                  </button>
+                  <div className="pf-edit-grid">
+                    <div className="pf-field"><span className="pf-field-label">Institution</span><input value={e.institution} onChange={ev => updateEntry('education', i, 'institution', ev.target.value)} placeholder="University or college" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Degree</span><input value={e.degree} onChange={ev => updateEntry('education', i, 'degree', ev.target.value)} placeholder="B.Tech" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Branch</span><input value={e.branch} onChange={ev => updateEntry('education', i, 'branch', ev.target.value)} placeholder="Computer Science" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Year</span><input value={e.graduationYear} onChange={ev => updateEntry('education', i, 'graduationYear', ev.target.value)} placeholder="2026" /></div>
+                    <div className="pf-field"><span className="pf-field-label">CGPA</span><input value={e.cgpa} onChange={ev => updateEntry('education', i, 'cgpa', ev.target.value)} placeholder="8.5/10" /></div>
                   </div>
-                  <button className="btn-ghost danger sm" onClick={() => removeEntry('education', i)}><X size={14} /> Remove</button>
                 </>
               ) : (
-                <div className="entry-display">
-                  <strong>{e.degree || 'Degree'} {e.branch && `in ${e.branch}`}</strong>
-                  <p>{e.institution || 'Institution'} {e.graduationYear && `· ${e.graduationYear}`} {e.cgpa && `· ${e.cgpa}`}</p>
+                <div className="pf-entry-body">
+                  <div className="pf-entry-top">
+                    <strong>{e.degree || 'Degree'}{e.branch ? ` in ${e.branch}` : ''}</strong>
+                    {e.graduationYear && <span className="pf-entry-time">{e.graduationYear}</span>}
+                  </div>
+                  <p className="pf-entry-sub">
+                    {e.institution || 'Institution'}{e.cgpa ? ` · ${e.cgpa}` : ''}
+                  </p>
                 </div>
               )}
             </div>
           ))}
-          {profile.education.length === 0 && <p className="placeholder">No education added yet.</p>}
-        </section>
+          {profile.education.length === 0 && (
+            <EmptyBlock
+              icon={GraduationCap}
+              title="No education added"
+              hint="Add your degree so every tailored resume includes it."
+              actionLabel="Add education"
+              onAction={() => { setEditing(true); addEntry('education'); }}
+            />
+          )}
+        </SectionCard>
 
         {/* Experience */}
-        <section className="profile-section">
-          <div className="section-header">
-            <h2>Experience</h2>
-            {editing && <button className="btn-ghost sm" onClick={() => addEntry('experience')}><Plus size={14} /> Add</button>}
-          </div>
+        <SectionCard
+          icon={Briefcase}
+          title="Experience"
+          count={counts.experience}
+          subtitle="Roles and internships HAMZO highlights for matching jobs."
+          tone="green"
+          action={editing ? (
+            <button type="button" className="pf-add-btn" onClick={() => addEntry('experience')}>
+              <Plus size={12} /> Add
+            </button>
+          ) : null}
+        >
           {profile.experience.map((e, i) => (
-            <div key={i} className="entry-card">
+            <div key={i} className="pf-entry">
               {editing ? (
                 <>
-                  <div className="form-grid">
-                    <div className="form-field"><label>Title</label><input value={e.title} onChange={ev => updateEntry('experience', i, 'title', ev.target.value)} /></div>
-                    <div className="form-field"><label>Company</label><input value={e.company} onChange={ev => updateEntry('experience', i, 'company', ev.target.value)} /></div>
-                    <div className="form-field"><label>Duration</label><input value={e.duration} onChange={ev => updateEntry('experience', i, 'duration', ev.target.value)} /></div>
+                  <button type="button" className="pf-remove" onClick={() => removeEntry('experience', i)} title="Remove experience">
+                    <Trash2 size={13} />
+                  </button>
+                  <div className="pf-edit-grid">
+                    <div className="pf-field"><span className="pf-field-label">Title</span><input value={e.title} onChange={ev => updateEntry('experience', i, 'title', ev.target.value)} placeholder="Software Engineer Intern" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Company</span><input value={e.company} onChange={ev => updateEntry('experience', i, 'company', ev.target.value)} placeholder="Company name" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Duration</span><input value={e.duration} onChange={ev => updateEntry('experience', i, 'duration', ev.target.value)} placeholder="Jun 2025 – Aug 2025" /></div>
                   </div>
-                  <div className="form-field"><label>Description</label><textarea value={e.description} onChange={ev => updateEntry('experience', i, 'description', ev.target.value)} /></div>
-                  <button className="btn-ghost danger sm" onClick={() => removeEntry('experience', i)}><X size={14} /> Remove</button>
+                  <div className="pf-field pf-field-full"><span className="pf-field-label">Description</span><textarea value={e.description} onChange={ev => updateEntry('experience', i, 'description', ev.target.value)} placeholder="What you built and the impact it had." /></div>
                 </>
               ) : (
-                <div className="entry-display">
-                  <strong>{e.title || 'Role'}</strong>
-                  <p>{e.company || 'Company'} {e.duration && `· ${e.duration}`}</p>
-                  {e.description && <p className="entry-desc">{e.description}</p>}
+                <div className="pf-entry-body">
+                  <div className="pf-entry-top">
+                    <strong>{e.title || 'Role'}</strong>
+                    {e.duration && <span className="pf-entry-time">{e.duration}</span>}
+                  </div>
+                  <p className="pf-entry-sub">{e.company || 'Company'}</p>
+                  {e.description && <p className="pf-entry-desc">{e.description}</p>}
                 </div>
               )}
             </div>
           ))}
-          {profile.experience.length === 0 && <p className="placeholder">No experience added yet.</p>}
-        </section>
+          {profile.experience.length === 0 && (
+            <EmptyBlock
+              icon={Briefcase}
+              title="No experience added"
+              hint="Add internships or roles to strengthen your match score."
+              actionLabel="Add experience"
+              onAction={() => { setEditing(true); addEntry('experience'); }}
+            />
+          )}
+        </SectionCard>
 
         {/* Projects */}
-        <section className="profile-section">
-          <div className="section-header">
-            <h2>Projects</h2>
-            {editing && <button className="btn-ghost sm" onClick={() => addEntry('projects')}><Plus size={14} /> Add</button>}
-          </div>
-          {profile.projects.map((p, i) => (
-            <div key={i} className="entry-card">
+        <SectionCard
+          icon={FolderGit2}
+          title="Projects"
+          count={counts.projects}
+          subtitle="Work that shows how you apply your skills."
+          tone="violet"
+          action={editing ? (
+            <button type="button" className="pf-add-btn" onClick={() => addEntry('projects')}>
+              <Plus size={12} /> Add
+            </button>
+          ) : null}
+        >
+          {profile.projects.map((project, i) => (
+            <div key={i} className="pf-entry">
               {editing ? (
                 <>
-                  <div className="form-grid">
-                    <div className="form-field"><label>Title</label><input value={p.title} onChange={ev => updateEntry('projects', i, 'title', ev.target.value)} /></div>
-                    <div className="form-field"><label>Technologies</label><input value={p.technologies} onChange={ev => updateEntry('projects', i, 'technologies', ev.target.value)} /></div>
-                    <div className="form-field"><label>Link</label><input value={p.link} onChange={ev => updateEntry('projects', i, 'link', ev.target.value)} /></div>
+                  <button type="button" className="pf-remove" onClick={() => removeEntry('projects', i)} title="Remove project">
+                    <Trash2 size={13} />
+                  </button>
+                  <div className="pf-edit-grid">
+                    <div className="pf-field"><span className="pf-field-label">Title</span><input value={project.title} onChange={ev => updateEntry('projects', i, 'title', ev.target.value)} placeholder="Project name" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Technologies</span><input value={project.technologies} onChange={ev => updateEntry('projects', i, 'technologies', ev.target.value)} placeholder="React, Node.js" /></div>
+                    <div className="pf-field"><span className="pf-field-label">Link</span><input value={project.link} onChange={ev => updateEntry('projects', i, 'link', ev.target.value)} placeholder="github.com/you/project" /></div>
                   </div>
-                  <div className="form-field"><label>Description</label><textarea value={p.description} onChange={ev => updateEntry('projects', i, 'description', ev.target.value)} /></div>
-                  <button className="btn-ghost danger sm" onClick={() => removeEntry('projects', i)}><X size={14} /> Remove</button>
+                  <div className="pf-field pf-field-full"><span className="pf-field-label">Description</span><textarea value={project.description} onChange={ev => updateEntry('projects', i, 'description', ev.target.value)} placeholder="What it does and what you learned." /></div>
                 </>
               ) : (
-                <div className="entry-display">
-                  <strong>{p.title || 'Project'}</strong>
-                  {p.technologies && <div className="job-card-skills small">{p.technologies.split(',').map(t => <span key={t} className="skill-tag">{t.trim()}</span>)}</div>}
-                  {p.description && <p className="entry-desc">{p.description}</p>}
+                <div className="pf-entry-body">
+                  <div className="pf-entry-top">
+                    <strong>{project.title || 'Project'}</strong>
+                    {project.link && (
+                      <a className="pf-entry-link" href={withProtocol(project.link)} target="_blank" rel="noreferrer" title="Open project link">
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+                  {project.technologies && (
+                    <div className="pf-mini-tags">
+                      {project.technologies.split(',').filter(Boolean).map(tech => (
+                        <span key={tech} className="pf-mini-tag">{tech.trim()}</span>
+                      ))}
+                    </div>
+                  )}
+                  {project.description && <p className="pf-entry-desc">{project.description}</p>}
                 </div>
               )}
             </div>
           ))}
-          {profile.projects.length === 0 && <p className="placeholder">No projects added yet.</p>}
-        </section>
+          {profile.projects.length === 0 && (
+            <EmptyBlock
+              icon={FolderGit2}
+              title="No projects added"
+              hint="Add 1–2 projects to show practical, job-ready work."
+              actionLabel="Add project"
+              onAction={() => { setEditing(true); addEntry('projects'); }}
+            />
+          )}
+        </SectionCard>
 
-        {/* Professional Links */}
-        <section className="profile-section">
-          <h2>Professional Links</h2>
-          <div className="form-grid">
-            <ProfileField
-              label="GitHub"
-              value={profile.links?.github}
-              editing={editing}
-              onChange={val => setProfile(p => ({ ...p, links: { ...(p.links || {}), github: val } }))}
-            />
-            <ProfileField
-              label="LinkedIn"
-              value={profile.links?.linkedin}
-              editing={editing}
-              onChange={val => setProfile(p => ({ ...p, links: { ...(p.links || {}), linkedin: val } }))}
-            />
-            <ProfileField
-              label="Portfolio"
-              value={profile.links?.portfolio}
-              editing={editing}
-              onChange={val => setProfile(p => ({ ...p, links: { ...(p.links || {}), portfolio: val } }))}
-            />
-          </div>
-        </section>
-      </div>
-
-      {showEditChoice && (
-        <div className="profile-modal-overlay" onMouseDown={event => event.target === event.currentTarget && setShowEditChoice(false)}>
-          <div className="profile-choice-modal" role="dialog" aria-modal="true" aria-labelledby="profile-choice-title">
-            <button className="profile-modal-close" onClick={() => setShowEditChoice(false)} aria-label="Close"><X size={18} /></button>
-            <span className="profile-modal-kicker">UPDATE YOUR PROFILE</span>
-            <h2 id="profile-choice-title">How would you like to edit?</h2>
-            <p>Enter your details manually, or let HAMZO fill your profile from your resume.</p>
-            {extractError && <div className="profile-extract-error">{extractError}</div>}
-            <button className="profile-choice-card" onClick={() => { setShowEditChoice(false); setEditing(true); }}>
-              <span className="profile-choice-icon manual"><PenLine size={20} /></span><span><strong>Edit manually</strong><small>Update your name, skills, education and experience yourself.</small></span><span className="profile-choice-arrow">→</span>
-            </button>
-            <button className="profile-choice-card" disabled={extracting} onClick={() => extractInputRef.current?.click()}>
-              <span className="profile-choice-icon extract">{extracting ? <Loader2 size={20} className="spin" /> : <Sparkles size={20} />}</span><span><strong>{extracting ? 'Extracting profile…' : 'Extract from your resume'}</strong><small>Choose a PDF file and automatically update your profile.</small></span><span className="profile-choice-arrow">→</span>
-            </button>
-            <input ref={extractInputRef} type="file" accept=".pdf" onChange={handleExtractResume} hidden />
-            <small className="profile-modal-note">PDF resumes with selectable text work best.</small>
-          </div>
         </div>
-      )}
+
+        <aside className="pf-side">
+          {/* Resume / CV document */}
+          <SectionCard
+            icon={FileText}
+            title="Resume / CV"
+            subtitle="Master file HAMZO tailors for every application."
+            tone="indigo"
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept=".pdf,.doc,.docx"
+              style={{ display: 'none' }}
+            />
+            <input ref={extractInputRef} type="file" accept=".pdf" onChange={handleExtractResume} hidden />
+
+            {profile.resume ? (
+              <>
+                <div className="pf-resume-file">
+                  <span className="pf-resume-icon"><FileText size={18} /></span>
+                  <div className="pf-resume-body">
+                    <strong title={profile.resume.fileName}>{profile.resume.fileName}</strong>
+                    <span>{profile.resume.fileSize} · Uploaded {profile.resume.uploadedAt}</span>
+                  </div>
+                  <span className="pf-badge-active"><CheckCircle2 size={11} /> Active</span>
+                </div>
+                <div className="pf-resume-actions">
+                  <button type="button" className="pf-btn-mini" onClick={handleViewResume}>
+                    <Eye size={13} /> View
+                  </button>
+                  {editing && (
+                    <>
+                      <button type="button" className="pf-btn-mini" onClick={() => fileInputRef.current?.click()}>
+                        <Upload size={13} /> Replace
+                      </button>
+                      <button type="button" className="pf-btn-mini is-danger" onClick={handleRemoveResume}>
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="pf-resume-empty">
+                <span className="pf-resume-empty-icon"><Upload size={18} /></span>
+                <strong>No resume uploaded</strong>
+                <span>Upload a PDF to auto-fill your profile and tailor resumes.</span>
+                <div className="pf-resume-empty-actions">
+                  <button type="button" className="pf-btn-primary pf-btn-sm" onClick={() => fileInputRef.current?.click()}>
+                    <Upload size={13} /> Upload resume
+                  </button>
+                  <button type="button" className="pf-btn-ghost pf-btn-sm" onClick={() => extractInputRef.current?.click()} disabled={extracting}>
+                    {extracting ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />} Extract details
+                  </button>
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* Skills */}
+          <SectionCard
+            icon={Sparkles}
+            title="Skills"
+            count={counts.skills}
+            subtitle="Keywords matched against every job post."
+            tone="violet"
+          >
+            {editing && (
+              <div className="pf-skill-add">
+                <input
+                  placeholder="Add a skill…"
+                  value={skillInput}
+                  onChange={e => setSkillInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSkill(); } }}
+                />
+                <button type="button" onClick={addSkill} title="Add skill"><Plus size={15} /></button>
+              </div>
+            )}
+            {counts.skills > 0 ? (
+              <div className="pf-skill-row">
+                {profile.skills.map(skill => (
+                  <span key={skill} className="pf-skill">
+                    {skill}
+                    {editing && (
+                      <button type="button" onClick={() => removeSkill(skill)} title={`Remove ${skill}`}>
+                        <X size={11} />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <EmptyBlock
+                icon={Sparkles}
+                title="No skills yet"
+                hint="Add 3 or more skills to improve match scores."
+                actionLabel={editing ? '' : 'Add skills'}
+                onAction={() => setEditing(true)}
+              />
+            )}
+          </SectionCard>
+
+          {/* Professional links */}
+          <SectionCard
+            icon={Link2}
+            title="Professional links"
+            subtitle="Shown on your profile and tailored resumes."
+            tone="green"
+          >
+            {editing ? (
+              <div className="pf-field-grid pf-links-edit">
+                <ProfileField
+                  label="GitHub"
+                  value={profile.links?.github}
+                  editing={editing}
+                  placeholder="github.com/username"
+                  onChange={val => setProfile(p => ({ ...p, links: { ...(p.links || {}), github: val } }))}
+                />
+                <ProfileField
+                  label="LinkedIn"
+                  value={profile.links?.linkedin}
+                  editing={editing}
+                  placeholder="linkedin.com/in/username"
+                  onChange={val => setProfile(p => ({ ...p, links: { ...(p.links || {}), linkedin: val } }))}
+                />
+                <ProfileField
+                  label="Portfolio"
+                  value={profile.links?.portfolio}
+                  editing={editing}
+                  placeholder="your-site.com"
+                  onChange={val => setProfile(p => ({ ...p, links: { ...(p.links || {}), portfolio: val } }))}
+                />
+              </div>
+            ) : (
+              <div className="pf-links">
+                {[
+                  { key: 'github', label: 'GitHub', icon: GithubMark },
+                  { key: 'linkedin', label: 'LinkedIn', icon: LinkedinMark },
+                  { key: 'portfolio', label: 'Portfolio', icon: Globe },
+                ].map(item => {
+                  const value = profile.links?.[item.key] || '';
+                  const Icon = item.icon;
+                  return value ? (
+                    <a
+                      key={item.key}
+                      className="pf-link"
+                      href={withProtocol(value)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={value}
+                    >
+                      <span className="pf-link-icon"><Icon size={14} /></span>
+                      <span className="pf-link-body">
+                        <span>{item.label}</span>
+                        <small>{value}</small>
+                      </span>
+                      <ExternalLink size={13} />
+                    </a>
+                  ) : (
+                    <div key={item.key} className="pf-link is-empty">
+                      <span className="pf-link-icon"><Icon size={14} /></span>
+                      <span className="pf-link-body">
+                        <span>{item.label}</span>
+                        <small>Not added</small>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+        </aside>
+      </div>
     </div>
   );
 }

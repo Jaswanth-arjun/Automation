@@ -166,6 +166,44 @@ export const profileStore = {
   },
 };
 
+// Candidate database — every profile save refreshes the admin's batch-wise list.
+export const candidateStore = {
+  syncProfile(profile = {}) {
+    const education = Array.isArray(profile.education) ? profile.education : [];
+    const primaryEducation = education.find((item) => item?.institution || item?.graduationYear) || {};
+    const batch = String(profile.batch || primaryEducation.graduationYear || '').trim();
+    const payload = {
+      email: String(profile.email || '').trim(),
+      fullName: String(profile.fullName || '').trim(),
+      phone: String(profile.phone || '').trim(),
+      batch,
+      institution: String(primaryEducation.institution || profile.institution || '').trim(),
+      skills: Array.isArray(profile.skills) ? profile.skills : [],
+    };
+    if (!payload.email) return Promise.resolve({ ok: false, skipped: true });
+    return apiFetch(MAILMIND_API, '/api/candidates/sync', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  list({ batch = '', search = '' } = {}) {
+    const params = new URLSearchParams();
+    if (batch && batch !== 'ALL') params.set('batch', batch);
+    if (search) params.set('search', search);
+    const query = params.toString();
+    return apiFetch(MAILMIND_API, `/api/candidates${query ? `?${query}` : ''}`);
+  },
+  broadcast(payload) {
+    return apiFetch(MAILMIND_API, '/api/admin/broadcast-batch-mail', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+  sentBroadcasts() {
+    return apiFetch(MAILMIND_API, '/api/admin/sent-broadcasts');
+  },
+};
+
 // LinkedIn campaign form values, shared so the Apply tab and the LinkedIn
 // Automation page always launch with the same company / role / filters.
 const CAMPAIGN_PREFS_KEY = 'wayin_linkedin_campaign_prefs';

@@ -732,6 +732,240 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadContacts();
 
+  // ─── Candidates database + batch mailer ───
+  const candidatesBody = document.getElementById('candidatesBody');
+  const candidatesTableWrap = document.getElementById('candidatesTableWrap');
+  const candidatesEmpty = document.getElementById('candidatesEmpty');
+  const candidatesCountBadge = document.getElementById('candidatesCountBadge');
+  const candidatesFilters = document.getElementById('candidatesFilters');
+  const candidatesSearch = document.getElementById('candidatesSearch');
+  const candidatesRefreshBtn = document.getElementById('candidatesRefreshBtn');
+  const batchMailToggle = document.getElementById('batchMailToggle');
+  const batchMailForm = document.getElementById('batchMailForm');
+  const batchMailTarget = document.getElementById('batchMailTarget');
+  const batchMailSubject = document.getElementById('batchMailSubject');
+  const batchMailBody = document.getElementById('batchMailBody');
+  const batchMailSend = document.getElementById('batchMailSend');
+  const batchMailCancel = document.getElementById('batchMailCancel');
+  const batchMailStatus = document.getElementById('batchMailStatus');
+  const batchMailSummary = document.getElementById('batchMailSummary');
+
+  const BATCH_MAIL_DEFAULT = `Hi {{name}},\n\nWe have an exciting opportunity for the {{batch}} batch and thought of you.\n\nRole: \nLocation: \nApply here: [Insert Job Link]\nApplication deadline: [Insert Deadline]\n\nGood luck,\nHamzo Careers`;
+
+  let candidatesData = { candidates: [], totalCandidates: 0, batchCounts: {} };
+  let candidateBatch = 'ALL';
+
+  function initialsOf(candidate) {
+    const source = String(candidate.fullName || '').trim() || String(candidate.email || '').split('@')[0] || 'C';
+    return source.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || 'C';
+  }
+
+  function formatCandidateDate(iso) {
+    if (!iso) return '—';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function batchLabel(batch) {
+    return batch && batch !== 'Unassigned' ? `${batch} batch` : 'Batch not set';
+  }
+
+  function filteredCandidates() {
+    const query = candidatesSearch.value.trim().toLowerCase();
+    return candidatesData.candidates.filter((candidate) => {
+      if (candidateBatch !== 'ALL' && (candidate.batch || 'Unassigned') !== candidateBatch) return false;
+      if (!query) return true;
+      return [candidate.fullName, candidate.email, candidate.phone, candidate.institution, ...(candidate.skills || [])]
+        .filter(Boolean).join(' ').toLowerCase().includes(query);
+    });
+  }
+
+  function renderCandidateFilters() {
+    const counts = candidatesData.batchCounts || {};
+    const keys = Object.keys(counts).sort((a, b) => {
+      const yearA = /^20\d{2}$/.test(a) ? Number(a) : 0;
+      const yearB = /^20\d{2}$/.test(b) ? Number(b) : 0;
+      return yearB - yearA || a.localeCompare(b);
+    });
+    const chips = [`<button type="button" class="candidate-chip ${candidateBatch === 'ALL' ? 'is-active' : ''}" data-batch="ALL">All batches <span>${candidatesData.totalCandidates}</span></button>`];
+    keys.forEach((key) => {
+      chips.push(`<button type="button" class="candidate-chip ${candidateBatch === key ? 'is-active' : ''}" data-batch="${escapeHtml(key)}">${escapeHtml(key)} <span>${counts[key]}</span></button>`);
+    });
+    candidatesFilters.innerHTML = chips.join('');
+    candidatesFilters.querySelectorAll('.candidate-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        candidateBatch = chip.dataset.batch || 'ALL';
+        renderCandidateFilters();
+        renderCandidates();
+      });
+    });
+  }
+
+  function renderCandidates() {
+    const rows = filteredCandidates();
+    const total = candidatesData.totalCandidates;
+    candidatesCountBadge.textContent = `${total} candidate${total === 1 ? '' : 's'}`;
+    candidatesEmpty.classList.toggle('hidden', rows.length > 0);
+    candidatesTableWrap.classList.toggle('hidden', rows.length === 0);
+
+    if (!rows.length) {
+      candidatesEmpty.querySelector('p').textContent = total
+        ? 'No candidate matches this filter. Try another batch or clear the search.'
+        : 'No candidates yet. Students appear here as soon as they sign in or save their profile.';
+      candidatesBody.innerHTML = '';
+      return;
+    }
+
+    candidatesBody.innerHTML = rows.map((candidate) => {
+      const skills = Array.isArray(candidate.skills) ? candidate.skills : [];
+      const skillChips = skills.length
+        ? `<div class="candidate-skills">${skills.slice(0, 3).map((skill) => `<span>${escapeHtml(skill)}</span>`).join('')}${skills.length > 3 ? `<em>+${skills.length - 3}</em>` : ''}</div>`
+        : '<span class="candidate-muted">—</span>';
+      return `
+        <tr>
+          <td>
+            <div class="candidate-person">
+              <span class="candidate-avatar">${escapeHtml(initialsOf(candidate))}</span>
+              <div>
+                <strong>${escapeHtml(candidate.fullName || 'Unnamed student')}</strong>
+                <small>${escapeHtml(candidate.institution || 'Institution not set')}</small>
+              </div>
+            </div>
+          </td>
+          <td><a class="candidate-email" href="mailto:${escapeHtml(candidate.email)}">${escapeHtml(candidate.email)}</a></td>
+          <td class="hide-sm candidate-muted">${escapeHtml(candidate.phone || '—')}</td>
+          <td><span class="candidate-badge ${candidate.batch ? '' : 'is-empty'}">${escapeHtml(candidate.batch || 'Not set')}</span></td>
+          <td class="hide-sm">${skillChips}</td>
+          <td class="hide-sm candidate-muted">${escapeHtml(formatCandidateDate(candidate.registeredAt))}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function loadCandidates() {
+    candidatesRefreshBtn.disabled = true;
+    candidatesRefreshBtn.textContent = 'Refreshing…';
+    try {
+      const res = await fetch('/api/candidates');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not load candidates.');
+      candidatesData = {
+        candidates: Array.isArray(data.candidates) ? data.candidates : [],
+        totalCandidates: Number(data.totalCandidates) || 0,
+        batchCounts: data.batchCounts || {},
+      };
+    } catch (err) {
+      candidatesData = { candidates: [], totalCandidates: 0, batchCounts: {} };
+      showToast(err.message || 'Could not load candidates.', true);
+    } finally {
+      candidatesRefreshBtn.disabled = false;
+      candidatesRefreshBtn.textContent = 'Refresh';
+      renderCandidateFilters();
+      renderCandidates();
+      renderBatchMailTargets();
+    }
+  }
+
+  function setBatchMailStatus(message, isError = false) {
+    batchMailStatus.textContent = message;
+    batchMailStatus.classList.toggle('hidden', !message);
+    batchMailStatus.classList.toggle('is-error', Boolean(isError));
+  }
+
+  function currentTargetCount() {
+    if (batchMailTarget.value === 'ALL') return candidatesData.totalCandidates;
+    return candidatesData.batchCounts?.[batchMailTarget.value] || 0;
+  }
+
+  function renderBatchMailTargets() {
+    const counts = candidatesData.batchCounts || {};
+    const keys = Object.keys(counts).sort((a, b) => b.localeCompare(a));
+    const options = [`<option value="ALL">All batches (${candidatesData.totalCandidates} recipients)</option>`];
+    keys.forEach((key) => {
+      options.push(`<option value="${escapeHtml(key)}">${escapeHtml(key)} (${counts[key]} recipient${counts[key] === 1 ? '' : 's'})</option>`);
+    });
+    batchMailTarget.innerHTML = options.join('');
+    if (candidateBatch !== 'ALL' && keys.includes(candidateBatch)) batchMailTarget.value = candidateBatch;
+    updateBatchMailCount();
+  }
+
+  function updateBatchMailCount() {
+    const count = currentTargetCount();
+    batchMailSend.textContent = `Send to ${count} candidate${count === 1 ? '' : 's'}`;
+    batchMailSend.disabled = count === 0;
+    const target = batchMailTarget.value;
+    batchMailSummary.textContent = target === 'ALL'
+      ? 'Pick a cohort and send one update to everyone in it.'
+      : `Sending to the ${batchLabel(target)}. Each student gets a private copy.`;
+  }
+
+  function bodyToHtml(text) {
+    return String(text || '')
+      .replace(/\r\n/g, '\n')
+      .split(/\n{2,}/)
+      .map((block) => `<p style="margin:0 0 14px;">${escapeHtml(block).replace(/\n/g, '<br />')}</p>`)
+      .join('');
+  }
+
+  async function sendBatchMail() {
+    const target = batchMailTarget.value;
+    const subject = batchMailSubject.value.trim();
+    const body = batchMailBody.value.trim();
+    const count = currentTargetCount();
+
+    if (!subject || !body) {
+      setBatchMailStatus('Add a subject and a message before sending.', true);
+      return;
+    }
+    const ok = confirm(`Send this email to ${count} candidate${count === 1 ? '' : 's'} in ${target === 'ALL' ? 'all batches' : `the ${batchLabel(target)}`}?`);
+    if (!ok) return;
+
+    batchMailSend.disabled = true;
+    setBatchMailStatus(`Sending to ${count} candidate${count === 1 ? '' : 's'}…`);
+    try {
+      const res = await fetch('/api/admin/broadcast-batch-mail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetBatch: target, subject, htmlBody: bodyToHtml(body), plainText: body, previewMode: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send this broadcast.');
+      setBatchMailStatus(`✓ Sent to ${data.sentCount || 0} candidate${data.sentCount === 1 ? '' : 's'}${data.failedCount ? ` · ${data.failedCount} failed` : ''}.`);
+      showToast(`Broadcast sent to ${data.sentCount || 0} candidate${data.sentCount === 1 ? '' : 's'}.`);
+      batchMailForm.classList.add('hidden');
+      batchMailToggle.classList.remove('hidden');
+      batchMailSubject.value = '';
+      batchMailBody.value = BATCH_MAIL_DEFAULT;
+    } catch (err) {
+      setBatchMailStatus(err.message, true);
+    } finally {
+      updateBatchMailCount();
+    }
+  }
+
+  candidatesSearch.addEventListener('input', renderCandidates);
+  candidatesRefreshBtn.addEventListener('click', loadCandidates);
+
+  batchMailToggle.addEventListener('click', () => {
+    batchMailForm.classList.remove('hidden');
+    batchMailToggle.classList.add('hidden');
+    if (!batchMailBody.value.trim()) batchMailBody.value = BATCH_MAIL_DEFAULT;
+    updateBatchMailCount();
+    batchMailSubject.focus();
+  });
+
+  batchMailCancel.addEventListener('click', () => {
+    batchMailForm.classList.add('hidden');
+    batchMailToggle.classList.remove('hidden');
+    setBatchMailStatus('');
+  });
+
+  batchMailTarget.addEventListener('change', updateBatchMailCount);
+  batchMailSend.addEventListener('click', sendBatchMail);
+
+  loadCandidates();
+
   // ─── Toast ───
   function showToast(msg, isError = false) {
     toastMessage.textContent = msg;

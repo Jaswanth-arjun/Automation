@@ -25,6 +25,7 @@
           <span class="stat-value" id="jobsCountBadge">0</span>
           <span class="stat-label">active postings</span>
         </div>
+        <a href="#candidatesSection" class="btn btn-outline btn-sm">Candidates ↓</a>
         <a href="/" class="btn btn-outline btn-sm" id="backToDashboardBtn">← Back to dashboard</a>
       </div>
     </div>
@@ -250,6 +251,85 @@
 
       <div class="contacts-list" id="contactsList">
         <div class="empty-state"><span class="empty-icon">📫</span><p>No employee contacts saved yet.</p></div>
+      </div>
+    </section>
+
+    <!-- ── Candidates ── -->
+    <section class="card candidates-card" id="candidatesSection">
+      <div class="card-head contacts-head">
+        <div>
+          <h2>Candidates</h2>
+          <p>Every registered student, grouped by graduation batch. Broadcast a role update to one cohort — each student receives a private copy.</p>
+        </div>
+        <span class="contacts-count" id="candidatesCountBadge">0 candidates</span>
+      </div>
+
+      <div class="candidates-toolbar">
+        <input type="search" id="candidatesSearch" class="contacts-search candidates-search" placeholder="Search name, email, phone or skill…" />
+        <div class="candidates-filters" id="candidatesFilters"></div>
+        <button type="button" class="btn btn-secondary btn-sm" id="candidatesRefreshBtn">Refresh</button>
+      </div>
+
+      <div class="candidates-table-wrap" id="candidatesTableWrap">
+        <table class="candidates-table">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Email</th>
+              <th class="hide-sm">Phone</th>
+              <th>Batch</th>
+              <th class="hide-sm">Top skills</th>
+              <th class="hide-sm">Registered</th>
+            </tr>
+          </thead>
+          <tbody id="candidatesBody"></tbody>
+        </table>
+      </div>
+
+      <div class="empty-state" id="candidatesEmpty">
+        <span class="empty-icon">🎓</span>
+        <p>No candidates yet. Students appear here as soon as they sign in or save their profile.</p>
+      </div>
+
+      <div class="batch-mail">
+        <div class="batch-mail-head">
+          <div>
+            <h3>Batch mailer</h3>
+            <p id="batchMailSummary">Pick a cohort and send one update to everyone in it.</p>
+          </div>
+          <button type="button" class="btn btn-primary" id="batchMailToggle">Compose batch email</button>
+        </div>
+
+        <form id="batchMailForm" class="batch-mail-form hidden" onsubmit="return false;">
+          <div class="field-grid">
+            <div class="field">
+              <label for="batchMailTarget">Target batch</label>
+              <select id="batchMailTarget"></select>
+            </div>
+            <div class="field">
+              <label for="batchMailFrom">From</label>
+              <input type="text" id="batchMailFrom" value="Hamzo Careers &lt;job-updates@hamzooh.com&gt;" readonly />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="batchMailSubject">Subject line</label>
+            <input type="text" id="batchMailSubject" maxlength="200" placeholder="e.g. Exclusive SDE opportunity for the 2026 batch" />
+          </div>
+
+          <div class="field">
+            <label for="batchMailBody">Email body</label>
+            <textarea id="batchMailBody" rows="9" placeholder="Write the message students will receive…"></textarea>
+            <span class="field-hint">Merge tags: <code>{{name}}</code>, <code>{{firstname}}</code>, <code>{{batch}}</code>, <code>{{phone}}</code>, <code>{{institution}}</code>. Recipients never see each other's addresses.</span>
+          </div>
+
+          <p class="batch-mail-status hidden" id="batchMailStatus"></p>
+
+          <div class="action-row">
+            <button type="button" class="btn btn-primary" id="batchMailSend">Send broadcast</button>
+            <button type="button" class="btn btn-ghost" id="batchMailCancel">Cancel</button>
+          </div>
+        </form>
       </div>
     </section>
   </main>
