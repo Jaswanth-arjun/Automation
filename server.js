@@ -28,6 +28,9 @@ import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
 import { campaignStore } from './lib/campaign-store.js';
 import { ReferralCampaignEngine } from './lib/referral-campaign-engine.js';
+import { connectMongo, isMongoActive, CandidateModel, BroadcastModel } from './lib/mongodb.js';
+
+connectMongo().catch((err) => console.error('MongoDB startup error:', err.message));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,6 +93,16 @@ function readCandidates() {
 
 function writeCandidates(records) {
   writeJsonArray(candidatesFilePath, records);
+  if (isMongoActive() && Array.isArray(records)) {
+    for (const c of records) {
+      if (!c.email) continue;
+      CandidateModel.findOneAndUpdate(
+        { email: c.email.toLowerCase().trim() },
+        { $set: c },
+        { upsert: true, returnDocument: 'after' }
+      ).catch(() => {});
+    }
+  }
 }
 
 function cleanString(value, max = 160) {
