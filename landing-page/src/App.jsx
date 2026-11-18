@@ -21,7 +21,7 @@ import VideoLoader from './components/VideoLoader';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
-  if (!isAuthenticated && !loading) return <Navigate to="/auth" replace />;
+  if (!isAuthenticated && !loading) return <Navigate to="/" replace />;
   return (
     <>
       {children}

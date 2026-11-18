@@ -76,7 +76,7 @@ export default function TopNav({ onMenu }) {
 
   const handleLogout = () => {
     logout();
-    navigate('/');
+    navigate('/', { replace: true });
   };
 
   // SVG Ring measurements (44px container, 19px radius)

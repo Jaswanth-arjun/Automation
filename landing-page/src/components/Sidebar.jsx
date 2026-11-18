@@ -135,7 +135,7 @@ export default function Sidebar({ open, onClose }) {
 
   const handleLogout = () => {
     logout();
-    navigate('/');
+    navigate('/', { replace: true });
   };
 
   // 40px container, 17px radius
