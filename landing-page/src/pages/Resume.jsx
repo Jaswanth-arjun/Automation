@@ -5,7 +5,7 @@ import { RESUME_TEMPLATES, getSelectedTemplateId, setSelectedTemplateId, DEFAULT
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import { extractProfilePdf, resumeUrlsFromText } from '../components/JobAnalyzerModal.helpers';
 
-const ANSWERS_KEY = 'hamzo_apply_answers';
+const ANSWERS_KEY = 'hamzooh_apply_answers';
 
 const overlayStyle = {
   position: 'fixed',
@@ -49,20 +49,20 @@ function Dialog({ title, onClose, children }) {
 }
 
 function extensionInstalled() {
-  if (window.__HAMZO_EXTENSION__ || document.documentElement.dataset.hamzoExtension === '1') {
+  if (window.__HAMZOOH_EXTENSION__ || document.documentElement.dataset.hamzoohExtension === '1') {
     return Promise.resolve(true);
   }
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), 1200);
     const onMessage = (event) => {
-      if (event.data?.source === 'hamzo-extension' && event.data.type === 'HAMZO_PONG') {
+      if (event.data?.source === 'hamzooh-extension' && event.data.type === 'HAMZOOH_PONG') {
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
         resolve(true);
       }
     };
     window.addEventListener('message', onMessage);
-    window.postMessage({ source: 'hamzo-app', type: 'HAMZO_PING' }, '*');
+    window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_PING' }, '*');
   });
 }
 
@@ -157,18 +157,18 @@ export default function ResumeManager() {
 
   useEffect(() => {
     const onMessage = (event) => {
-      if (event.data?.source === 'hamzo-extension' && event.data.type === 'HAMZO_ANSWERS') {
+      if (event.data?.source === 'hamzooh-extension' && event.data.type === 'HAMZOOH_ANSWERS') {
         localStorage.setItem(ANSWERS_KEY, JSON.stringify(event.data.answers || {}));
       }
     };
     window.addEventListener('message', onMessage);
-    window.postMessage({ source: 'hamzo-app', type: 'HAMZO_GET_ANSWERS' }, '*');
+    window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_GET_ANSWERS' }, '*');
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
   const pushProfileToExtension = () => {
     const profile = profileStore.get() || {};
-    window.postMessage({ source: 'hamzo-app', type: 'HAMZO_SAVE_PROFILE', profile, answers: savedAnswers() }, '*');
+    window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_SAVE_PROFILE', profile, answers: savedAnswers() }, '*');
   };
 
   /** Map Profile.jsx field names to the resume backend format */
@@ -312,15 +312,15 @@ export default function ResumeManager() {
     }));
     const ready = await new Promise((resolve) => {
       const onMsg = (event) => {
-        if (event.source !== window || event.data?.source !== 'hamzo-extension') return;
-        if (event.data.type !== 'HAMZO_APPLY_READY') return;
+        if (event.source !== window || event.data?.source !== 'hamzooh-extension') return;
+        if (event.data.type !== 'HAMZOOH_APPLY_READY') return;
         window.removeEventListener('message', onMsg);
         resolve(event.data);
       };
       window.addEventListener('message', onMsg);
       window.postMessage({
-        source: 'hamzo-app',
-        type: 'HAMZO_START_APPLY',
+        source: 'hamzooh-app',
+        type: 'HAMZOOH_START_APPLY',
         url: destination,
         profile,
         answers: savedAnswers(),
@@ -329,16 +329,16 @@ export default function ResumeManager() {
       }, '*');
       setTimeout(() => {
         window.removeEventListener('message', onMsg);
-        resolve({ ok: false, error: 'Hamzo Apply did not respond. Reload the unpacked extension, then refresh this page.' });
+        resolve({ ok: false, error: 'Hamzooh Apply did not respond. Reload the unpacked extension, then refresh this page.' });
       }, 10000);
     });
     if (!ready.ok) {
-      setError(ready.error || 'Reload Hamzo Apply, then Accept again.');
+      setError(ready.error || 'Reload Hamzooh Apply, then Accept again.');
       return;
     }
     window.open(ready.url || destination, '_blank');
     setTailored(null);
-    setStatus('The job page opened with your tailored PDF ready to attach. Hamzo Apply will fill the form on that tab.');
+    setStatus('The job page opened with your tailored PDF ready to attach. Hamzooh Apply will fill the form on that tab.');
   };
 
   const handleResumeUpload = async (e) => {
@@ -473,7 +473,7 @@ export default function ResumeManager() {
             </div>
             <strong style={{ fontSize: 16 }}>{uploading ? 'Reading your resume…' : 'Upload your resume'}</strong>
             <p style={{ fontSize: 13, color: '#666', margin: 0, maxWidth: 440, lineHeight: 1.5 }}>
-              Upload the master resume here (or from your Profile section). HAMZO tailors it for every application in the template you select below.
+              Upload the master resume here (or from your Profile section). HAMZOOH tailors it for every application in the template you select below.
             </p>
             <span
               className="btn-accent"
@@ -489,7 +489,7 @@ export default function ResumeManager() {
       <section className="profile-section" style={{ marginTop: 20 }}>
         <h2>Resume templates</h2>
         <p style={{ fontSize: 13.5, color: '#666', margin: '4px 0 14px', lineHeight: 1.5 }}>
-          Select a template once — every application resume HAMZO tailors will use it until you change it.
+          Select a template once — every application resume HAMZOOH tailors will use it until you change it.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
           {RESUME_TEMPLATES.map((t) => {
@@ -581,9 +581,9 @@ export default function ResumeManager() {
       />
 
       {extensionPrompt && (
-        <Dialog title="Add the Hamzo extension first" onClose={() => setExtensionPrompt(false)}>
+        <Dialog title="Add the Hamzooh extension first" onClose={() => setExtensionPrompt(false)}>
           <p style={{ margin: '0 0 12px', fontSize: 14, lineHeight: 1.55, color: '#555852' }}>
-            Hamzo Apply is already in Chrome. Click the reload icon on that extension card, refresh this Resume page, then store your profile.
+            Hamzooh Apply is already in Chrome. Click the reload icon on that extension card, refresh this Resume page, then store your profile.
           </p>
           <p style={{ margin: '0 0 18px', fontSize: 13, lineHeight: 1.5, color: '#171817' }}>
             Chrome → Extensions → Load unpacked → select <code>d:\Automation\extension</code>
@@ -594,13 +594,13 @@ export default function ResumeManager() {
               const ready = await extensionInstalled();
               if (!ready) {
                 setExtensionPrompt(false);
-                setError('Hamzo Apply is installed, but this tab has not picked it up yet. On chrome://extensions, click the reload icon on Hamzo Apply, then refresh this Resume page and click again.');
+                setError('Hamzooh Apply is installed, but this tab has not picked it up yet. On chrome://extensions, click the reload icon on Hamzooh Apply, then refresh this Resume page and click again.');
                 return;
               }
               pushProfileToExtension();
               setExtensionPrompt(false);
               setStatus('Extension connected. Your profile is stored. Paste the job link again.');
-            }}>Store my Hamzo details</button>
+            }}>Store my Hamzooh details</button>
           </div>
         </Dialog>
       )}

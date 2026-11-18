@@ -151,7 +151,7 @@ export default function Sidebar({ open, onClose }) {
         <div className="sidebar-header">
           <NavLink to="/dashboard" className="sidebar-brand" onClick={onClose}>
             <span className="sidebar-brand-mark"><PawLogo size={26} /></span>
-            <span className="sidebar-brand-text">HAMZO</span>
+            <span className="sidebar-brand-text">HAMZOOH</span>
           </NavLink>
           <button className="sidebar-close" onClick={onClose} aria-label="Close sidebar">
             <X size={18} />

@@ -560,9 +560,9 @@ document.addEventListener('DOMContentLoaded', () => {
           // cached entry) — still clean it up locally so the card disappears.
           if (res.ok || res.status === 404) {
             try {
-              const saved = JSON.parse(localStorage.getItem('hamzo_admin_jobs') || '[]');
+              const saved = JSON.parse(localStorage.getItem('hamzooh_admin_jobs') || '[]');
               const updated = saved.filter((j) => String(j.id) !== String(id));
-              localStorage.setItem('hamzo_admin_jobs', JSON.stringify(updated));
+              localStorage.setItem('hamzooh_admin_jobs', JSON.stringify(updated));
               window.dispatchEvent(new Event('admin_jobs_updated'));
             } catch {}
             showToast(res.ok ? 'Job deleted.' : 'Job was already removed.');
@@ -750,7 +750,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const batchMailStatus = document.getElementById('batchMailStatus');
   const batchMailSummary = document.getElementById('batchMailSummary');
 
-  const BATCH_MAIL_DEFAULT = `Hi {{name}},\n\nWe have an exciting opportunity for the {{batch}} batch and thought of you.\n\nRole: \nLocation: \nApply here: [Insert Job Link]\nApplication deadline: [Insert Deadline]\n\nGood luck,\nHamzo Careers`;
+  const BATCH_MAIL_DEFAULT = `Hi {{name}},\n\nWe have an exciting opportunity for the {{batch}} batch and thought of you.\n\nRole: \nLocation: \nApply here: [Insert Job Link]\nApplication deadline: [Insert Deadline]\n\nGood luck,\nHamzooh Careers`;
 
   let candidatesData = { candidates: [], totalCandidates: 0, batchCounts: {} };
   let candidateBatch = 'ALL';

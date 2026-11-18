@@ -1,1325 +1,1336 @@
 (function () {
-  if (window.__HAMZO_FILLER_LOADED__) return;
-  window.__HAMZO_FILLER_LOADED__ = true;
-
-  /**
-   * Hamzo Apply — Extension Content Script (filler.js)
-   * Runs on external job application pages to auto-fill forms,
-   * detect missing info, ask user via branded overlay, remember answers,
-   * and confirm before submission.
-   */
-
-  // ─── Field Detection Hints ───
-  const FIELD_HINTS = [
-  { key: 'email', test: /e-?mail/i },
-  { key: 'phone', test: /phone|mobile|tel/i },
-  { key: 'firstName', test: /first.?name|given.?name|firstname/i },
-  { key: 'lastName', test: /last.?name|surname|family.?name|lastname/i },
-  { key: 'fullName', test: /^name$|full.?name|your.?name|legal.?name|candidate.?name/i },
-  { key: 'location', test: /city|location|address|country|state|current.?location/i },
-  { key: 'linkedin', test: /linkedin/i },
-  { key: 'github', test: /github/i },
-  { key: 'portfolio', test: /portfolio|website|personal.?url|^url$/i },
-  { key: 'projectLink', test: /project.?(link|url)|link.?(to|of).?(project|work|portfolio|github|demo)|share.*link|deployed/i },
-  { key: 'university', test: /university|college|school|institute|alma.?mater|institution/i },
-  { key: 'gpa', test: /cgpa|gpa|grade.?point/i },
-  { key: 'internship', test: /internship|past.?intern|previous.?intern|intern.?experience/i },
-  { key: 'degree', test: /degree|qualification|major|course|field.?of.?study|branch/i },
-  { key: 'graduation', test: /graduat|class.?of|year.?of|expected/i },
-  { key: 'salary', test: /salary|compensation|pay|ctc|expected.?salary/i },
-  { key: 'experience_years', test: /years?.?of.?experience|total.?experience/i },
-  { key: 'codechef', test: /codechef|code.?chef/i },
-  { key: 'codeforces', test: /codeforces|code.?forces/i },
-  { key: 'leetcode', test: /leetcode|leet.?code/i },
-  { key: 'hackerrank', test: /hackerrank|hacker.?rank/i },
-  { key: 'cover_letter', test: /cover.?letter|additional.?info|why.?do.?you.?want|tell.?us.?about/i },
-];
-
-// ─── Utility Helpers ───
-
-function extensionAlive() {
-  try { return Boolean(chrome.runtime && chrome.runtime.id); } catch { return false; }
-}
-
-function labelFor(input) {
-  const id = input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
-  const wrapping = input.closest('label');
-  const aria = input.getAttribute('aria-label') || '';
-  const nearby = input.getAttribute('placeholder') || input.name || input.id || '';
-  const heading = input.closest('div, li, fieldset')?.querySelector('label, p, span, legend, div')?.innerText || '';
-  return [id?.innerText, wrapping?.innerText, aria, nearby, heading].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-}
-
-function questionFor(el) {
-  const block = el.closest('fieldset, li, .form-group, [class*="question"], [class*="field"]') || el.parentElement;
-  const wider = block?.parentElement;
-  const text = [block?.innerText, wider?.innerText, el.getAttribute('aria-label'), labelFor(el)].filter(Boolean).join(' ');
-  return text.replace(/\s+/g, ' ').trim().slice(0, 700);
-}
-
-function profileValue(profile, key, jobTitle, company) {
-  const name = profile.fullName || '';
-  const [first, ...rest] = name.split(' ').filter(Boolean);
-  const education = profile.education?.[0] || {};
-  const internships = profile.experience || profile.internships || [];
-  const intern = internships.map((item) => [item.title, item.company, item.dates].filter(Boolean).join(' — ')).filter(Boolean).join('; ');
-  const projects = profile.projects || [];
-  const projectUrl = projects.map((p) => p.link || p.url).find(Boolean)
-    || profile.links?.github || profile.github || profile.links?.portfolio || '';
-  // Phone boxes are often split ("+91" prefix + number-only box): digits only,
-  // last 10 for the number box so a stored "+919440552825" never overflows it.
-  const phoneDigits = String(profile.phone || '').replace(/\D/g, '');
-  const map = {
-    email: profile.email || '',
-    phone: phoneDigits.length > 10 ? phoneDigits.slice(-10) : phoneDigits,
-    firstName: first || '',
-    lastName: rest.join(' ') || '',
-    fullName: name,
-    location: profile.location || '',
-    linkedin: profile.links?.linkedin || profile.linkedin || '',
-    github: profile.links?.github || profile.github || '',
-    portfolio: profile.links?.portfolio || '',
-    projectLink: projectUrl,
-    university: education.school || education.university || '',
-    gpa: education.gpa || education.detail || education.score || '',
-    internship: intern || '',
-    degree: education.degree || '',
-    graduation: education.dates || '',
-    salary: '',
-    experience_years: String(internships.length || '0'),
-    codechef: profile.codechef || profile.codechefRating || '',
-    codeforces: profile.codeforces || profile.codeforcesRating || '',
-    leetcode: profile.leetcode || profile.leetcodeRating || '',
-    hackerrank: profile.hackerrank || profile.hackerrankRating || '',
-    cover_letter: `I am excited to apply for the ${jobTitle || 'position'} at ${company || 'your company'}. With my background in ${(profile.skills || []).slice(0, 4).join(', ') || 'software development'}, I am confident in my ability to contribute effectively.`,
-  };
-  return String(map[key] || '').trim();
-}
-
-function setNativeValue(input, value) {
-  if (input.tagName === 'SELECT') {
-    const option = [...input.options].find((item) => item.value === value || item.text.toLowerCase().includes(String(value).toLowerCase()));
-    if (option) input.value = option.value;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+  if (window.__HAMZOOH_FILLER_LOADED__) {
+    try { window.__HAMZOOH_BOOT__?.(); } catch {}
     return;
   }
-  const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  setter?.call(input, value);
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-}
+  window.__HAMZOOH_FILLER_LOADED__ = true;
 
-function isPlaceholderValue(input) {
-  const type = (input.getAttribute('type') || '').toLowerCase();
-  if (input.tagName === 'SELECT') {
-    const selected = input.options[input.selectedIndex];
-    const text = (selected?.text || input.value || '').trim();
-    return !text || /please select|^select$|^-+$|choose/i.test(text);
+  const FIELD_HINTS = [
+    { key: 'email', test: /e-?mail/i },
+    { key: 'phone', test: /phone|mobile|\btel\b|telephone|cell/i },
+    { key: 'firstName', test: /first.?name|given.?name|firstname/i },
+    { key: 'lastName', test: /last.?name|surname|family.?name|lastname/i },
+    { key: 'fullName', test: /^name$|full.?name|your.?name|legal.?name|candidate.?name|applicant.?name/i },
+    { key: 'address', test: /street.?address|^address$|address.?line.?1|mailing.?address/i },
+    { key: 'city', test: /^city$|town/i },
+    { key: 'state', test: /state|province|region/i },
+    { key: 'zip', test: /zip|postal.?code|pin.?code/i },
+    { key: 'country', test: /country|nation/i },
+    { key: 'location', test: /city|location|current.?location|where.?do.?you.?live/i },
+    { key: 'linkedin', test: /linkedin/i },
+    { key: 'github', test: /github/i },
+    { key: 'portfolio', test: /portfolio|website|personal.?url|^url$|personal.?site/i },
+    { key: 'projectLink', test: /project.?(link|url)|link.?(to|of).?(project|work|portfolio|github|demo)|share.*link|deployed/i },
+    { key: 'university', test: /university|college|school|institute|alma.?mater|institution/i },
+    { key: 'gpa', test: /cgpa|gpa|grade.?point/i },
+    { key: 'internship', test: /internship|past.?intern|previous.?intern|intern.?experience/i },
+    { key: 'degree', test: /degree|qualification|major|course|field.?of.?study|branch/i },
+    { key: 'graduation', test: /graduat|class.?of|year.?of|expected.?graduat/i },
+    { key: 'codechef', test: /codechef|code.?chef/i },
+    { key: 'codeforces', test: /codeforces|code.?forces/i },
+    { key: 'leetcode', test: /leetcode|leet.?code/i },
+    { key: 'hackerrank', test: /hackerrank|hacker.?rank/i },
+    { key: 'salary', test: /salary|compensation|pay|ctc|expected.?salary/i },
+    { key: 'experience_years', test: /years?.?of.?experience|total.?experience/i },
+    { key: 'cover_letter', test: /cover.?letter|additional.?info|why.?do.?you.?want|tell.?us.?about|why.?this.?role|why.?our.?company/i },
+  ];
+
+  const FILLER_WORDS = new Set([
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'do', 'does', 'did', 'have', 'has', 'had', 'will', 'would', 'could',
+    'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
+    'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+    'before', 'after', 'and', 'but', 'or', 'nor', 'not', 'so', 'yet',
+    'please', 'provide', 'enter', 'specify', 'select', 'choose', 'answer',
+    'question', 'below', 'us', 'we', 'me', 'i', 'you', 'this', 'that',
+  ]);
+
+  const skipped = [];
+  const logs = [];
+  let filling = false;
+
+  function extensionAlive() {
+    try { return Boolean(chrome.runtime && chrome.runtime.id); } catch { return false; }
   }
-  if (type === 'radio' || type === 'checkbox') return !input.checked;
-  return !String(input.value || '').trim();
-}
 
-function optionList(select) {
-  return [...select.options].filter((item) => item.value !== '' && !/please select|^select$|^-+$|choose/i.test(item.text.trim()));
-}
-
-function matchOption(select, wanted) {
-  const wantedText = String(wanted || '').trim().toLowerCase();
-  return optionList(select).find((item) => {
-    const text = item.text.trim().toLowerCase();
-    const value = String(item.value).toLowerCase();
-    return text === wantedText || value === wantedText || text.startsWith(wantedText) || wantedText.startsWith(text);
-  });
-}
-
-function resumeFile(pending, profile) {
-  const base64 = pending?.resumeBase64 || profile?.pdfBase64 || profile?.resumeBase64 || '';
-  if (!base64) return null;
-  let raw = String(base64).trim();
-  if (raw.includes(',')) {
-    raw = raw.split(',')[1];
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
   }
-  raw = raw.replace(/\s+/g, '');
-  if (!raw) return null;
-  try {
-    const binary = atob(raw);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return new File([bytes], pending?.resumeName || 'hamzo-tailored-resume.pdf', { type: 'application/pdf' });
-  } catch (err) {
-    console.error('Hamzo Apply: Failed to decode resumeBase64:', err);
+
+  function hamzoohLog(level, message, extra) {
+    const entry = { level, message, extra, t: Date.now(), href: location.href };
+    logs.push(entry);
+    try { console[level === 'error' ? 'error' : 'log']('[Hamzooh Apply]', message, extra || ''); } catch {}
+  }
+
+  function sendProgress(step, message, details = {}) {
+    if (!extensionAlive()) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: 'HAMZOOH_FILLER_PROGRESS',
+        step,
+        message,
+        timestamp: Date.now(),
+        skipped: skipped.slice(),
+        ...details,
+      });
+    } catch {}
+  }
+
+  function runtimeSend(payload) {
+    return new Promise((resolve) => {
+      if (!extensionAlive()) return resolve(null);
+      try {
+        chrome.runtime.sendMessage(payload, (res) => {
+          if (chrome.runtime.lastError) return resolve(null);
+          resolve(res || null);
+        });
+      } catch { resolve(null); }
+    });
+  }
+
+  function proxyFetch(path, body, method = 'POST') {
+    return runtimeSend({ type: 'HAMZOOH_PROXY_FETCH', path, method, body });
+  }
+
+  function queryAllDeep(selector, root = document) {
+    const out = [];
+    const visit = (node) => {
+      if (!node?.querySelectorAll) return;
+      try { out.push(...node.querySelectorAll(selector)); } catch {}
+      let children = [];
+      try { children = node.querySelectorAll('*'); } catch { return; }
+      for (const el of children) {
+        if (el.shadowRoot) visit(el.shadowRoot);
+      }
+    };
+    visit(root);
+    return out;
+  }
+
+  function visible(el) {
+    if (!el) return false;
+    try {
+      if (el.closest('[hidden], [aria-hidden="true"]')) return false;
+      const r = el.getBoundingClientRect?.();
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity || '1') < 0.1) return false;
+      if (r && (r.width === 0 || r.height === 0)) return false;
+      return true;
+    } catch { return false; }
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[char]);
+  }
+
+  function labelFor(input) {
+    try {
+      const id = input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+      const wrapping = input.closest('label');
+      const aria = input.getAttribute('aria-label') || input.getAttribute('aria-labelledby') || '';
+      const labelled = aria && document.getElementById(String(aria).split(' ')[0]);
+      const nearby = input.getAttribute('placeholder') || input.name || input.id || '';
+      const ownLabel = (id?.innerText || wrapping?.innerText || labelled?.innerText || '').replace(/\s+/g, ' ').trim();
+      if (ownLabel) {
+        return [ownLabel, input.getAttribute('placeholder') || '', input.name || '']
+          .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+      }
+      const heading = input.closest('div, li, fieldset, section, td')?.querySelector('label, p, span, legend, h1, h2, h3, div')?.innerText || '';
+      return [aria, nearby, heading].filter(Boolean).join(' ')
+        .replace(/\s+/g, ' ').trim().slice(0, 400);
+    } catch {
+      return (input.name || input.id || '').toString();
+    }
+  }
+
+  // The visible text of a single radio/checkbox option ("Yes", "Bachelor's degree").
+  function optionTextFor(input) {
+    try {
+      const wrapping = input.closest('label');
+      const wrappingText = (wrapping?.innerText || '').replace(/\s+/g, ' ').trim();
+      if (wrappingText) return wrappingText;
+      if (input.id) {
+        const own = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+        const ownText = (own?.innerText || '').replace(/\s+/g, ' ').trim();
+        if (ownText) return ownText;
+      }
+      return String(input.value || '').replace(/\s+/g, ' ').trim();
+    } catch {
+      return String(input.value || '').trim();
+    }
+  }
+
+  function cleanPrompt(text) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!t || t.length > 260) return '';
+    if (/[{;]\s*[a-z-]+\s*:/.test(t)) return ''; // CSS / JS blob
+    if (/^(body|html|head|script|style)\b/i.test(t)) return '';
+    return t;
+  }
+
+  // Finds the element that wraps exactly one radio/checkbox group.
+  function choiceGroupContainer(el, type) {
+    const name = el.getAttribute('name') || '';
+    let node = el.parentElement;
+    for (let depth = 0; depth < 6 && node && node !== document.body; depth += 1) {
+      const selector = name
+        ? `input[type="${type}"][name="${CSS.escape(name)}"]`
+        : `input[type="${type}"]`;
+      const groupCount = node.querySelectorAll(selector).length;
+      const totalCount = node.querySelectorAll('input, select, textarea').length;
+      if (groupCount >= 2 && groupCount === totalCount) return node;
+      if (totalCount > groupCount) return null;
+      node = node.parentElement;
+    }
     return null;
   }
-}
 
-function attachResume(input, pending, profile) {
-  const file = resumeFile(pending, profile);
-  if (!file || !input) return false;
-  try {
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
-    input.files = transfer.files;
-  } catch {
+  function promptBefore(container) {
+    if (!container) return '';
+    for (const sibling of [container.previousElementSibling]) {
+      if (!sibling) continue;
+      if (sibling.matches('input, select, textarea') || sibling.querySelector('input, select, textarea')) continue;
+      const text = cleanPrompt(sibling.innerText || sibling.textContent);
+      if (text) return text;
+    }
+    return '';
+  }
+
+  function questionFor(el) {
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    const labelledBy = (el.getAttribute('aria-labelledby') || '');
+    const labelledByText = labelledBy.split(/\s+/).filter(Boolean)
+      .map((id) => document.getElementById(id)?.innerText || '').join(' ').replace(/\s+/g, ' ').trim();
+    const legend = cleanPrompt(el.closest('fieldset')?.querySelector('legend')?.innerText);
+    const labelText = cleanPrompt(labelFor(el));
+
+    if (aria || labelledByText) return cleanPrompt([legend, aria, labelledByText, labelText].filter(Boolean).join(' '));
+
+    if (type === 'radio' || type === 'checkbox') {
+      if (legend) return legend;
+      const group = choiceGroupContainer(el, type);
+      if (group) {
+        const prompt = promptBefore(group);
+        if (prompt) return prompt;
+        const closest = group.closest('.field, .form-group, fieldset, li');
+        const earlier = closest && closest !== group ? promptBefore(closest) : '';
+        if (earlier) return earlier;
+      }
+      const own = cleanPrompt(labelFor(el).replace(new RegExp(`\\b${el.name}\\b`, 'g'), ''));
+      if (own && own.length > 12) return own;
+      return labelText;
+    }
+
+    return cleanPrompt([legend, labelText].filter(Boolean).join(' '));
+  }
+
+  function profileValue(profile, key, jobTitle, company) {
+    const name = profile.fullName || '';
+    const [first, ...rest] = name.split(' ').filter(Boolean);
+    const education = profile.education?.[0] || {};
+    const internships = profile.experience || profile.internships || [];
+    const intern = internships.map((item) => [item.title, item.company, item.dates].filter(Boolean).join(' — ')).filter(Boolean).join('; ');
+    const projects = profile.projects || [];
+    const projectUrl = projects.map((p) => p.link || p.url).find(Boolean)
+      || profile.links?.github || profile.github || profile.links?.portfolio || '';
+    const phoneDigits = String(profile.phone || '').replace(/\D/g, '');
+    const locParts = String(profile.location || '').split(',').map((p) => p.trim());
+    const map = {
+      email: profile.email || '',
+      phone: phoneDigits.length > 10 ? phoneDigits.slice(-10) : phoneDigits,
+      firstName: first || '',
+      lastName: rest.join(' ') || '',
+      fullName: name,
+      address: profile.address || profile.street || '',
+      city: profile.city || locParts[0] || '',
+      state: profile.state || locParts[1] || '',
+      zip: profile.zip || profile.postalCode || '',
+      country: profile.country || locParts[2] || locParts[1] || '',
+      location: profile.location || '',
+      linkedin: profile.links?.linkedin || profile.linkedin || '',
+      github: profile.links?.github || profile.github || '',
+      portfolio: profile.links?.portfolio || profile.portfolio || profile.links?.github || profile.github || '',
+      projectLink: projectUrl,
+      university: education.school || education.university || '',
+      gpa: education.gpa || education.detail || education.score || '',
+      internship: intern || '',
+      degree: education.degree || '',
+      graduation: education.dates || education.graduationYear || profile.batch || '',
+      salary: profile.expectedSalary || profile.salary || '',
+      experience_years: profile.yearsOfExperience != null && profile.yearsOfExperience !== ''
+        ? String(profile.yearsOfExperience) : String(internships.length || '0'),
+      codechef: profile.codechef || profile.codechefRating || '',
+      codeforces: profile.codeforces || profile.codeforcesRating || '',
+      leetcode: profile.leetcode || profile.leetcodeRating || '',
+      hackerrank: profile.hackerrank || profile.hackerrankRating || '',
+      cover_letter: `I am excited to apply for the ${jobTitle || 'position'} at ${company || 'your company'}. With my background in ${(profile.skills || []).slice(0, 4).join(', ') || 'software development'}, I am confident in my ability to contribute effectively.`,
+    };
+    return String(map[key] || '').trim();
+  }
+
+  function setNativeValue(input, value) {
+    if (!input) return false;
+    try {
+      if (input.tagName === 'SELECT') {
+        const wanted = String(value).trim().toLowerCase();
+        const option = [...input.options].find((item) => {
+          const text = item.text.trim().toLowerCase();
+          return item.value.trim().toLowerCase() === wanted || text === wanted
+            || (wanted === 'yes' && /^(yes|y)\b/.test(text))
+            || (wanted === 'no' && /^(no|n)\b/.test(text))
+            || (wanted === 'decline' && /decline|prefer not|do not wish/.test(text));
+        });
+        if (!option) return false;
+        input.value = option.value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+      if (input.isContentEditable) {
+        input.focus();
+        input.textContent = value;
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
+        return true;
+      }
+      const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, data: String(value), inputType: 'insertText' }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
+      return true;
+    } catch (err) {
+      hamzoohLog('error', 'setNativeValue failed', err.message);
+      return false;
+    }
+  }
+
+  function isPlaceholderValue(input) {
+    const type = (input.getAttribute('type') || '').toLowerCase();
+    if (input.tagName === 'SELECT') {
+      const selected = input.options[input.selectedIndex];
+      const text = (selected?.text || input.value || '').trim();
+      return !text || /please select|^select$|^-+$|choose/i.test(text);
+    }
+    if (type === 'radio' || type === 'checkbox') return !input.checked;
+    return !String(input.value || '').trim();
+  }
+
+  function optionList(select) {
+    return [...select.options].filter((item) => item.value !== '' && !/please select|^select$|^-+$|choose/i.test(item.text.trim()));
+  }
+
+  function collectInputs() {
+    return queryAllDeep('input, textarea, select').filter((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) return false;
+      if (input.disabled || !visible(input)) return false;
+      return true;
+    });
+  }
+
+  function normalizeQuestion(raw) {
+    const words = String(raw || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/).filter((w) => w.length > 1 && !FILLER_WORDS.has(w));
+    return [...new Set(words)].sort().join(' ');
+  }
+
+  function questionSimilarity(normA, normB) {
+    if (!normA || !normB) return 0;
+    const setA = new Set(normA.split(' '));
+    const setB = new Set(normB.split(' '));
+    if (!setA.size || !setB.size) return 0;
+    let overlap = 0;
+    for (const word of setA) if (setB.has(word)) overlap++;
+    return overlap / new Set([...setA, ...setB]).size;
+  }
+
+  function findBestAnswer(question, answers) {
+    if (!question || !answers) return null;
+    const normalized = normalizeQuestion(question);
+    const directKey = question.toLowerCase().trim();
+    if (answers[directKey]) {
+      const val = answers[directKey];
+      return typeof val === 'string' ? val : val?.answer || String(val);
+    }
+    let bestAnswer = null;
+    let bestScore = 0;
+    for (const [key, entry] of Object.entries(answers)) {
+      const score = questionSimilarity(normalized, normalizeQuestion(key));
+      if (score > bestScore && score >= 0.45) {
+        bestScore = score;
+        bestAnswer = typeof entry === 'string' ? entry : entry?.answer || String(entry);
+      }
+    }
+    return bestAnswer;
+  }
+
+  function isSensitiveQuestion(question) {
+    return /authorized to work|work authorization|sponsorship|visa status|citizenship|ssn|social security|passport number|national id|aadhaar|convicted|felony|criminal|date of birth|\bdob\b|expected salary|compensation|notice period|currently employed/i.test(String(question || ''));
+  }
+
+  function isEeoQuestion(question) {
+    return /gender|hispanic|race|ethnicity|veteran|disability|lgbt|sexual orientation/i.test(String(question || ''));
+  }
+
+  // Only uses facts the user actually stored. Returns '' when unknown so the
+  // caller asks the user instead of inventing an answer.
+  function sensitiveProfileAnswer(question, profile) {
+    const q = String(question || '').toLowerCase();
+    const p = profile || {};
+    if (/authorized to work|work authorization|legally (eligible|authorized)|right to work|eligible to work/.test(q)) {
+      const flag = p.workAuthorized ?? p.authorizedToWork ?? p.workAuth;
+      if (flag === true || /^(yes|true)$/i.test(String(flag || ''))) return 'Yes';
+      if (flag === false || /^(no|false)$/i.test(String(flag || ''))) return 'No';
+    }
+    if (/require .*sponsorship|need .*sponsorship|sponsorship/.test(q)) {
+      const flag = p.requireSponsorship ?? p.sponsorshipRequired;
+      if (flag === true) return 'Yes';
+      if (flag === false) return 'No';
+    }
+    if (/expected (salary|ctc|compensation)|salary expectation/.test(q)) {
+      const salary = p.expectedSalary || p.salary;
+      if (salary) return String(salary);
+    }
+    return '';
+  }
+
+  function chooseFromProfile(question, profile, company) {
+    const q = String(question || '').toLowerCase();
+    const known = sensitiveProfileAnswer(question, profile);
+    if (known) return known;
+    if (/privacy|acknowledge|agree|consent|terms|i understand|i certify/.test(q) && !isSensitiveQuestion(q)) return 'yes';
+    if (isEeoQuestion(q)) return 'decline';
+    const workedHere = (profile.experience || []).some((item) => {
+      const c = String(item.company || '').toLowerCase();
+      return c && company && (c.includes(String(company).toLowerCase()) || String(company).toLowerCase().includes(c));
+    });
+    if (/employed by|worked (for|at)|previously employed|ever been employed/.test(q)) {
+      if (workedHere) return 'yes';
+      if (company && (q.includes(String(company).toLowerCase()) || /this company|the company/.test(q))) return 'no';
+    }
+    return '';
+  }
+
+  // Only picks an option when the question itself makes the right choice
+  // unambiguous. Never guesses among unrelated options.
+  function heuristicChoice(question, optionTexts, profile) {
+    const q = String(question || '').toLowerCase();
+    const texts = (optionTexts || []).map((t) => String(t).trim()).filter(Boolean);
+    if (!texts.length) return '';
+    const find = (re) => texts.find((t) => re.test(t));
+    if (/how did you hear|referral source|source of application|where did you (find|hear)/.test(q)) {
+      return find(/linkedin/i) || find(/job board|naukri|indeed/i) || find(/company website|careers/i) || '';
+    }
+    if (/gender|hispanic|race|ethnicity|veteran|disability|sexual orientation/.test(q)) {
+      return find(/decline|prefer not|do not wish/i) || '';
+    }
+    if (/highest (level of )?education|education level|highest qualification|degree (completed|earned)/.test(q)) {
+      const degree = String(profile?.education?.[0]?.degree || '').toLowerCase();
+      const ranked = [
+        [/ph\.?d|doctorate/, /ph\.?d|doctorate/i],
+        [/(m\.?tech|m\.?s|master|mba|m\.?sc|post.?grad)/, /master|m\.?tech|m\.?s\b|mba|post.?grad/i],
+        [/(b\.?tech|b\.?e\b|bachelor|b\.?s|b\.?sc|under.?grad)/, /bachelor|b\.?tech|b\.?e\b|b\.?s\b|under.?grad/i],
+        [/(diploma|associate)/, /diploma|associate/i],
+      ];
+      for (const [profileRe, optionRe] of ranked) {
+        if (profileRe.test(degree)) {
+          const hit = find(optionRe);
+          if (hit) return hit;
+        }
+      }
+      return find(/bachelor|b\.?tech|under.?grad/i) || '';
+    }
+    if (/employment type|job type/.test(q)) {
+      return find(/full.?time/i) || '';
+    }
+    return '';
+  }
+
+  function applyChoice(input, wanted) {
+    if (!wanted) return false;
+    if (input.tagName === 'SELECT') {
+      const wantedText = wanted === 'yes' ? 'Yes' : wanted === 'no' ? 'No' : wanted === 'decline' ? 'Decline' : wanted;
+      let option = optionList(input).find((item) => item.text.trim().toLowerCase() === String(wantedText).toLowerCase());
+      if (!option && wanted === 'decline') option = optionList(input).find((item) => /decline|prefer not|do not wish/i.test(item.text));
+      if (!option && (wanted === 'yes' || wanted === 'no')) {
+        option = optionList(input).find((item) => (wanted === 'yes' ? /^(yes|y)\b/i : /^(no|n)\b/i).test(item.text.trim()));
+      }
+      if (!option) return false;
+      return setNativeValue(input, option.value || option.text);
+    }
+    const type = (input.getAttribute('type') || '').toLowerCase();
+    if (type === 'radio') {
+      const optionText = optionTextFor(input).toLowerCase();
+      const value = String(wanted).toLowerCase();
+      const yes = /^(yes|y|true|agree)$/.test(value) && /^(yes|y)\b|true|agree/.test(optionText);
+      const no = /^(no|n|false|disagree)$/.test(value) && /^(no|n)\b|false|disagree/.test(optionText);
+      const decline = /decline|prefer not|do not wish/.test(value) && /decline|prefer not|do not wish/.test(optionText);
+      const exact = optionText.trim() === value || String(input.value).trim().toLowerCase() === value;
+      if (yes || no || decline || exact) {
+        if (!input.checked) input.click();
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return input.checked;
+      }
+    }
+    if (type === 'checkbox') {
+      const value = String(wanted).toLowerCase();
+      const shouldCheck = /^(yes|y|true|agree|accepted)$/.test(value) && !/decline|prefer not/.test(value);
+      const shouldUncheck = /^(no|n|false|decline|prefer not)$/.test(value);
+      if (shouldCheck && !input.checked) input.click();
+      if (shouldUncheck && input.checked) input.click();
+      return (shouldCheck || shouldUncheck) && input.checked === shouldCheck;
+    }
     return false;
   }
 
-  // Dispatch events to input and all parent forms/wrappers
-  const events = ['focus', 'click', 'input', 'change', 'blur'];
-  events.forEach((type) => {
-    try {
-      input.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
-    } catch {}
-  });
-
-  // Also trigger change event on parent form and wrapper for frameworks (React, Greenhouse, Lever)
-  try {
-    const parent = input.closest('#resume_wrapper, .field, [class*="resume"], [class*="file"], form') || input.parentElement;
-    if (parent) {
-      events.forEach((type) => {
-        try {
-          parent.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
-        } catch {}
-      });
-
-      // Show attached confirmation badge on the attach button container if available
-      const attachBtn = parent.querySelector('button[data-source="attach"], button[data-source="paste"], button, [role="button"]');
-      if (attachBtn) {
-        const btnContainer = attachBtn.parentElement;
-        if (btnContainer && !btnContainer.querySelector('.hamzo-attached-badge')) {
-          const badge = document.createElement('div');
-          badge.className = 'hamzo-attached-badge';
-          badge.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 8px; font-weight: 700; font-size: 13px; margin-top: 6px; font-family: sans-serif;';
-          badge.innerHTML = `✓ ${file.name} (Attached by Hamzo AI)`;
-          btnContainer.appendChild(badge);
-        }
-      }
-    }
-  } catch {}
-
-  return Boolean(input.files && input.files.length);
-}
-
-function allFileInputs() {
-  const inputs = [...document.querySelectorAll('input[type="file"]')];
-
-  // Also search accessible iframes
-  try {
-    const iframes = document.querySelectorAll('iframe');
-    iframes.forEach((frame) => {
+  async function fillCustomDropdowns(wantedByQuestion, answers, profile, company) {
+    const widgets = queryAllDeep('[role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="dropdown"]')
+      .filter((el) => visible(el) && el.tagName !== 'SELECT');
+    for (const widget of widgets.slice(0, 20)) {
+      const question = questionFor(widget);
+      let wanted = findBestAnswer(question, answers) || chooseFromProfile(question, profile, company) || wantedByQuestion.get(question);
       try {
-        const frameDoc = frame.contentDocument || frame.contentWindow?.document;
-        if (frameDoc) {
-          inputs.push(...frameDoc.querySelectorAll('input[type="file"]'));
+        widget.click();
+        await sleep(250);
+        const options = queryAllDeep('[role="option"], [class*="option"], li').filter((o) => visible(o) && (o.innerText || '').trim());
+        if (!options.length) continue;
+        if (!wanted) wanted = heuristicChoice(question, options.map((o) => o.innerText.trim()), profile);
+        if (!wanted) {
+          document.body.click();
+          await sleep(100);
+          skipped.push({ field: (question || 'Custom dropdown').slice(0, 80), reason: 'No matching profile value or saved answer for this dropdown.' });
+          continue;
         }
+        const hit = options.find((o) => {
+          const t = o.innerText.trim().toLowerCase();
+          const w = String(wanted).toLowerCase();
+          return t === w || (w === 'yes' && /^(yes|y)\b/.test(t)) || (w === 'no' && /^(no|n)\b/.test(t)) || (w === 'decline' && /decline|prefer not/.test(t));
+        });
+        if (hit) {
+          hit.click();
+          hamzoohLog('log', 'custom dropdown filled', question.slice(0, 80));
+        } else {
+          document.body.click();
+          skipped.push({ field: (question || 'Custom dropdown').slice(0, 80), reason: `The value "${wanted}" is not an option in this dropdown.` });
+        }
+        await sleep(150);
       } catch {}
-    });
-  } catch {}
-
-  // Sort inputs so resume inputs come first
-  return inputs.sort((a, b) => {
-    const aText = `${a.id} ${a.name} ${a.getAttribute('aria-label') || ''} ${labelFor(a)}`.toLowerCase();
-    const bText = `${b.id} ${b.name} ${b.getAttribute('aria-label') || ''} ${labelFor(b)}`.toLowerCase();
-    const aIsResume = /resume|cv/i.test(aText);
-    const bIsResume = /resume|cv/i.test(bText);
-    if (aIsResume && !bIsResume) return -1;
-    if (!aIsResume && bIsResume) return 1;
-    return 0;
-  });
-}
-
-async function attachGeneratedResume(pending, profile) {
-  const file = resumeFile(pending, profile);
-  if (!file) return false;
-
-  const clickAttach = () => {
-    const nodes = [...document.querySelectorAll('button, a, label, span, [role="button"]')].filter((el) => {
-      const text = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
-      return /^(attach file|upload( file)?|choose file|browse|attach)$/i.test(text) || /attach file/i.test(text);
-    });
-    nodes.forEach((node) => {
-      try { node.click(); } catch {}
-    });
-  };
-
-  const waitForInputs = async (ms) => {
-    const start = Date.now();
-    while (Date.now() - start < ms) {
-      const found = allFileInputs();
-      if (found.length) return found;
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-    return allFileInputs();
-  };
-
-  // Step 1: Try direct attachment to existing file inputs
-  let attached = allFileInputs().some((input) => attachResume(input, pending, profile));
-
-  // Step 2: If not attached, click "Attach file" button to unveil hidden inputs, then retry
-  if (!attached) {
-    clickAttach();
-    const discovered = await waitForInputs(1200);
-    attached = discovered.some((input) => attachResume(input, pending, profile));
-  }
-
-  // Step 3: Drag & drop fallback for dropzone areas
-  if (!attached) {
-    const zone = [...document.querySelectorAll('div, section, label, form')].find((el) => {
-      const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
-      return /resume\/?cv|attach file|drop file/i.test(text) && text.length < 150;
-    });
-    if (zone) {
-      const transfer = new DataTransfer();
-      transfer.items.add(file);
-      ['dragenter', 'dragover', 'drop'].forEach((type) => {
-        zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
-      });
-      attached = allFileInputs().some((input) => attachResume(input, pending, profile));
     }
   }
 
-  return attached;
-}
-
-// ─── Semantic Question Matching (client-side) ───
-
-const FILLER_WORDS = new Set([
-  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-  'do', 'does', 'did', 'have', 'has', 'had', 'will', 'would', 'could',
-  'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
-  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
-  'before', 'after', 'and', 'but', 'or', 'nor', 'not', 'so', 'yet',
-  'both', 'either', 'neither', 'each', 'every', 'all', 'any', 'few',
-  'more', 'most', 'other', 'some', 'such', 'than', 'too', 'very',
-  'just', 'also', 'about', 'if', 'then', 'that', 'this', 'these', 'those',
-  'it', 'its', 'my', 'your', 'our', 'their', 'his', 'her', 'what', 'which',
-  'who', 'whom', 'how', 'when', 'where', 'why', 'there', 'here', 'up',
-  'out', 'down', 'please', 'provide', 'enter', 'specify', 'select',
-  'choose', 'answer', 'following', 'question', 'below', 'us', 'we', 'me',
-  'i', 'you', 'he', 'she', 'they', 'them',
-]);
-
-function normalizeQuestion(raw) {
-  const words = String(raw || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/).filter(w => w.length > 1 && !FILLER_WORDS.has(w));
-  return [...new Set(words)].sort().join(' ');
-}
-
-function questionSimilarity(normA, normB) {
-  if (!normA || !normB) return 0;
-  const setA = new Set(normA.split(' '));
-  const setB = new Set(normB.split(' '));
-  if (setA.size === 0 || setB.size === 0) return 0;
-  let overlap = 0;
-  for (const word of setA) { if (setB.has(word)) overlap++; }
-  const union = new Set([...setA, ...setB]).size;
-  return union > 0 ? overlap / union : 0;
-}
-
-function findBestAnswer(question, answers) {
-  if (!question || !answers) return null;
-  const normalized = normalizeQuestion(question);
-  const directKey = question.toLowerCase().trim();
-
-  // Direct match first
-  if (answers[directKey]) {
-    const val = answers[directKey];
-    return typeof val === 'string' ? val : val?.answer || String(val);
-  }
-
-  // Semantic match
-  let bestAnswer = null;
-  let bestScore = 0;
-  for (const [key, entry] of Object.entries(answers)) {
-    const normKey = normalizeQuestion(key);
-    const score = questionSimilarity(normalized, normKey);
-    if (score > bestScore && score >= 0.45) {
-      bestScore = score;
-      bestAnswer = typeof entry === 'string' ? entry : entry?.answer || String(entry);
-    }
-  }
-  return bestAnswer;
-}
-
-// ─── Yes/No Question Logic ───
-
-function chooseYesNo(question, profile) {
-  const q = String(question || '').toLowerCase();
-  const company = String(profile.company || location.hostname.replace(/^www\./, '').split('.')[0] || '').toLowerCase();
-  if (/employed by|worked (for|at)|contractor|previously employed|ever been employed/.test(q) && (company && q.includes(company) || /this company|the company/.test(q))) return 'no';
-  if (/currently employed|current employer/.test(q) && !/name of/.test(q)) return 'no';
-  if (/convicted|felony|criminal/.test(q)) return 'no';
-  if (/export control|denied|debarred/.test(q)) return 'no';
-  if (/relative work|family member/.test(q)) return 'no';
-  if (/require sponsorship|need sponsorship|visa sponsorship/.test(q)) return 'yes';
-  if (/authorized to work/.test(q) && /without sponsorship|no sponsorship/.test(q)) return 'no';
-  if (/available|onsite|on-site|start|internship|willing to relocate|able to relocate|open to relocation|relocate for this position|move to another location|18 years|over 18|legally eligible|acknowledge|privacy|agree|consent|terms|i understand/.test(q)) return 'yes';
-  if (/gender|hispanic|race|ethnicity|veteran|disability|lgbt/.test(q)) return 'decline';
-  return '';
-}
-
-function applyChoice(input, wanted) {
-  if (!wanted) return false;
-  if (input.tagName === 'SELECT') {
-    const yesNo = wanted === 'yes' || wanted === 'no';
-    let option = matchOption(input, wanted === 'yes' ? 'Yes' : wanted === 'no' ? 'No' : wanted === 'decline' ? 'Decline' : wanted);
-    if (!option && wanted === 'decline') option = optionList(input).find((item) => /decline|prefer not|do not wish|don't wish/i.test(item.text));
-    if (!option && yesNo) {
-      option = optionList(input).find((item) => (wanted === 'yes' ? /^(yes|y)\b/i : /^(no|n)\b/i).test(item.text.trim()));
-    }
-    if (!option) return false;
-    input.value = option.value;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  }
-  const type = (input.getAttribute('type') || '').toLowerCase();
-  if (type === 'radio') {
-    const label = `${labelFor(input)} ${input.value}`.toLowerCase();
-    const yes = wanted === 'yes' && /^(yes|y)\b|true|agree/.test(label);
-    const no = wanted === 'no' && /^(no|n)\b|false|disagree/.test(label);
-    if (yes || no || label.includes(String(wanted).toLowerCase())) {
-      input.checked = true;
-      input.click();
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    }
-  }
-  if (type === 'checkbox' && (wanted === 'yes' || wanted === 'agree')) {
-    if (!input.checked) input.click();
-    return true;
-  }
-  return false;
-}
-
-function fillChoices(profile, answers) {
-  const controls = [...document.querySelectorAll('select, input[type="radio"], input[type="checkbox"]')];
-  const radioNames = new Set();
-  controls.forEach((input) => {
-    const type = (input.getAttribute('type') || '').toLowerCase();
-    const question = questionFor(input);
-    const key = question.toLowerCase().slice(0, 180);
-
-    // Check saved answers first (semantic matching)
-    const savedAnswer = findBestAnswer(question, answers);
-    if (type === 'radio') {
-      if (radioNames.has(input.name)) return;
-      radioNames.add(input.name);
-    }
-    if (type === 'checkbox' && /privacy|acknowledge|agree|terms|consent/.test(question.toLowerCase())) {
-      applyChoice(input, savedAnswer || 'yes');
-      answers[key] = 'yes';
-      return;
-    }
-    const wanted = savedAnswer || chooseYesNo(question, profile);
-    if (!wanted) return;
-    if (type === 'radio') {
-      const group = [...document.querySelectorAll(`input[type="radio"][name="${CSS.escape(input.name)}"]`)];
-      const hit = group.find((item) => applyChoice(item, wanted));
-      if (hit) answers[key] = wanted;
-      return;
-    }
-    if (applyChoice(input, wanted)) answers[key] = wanted;
-  });
-}
-
-// ─── Form Field Collection ───
-
-function collectInputs() {
-  return [...document.querySelectorAll('input, textarea, select')].filter((input) => {
-    const type = (input.getAttribute('type') || '').toLowerCase();
-    if (['hidden', 'password', 'submit', 'button', 'checkbox', 'radio'].includes(type)) return false;
-    if (input.disabled || input.getAttribute('aria-hidden') === 'true') return false;
-    return true;
-  });
-}
-
-async function waitForForm() {
-  for (let i = 0; i < 25; i += 1) {
-    const heading = [...document.querySelectorAll('h1,h2,h3,legend')].find((node) => /apply for this job|application|submit application/i.test(node.innerText || ''));
-    if (heading) heading.scrollIntoView({ block: 'start' });
-    else window.scrollTo({ top: document.body.scrollHeight * 0.55, behavior: 'instant' });
-    const inputs = collectInputs().filter((input) => (input.getAttribute('type') || '') !== 'file');
-    if (inputs.length >= 3) return inputs;
-    await new Promise((resolve) => setTimeout(resolve, 400));
-  }
-  return collectInputs();
-}
-
-// ─── CAPTCHA / MFA Detection ───
-
-function detectCaptchaOrMFA() {
-  // Check for CAPTCHA iframes
-  const captchaIframes = [...document.querySelectorAll('iframe')].filter((iframe) => {
-    const src = (iframe.src || '').toLowerCase();
-    return /recaptcha|hcaptcha|captcha|turnstile|challenge/i.test(src);
-  });
-  if (captchaIframes.length > 0) return 'captcha';
-
-  // Check for CAPTCHA divs
-  const captchaDivs = [...document.querySelectorAll('[class*="captcha"], [id*="captcha"], [class*="recaptcha"], [id*="recaptcha"], .g-recaptcha, .h-captcha')];
-  if (captchaDivs.length > 0) return 'captcha';
-
-  // Check for MFA/OTP fields
-  const mfaInputs = [...document.querySelectorAll('input')].filter((input) => {
-    const label = labelFor(input).toLowerCase();
-    const placeholder = (input.placeholder || '').toLowerCase();
-    return /otp|verification code|two.?factor|2fa|mfa|authenticator|security code/i.test(label + ' ' + placeholder);
-  });
-  if (mfaInputs.length > 0) return 'mfa';
-
-  return null;
-}
-
-// ─── Hamzo Pop-up Overlay System ───
-
-function removeHamzoOverlays() {
-  document.querySelectorAll('.hamzo-overlay-container').forEach((el) => el.remove());
-}
-
-function createOverlayContainer() {
-  const container = document.createElement('div');
-  container.className = 'hamzo-overlay-container';
-  container.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:360px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;animation:hamzoSlideIn .3s ease-out';
-  return container;
-}
-
-function injectHamzoStyles() {
-  if (document.getElementById('hamzo-overlay-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'hamzo-overlay-styles';
-  style.textContent = `
-    @keyframes hamzoSlideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    @keyframes hamzoPulse { 0%, 100% { box-shadow: 0 8px 32px rgba(0,150,136,0.25); } 50% { box-shadow: 0 8px 40px rgba(0,150,136,0.4); } }
-    .hamzo-card { background:#fff; border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.18); overflow:hidden; border:1px solid #e0e0e0; }
-    .hamzo-header { background:linear-gradient(135deg,#00796b,#009688); padding:16px 18px; display:flex; align-items:center; gap:10px; color:#fff; }
-    .hamzo-logo { width:32px; height:32px; border-radius:8px; background:rgba(255,255,255,.2); display:flex; align-items:center; justify-content:center; font-size:18px; }
-    .hamzo-title { font-weight:800; font-size:14px; }
-    .hamzo-subtitle { font-size:11px; opacity:.85; }
-    .hamzo-body { padding:16px 18px; }
-    .hamzo-question { font-size:13px; color:#333; font-weight:600; line-height:1.5; margin-bottom:12px; }
-    .hamzo-input { width:100%; padding:10px 14px; border:1.5px solid #d9d9d2; border-radius:10px; font-size:14px; outline:none; box-sizing:border-box; transition:border-color .2s; }
-    .hamzo-input:focus { border-color:#009688; }
-    .hamzo-remember { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; color:#555; cursor:pointer; }
-    .hamzo-remember input { width:16px; height:16px; accent-color:#009688; cursor:pointer; }
-    .hamzo-footer { padding:12px 18px; border-top:1px solid #f0f0f0; display:flex; gap:8px; }
-    .hamzo-btn { flex:1; padding:10px; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; border:none; transition:all .2s; }
-    .hamzo-btn-primary { background:#009688; color:#fff; }
-    .hamzo-btn-primary:hover { background:#00796b; }
-    .hamzo-btn-skip { background:#f5f5f5; color:#666; }
-    .hamzo-btn-skip:hover { background:#eee; }
-    .hamzo-confirm-btn { padding:12px 20px; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; border:none; transition:all .2s; }
-    .hamzo-submit-btn { background:#009688; color:#fff; }
-    .hamzo-submit-btn:hover { background:#00796b; }
-    .hamzo-review-btn { background:#fff; color:#009688; border:1.5px solid #009688; }
-    .hamzo-review-btn:hover { background:#e0f2f1; }
-    .hamzo-cancel-btn { background:#f5f5f5; color:#666; }
-    .hamzo-cancel-btn:hover { background:#eee; }
-    .hamzo-progress { font-size:11px; color:#009688; font-weight:600; padding:8px 18px; background:#e0f2f1; }
-    .hamzo-captcha-msg { font-size:13px; color:#f57c00; font-weight:600; line-height:1.5; margin-bottom:12px; }
-  `;
-  document.head.appendChild(style);
-}
-
-/**
- * Ask the user for missing information via a branded Hamzo overlay.
- * Supports text input, clickable chips, or select dropdowns for options.
- * Returns { answer, remember } or null if skipped.
- */
-function askHamzoQuestion(question, fieldIndex, totalFields, options = []) {
-  return new Promise((resolve) => {
-    injectHamzoStyles();
-    removeHamzoOverlays();
-
-    const container = createOverlayContainer();
-    const hasOptions = Array.isArray(options) && options.length > 0;
-
-    let inputHtml = '';
-    if (hasOptions && options.length <= 6) {
-      inputHtml = `
-        <div class="hamzo-options-grid" style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;">
-          ${options.map((opt) => `<button type="button" class="hamzo-chip-btn" data-val="${CSS.escape(opt)}" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;color:#1e293b;font-weight:500;text-align:left;">${opt}</button>`).join('')}
-        </div>
-        <input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Or type your custom answer…" style="display:none;margin-top:6px;" />
-      `;
-    } else if (hasOptions) {
-      inputHtml = `
-        <select class="hamzo-input" id="hamzo-answer-select" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;margin:10px 0;font-size:14px;background:#fff;">
-          <option value="">-- Select option --</option>
-          ${options.map((opt) => `<option value="${CSS.escape(opt)}">${opt}</option>`).join('')}
-        </select>
-        <input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Or type your custom answer…" style="display:none;margin-top:6px;" />
-      `;
-    } else {
-      inputHtml = `<input class="hamzo-input" id="hamzo-answer-input" type="text" placeholder="Your answer…" autofocus />`;
-    }
-
-    container.innerHTML = `
-      <div class="hamzo-card" style="animation:hamzoPulse 2s ease-in-out infinite">
-        <div class="hamzo-progress">${fieldIndex + 1} of ${totalFields} missing fields</div>
-        <div class="hamzo-header">
-          <div class="hamzo-logo">🤖</div>
-          <div>
-            <div class="hamzo-title">Hamzo needs one detail</div>
-            <div class="hamzo-subtitle">Saved to Vault — never asks again</div>
-          </div>
-        </div>
-        <div class="hamzo-body">
-          <div class="hamzo-question">"${question.length > 130 ? question.slice(0, 127) + '...' : question}"</div>
-          ${inputHtml}
-          <label class="hamzo-remember" style="margin-top:10px;display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;">
-            <input type="checkbox" id="hamzo-remember-check" checked />
-            <span>💾 Save to Vault (never ask again)</span>
-          </label>
-        </div>
-        <div class="hamzo-footer">
-          <button class="hamzo-btn hamzo-btn-skip" id="hamzo-skip-btn">Skip</button>
-          <button class="hamzo-btn hamzo-btn-primary" id="hamzo-save-btn">Save & Continue</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(container);
-
-    const input = container.querySelector('#hamzo-answer-input');
-    const select = container.querySelector('#hamzo-answer-select');
-    const saveBtn = container.querySelector('#hamzo-save-btn');
-    const skipBtn = container.querySelector('#hamzo-skip-btn');
-    const rememberCheck = container.querySelector('#hamzo-remember-check');
-
-    // Handle option chip clicks
-    container.querySelectorAll('.hamzo-chip-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const val = btn.getAttribute('data-val');
-        const remember = rememberCheck.checked;
-        container.remove();
-        resolve({ answer: val, remember });
-      });
-    });
-
-    // Handle select dropdown change
-    if (select) {
-      select.addEventListener('change', () => {
-        if (select.value) {
-          const remember = rememberCheck.checked;
-          container.remove();
-          resolve({ answer: select.value, remember });
+  function fillChoices(profile, answers, company) {
+    const controls = queryAllDeep('select, input[type="radio"], input[type="checkbox"]').filter(visible);
+    const radioNames = new Set();
+    let filledCount = 0;
+    controls.forEach((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      const question = questionFor(input);
+      const key = question.toLowerCase().slice(0, 180);
+      const savedAnswer = findBestAnswer(question, answers);
+      let wanted = savedAnswer || chooseFromProfile(question, profile, company);
+      if (!wanted && type !== 'radio' && type !== 'checkbox') {
+        wanted = heuristicChoice(question, optionList(input).map((o) => o.text.trim()), profile);
+      }
+      if (type === 'radio') {
+        if (radioNames.has(input.name)) return;
+        radioNames.add(input.name);
+        if (!wanted) return;
+        const group = queryAllDeep(`input[type="radio"][name="${CSS.escape(input.name)}"]`).filter(visible);
+        if (group.some((item) => item.checked)) return;
+        const hit = group.find((item) => applyChoice(item, wanted));
+        if (hit) {
+          answers[key] = wanted;
+          filledCount += 1;
         }
-      });
-    }
-
-    setTimeout(() => {
-      if (input && input.style.display !== 'none') input.focus();
-      else if (select) select.focus();
-    }, 100);
-
-    saveBtn.addEventListener('click', () => {
-      const answer = (select?.value || input?.value || '').trim();
-      if (!answer) {
-        if (input) { input.style.display = 'block'; input.focus(); }
         return;
       }
-      const remember = rememberCheck.checked;
-      container.remove();
-      resolve({ answer, remember });
+      if (type === 'checkbox') {
+        const isConsent = /privacy|acknowledge|agree|terms|consent/.test(question.toLowerCase());
+        const choice = savedAnswer || (isConsent ? 'yes' : chooseFromProfile(question, profile, company));
+        if (choice && applyChoice(input, choice)) {
+          answers[key] = choice;
+          filledCount += 1;
+        }
+        return;
+      }
+      if (wanted && applyChoice(input, wanted)) {
+        answers[key] = wanted;
+        filledCount += 1;
+      }
     });
+    return filledCount;
+  }
 
-    skipBtn.addEventListener('click', () => {
-      container.remove();
-      resolve(null);
+  function resumeFile(pending) {
+    const base64 = pending?.resumeBase64 || '';
+    if (!base64) return null;
+    let raw = String(base64).trim();
+    if (raw.includes(',')) raw = raw.split(',')[1];
+    raw = raw.replace(/\s+/g, '');
+    if (!raw) return null;
+    try {
+      const binary = atob(raw);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      return new File([bytes], pending?.resumeName || 'hamzooh-tailored-resume.pdf', { type: 'application/pdf' });
+    } catch (err) {
+      hamzoohLog('error', 'Failed to decode resume', err.message);
+      return null;
+    }
+  }
+
+  function attachResume(input, file) {
+    if (!file || !input) return false;
+    try {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+    } catch { return false; }
+    ['focus', 'click', 'input', 'change', 'blur'].forEach((type) => {
+      try { input.dispatchEvent(new Event(type, { bubbles: true, cancelable: true })); } catch {}
     });
+    return Boolean(input.files && input.files.length);
+  }
 
-    if (input) {
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          saveBtn.click();
+  function allFileInputs() {
+    return queryAllDeep('input[type="file"]').sort((a, b) => {
+      const aText = `${a.id} ${a.name} ${labelFor(a)}`.toLowerCase();
+      const bText = `${b.id} ${b.name} ${labelFor(b)}`.toLowerCase();
+      return (/resume|cv/i.test(aText) ? -1 : 0) - (/resume|cv/i.test(bText) ? -1 : 0);
+    });
+  }
+
+  async function attachGeneratedResume(pending) {
+    const fromBg = await runtimeSend({ type: 'HAMZOOH_GET_RESUME' });
+    if (fromBg?.resumeBase64) {
+      pending.resumeBase64 = fromBg.resumeBase64;
+      pending.resumeName = fromBg.resumeName || pending.resumeName;
+    }
+    const file = resumeFile(pending);
+    if (!file) {
+      skipped.push({ field: 'resume', reason: 'No tailored resume bytes were available to attach.' });
+      sendProgress('resume_missing', '⚠️ Tailored resume was not available to attach.');
+      return false;
+    }
+
+    const clickAttach = () => {
+      queryAllDeep('button, a, label, span, [role="button"]').forEach((el) => {
+        const text = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+        if (/^(attach file|upload( file)?|choose file|browse|attach)$/i.test(text) || /attach (a )?file|upload resume|upload cv/i.test(text)) {
+          try { el.click(); } catch {}
         }
       });
+    };
+
+    let attached = allFileInputs().some((input) => attachResume(input, file));
+    if (!attached) {
+      clickAttach();
+      const start = Date.now();
+      while (Date.now() - start < 1500 && !allFileInputs().length) await sleep(150);
+      attached = allFileInputs().some((input) => attachResume(input, file));
     }
-  });
-}
-
-/**
- * Show CAPTCHA/MFA pause overlay.
- * Returns a promise that resolves when user clicks Continue.
- */
-function showCaptchaPauseOverlay(type) {
-  return new Promise((resolve) => {
-    injectHamzoStyles();
-    removeHamzoOverlays();
-
-    const container = createOverlayContainer();
-    const message = type === 'captcha'
-      ? 'A CAPTCHA was detected on this page. Please complete it, then click Continue.'
-      : 'A verification/MFA step was detected. Please complete it, then click Continue.';
-
-    container.innerHTML = `
-      <div class="hamzo-card">
-        <div class="hamzo-header" style="background:linear-gradient(135deg,#f57c00,#ff9800)">
-          <div class="hamzo-logo">⚠️</div>
-          <div>
-            <div class="hamzo-title">Action Required</div>
-            <div class="hamzo-subtitle">Hamzo is paused</div>
-          </div>
-        </div>
-        <div class="hamzo-body">
-          <div class="hamzo-captcha-msg">${message}</div>
-        </div>
-        <div class="hamzo-footer">
-          <button class="hamzo-btn hamzo-btn-primary" id="hamzo-captcha-continue" style="background:#f57c00">Continue Automation</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(container);
-    container.querySelector('#hamzo-captcha-continue').addEventListener('click', () => {
-      container.remove();
-      resolve();
-    });
-  });
-}
-
-/**
- * Show pre-submission confirmation overlay.
- * Returns 'submit' | 'review' | 'cancel'.
- */
-function showSubmitConfirmation(filledCount) {
-  return new Promise((resolve) => {
-    injectHamzoStyles();
-    removeHamzoOverlays();
-
-    const container = createOverlayContainer();
-    container.style.width = '400px';
-    container.innerHTML = `
-      <div class="hamzo-card">
-        <div class="hamzo-header" style="background:linear-gradient(135deg,#2e7d32,#43a047)">
-          <div class="hamzo-logo">✅</div>
-          <div>
-            <div class="hamzo-title">Application Ready!</div>
-            <div class="hamzo-subtitle">${filledCount} fields filled successfully</div>
-          </div>
-        </div>
-        <div class="hamzo-body">
-          <div class="hamzo-question" style="margin-bottom:4px">The application has been completed. Do you want me to submit it?</div>
-          <p style="font-size:11px;color:#888;margin:6px 0 0">You can review the filled form before submitting.</p>
-        </div>
-        <div class="hamzo-footer" style="flex-wrap:wrap">
-          <button class="hamzo-confirm-btn hamzo-submit-btn" id="hamzo-do-submit">✓ Submit Application</button>
-          <button class="hamzo-confirm-btn hamzo-review-btn" id="hamzo-do-review">👁 Review</button>
-          <button class="hamzo-confirm-btn hamzo-cancel-btn" id="hamzo-do-cancel">✗ Cancel</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(container);
-    container.querySelector('#hamzo-do-submit').addEventListener('click', () => { container.remove(); resolve('submit'); });
-    container.querySelector('#hamzo-do-review').addEventListener('click', () => { container.remove(); resolve('review'); });
-    container.querySelector('#hamzo-do-cancel').addEventListener('click', () => { container.remove(); resolve('cancel'); });
-  });
-}
-
-// ─── Progress Reporting ───
-
-function sendProgress(step, message, details = {}) {
-  if (!extensionAlive()) return;
-  try {
-    chrome.runtime.sendMessage({
-      type: 'HAMZO_FILLER_PROGRESS',
-      step,
-      message,
-      timestamp: Date.now(),
-      ...details,
-    });
-  } catch {}
-}
-
-// ─── Sync answers to server vault ───
-
-async function syncAnswerToServer(question, answer, approved) {
-  try {
-    await fetch('http://localhost:3000/api/vault/answers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, answer, approved }),
-    });
-  } catch {}
-}
-
-async function queryServerVaultMatch(question) {
-  try {
-    const res = await fetch('http://localhost:3000/api/vault/answers/match', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.match?.answer || null;
-  } catch {
-    return null;
-  }
-}
-
-async function inferAnswerWithAI(question, options, profile, jobTitle, company, resumeText) {
-  try {
-    const res = await fetch('http://localhost:3000/api/vault/infer-answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, options, profile, jobTitle, company, resumeText }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data?.canInfer && data?.answer) {
-      return { answer: data.answer, source: data.source || 'ai-inference' };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// ─── Main Form Fill Pipeline ───
-
-// Self-deciding orchestrator:
-// Phase 1 — job DESCRIPTION page (no form, has Apply CTA): click Apply, adopt the
-//   resulting page/form URL, continue automatically.
-// Phase 2 — APPLICATION form page: fill → resume → questions → confirm → submit.
-// Handles full reloads (content script re-runs, pendingApply adopted URL matches)
-// and SPA route changes (URL watcher below re-triggers the pipeline).
-async function fillPage(profile, answers, pending, depth = 0) {
-  if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
-  if (depth > 4) {
-    sendProgress('complete', '⚠️ Too many application steps — please continue manually from here.', {
-      status: 'needs_attention', filledCount: 0, emptyCount: 0,
-    });
-    await markPendingDone();
-    return;
-  }
-
-  await waitForContent();
-  if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
-
-  const earlyInputs = collectInputs().filter((input) => (input.getAttribute('type') || '') !== 'file');
-  const applyBtns = earlyInputs.length < 3 ? findDescriptionApplyButtons() : [];
-
-  if (applyBtns.length) {
-    sendProgress('apply_opening', '📄 Job description page detected. Clicking Apply to open the application form...');
-    const clicked = await clickApplyUntilEffect(applyBtns);
-    if (!clicked) {
-      // Clicks had no effect — most sites gate Apply behind candidate login.
-      // Do NOT mark done: the user may click Apply manually, and the DOM watcher
-      // below will auto-start the form fill when the form appears.
-      const wall = detectLoginWall();
-      if (wall) {
-        sendProgress('login_required', '🔐 This job site needs you to log in before applying.');
-        sendProgress('complete', '🔐 Please log in on the job site (candidate login), click Apply yourself — Hamzo will fill the form automatically when it appears.', {
-          status: 'needs_attention', filledCount: 0, emptyCount: 0,
+    if (!attached) {
+      const zone = queryAllDeep('div, section, label, form').find((el) => {
+        const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+        return /resume\/?cv|attach file|drop file/i.test(text) && text.length < 180;
+      });
+      if (zone) {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        ['dragenter', 'dragover', 'drop'].forEach((type) => {
+          try { zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer })); } catch {}
         });
-      } else {
-        sendProgress('complete', '⚠️ The Apply button is not responding — click Apply yourself, Hamzo will fill the form automatically when it appears.', {
-          status: 'needs_attention', filledCount: 0, emptyCount: 0,
-        });
+        attached = allFileInputs().some((input) => attachResume(input, file));
       }
+    }
+    if (attached) sendProgress('resume_attached', `📎 Attached ${file.name}`);
+    else {
+      skipped.push({ field: 'resume', reason: 'Could not find a file input or dropzone for the resume.' });
+      sendProgress('resume_failed', '⚠️ Could not attach the tailored resume — no file input found.');
+    }
+    return attached;
+  }
+
+  function detectCaptchaOrMFA() {
+    const captchaIframes = [...document.querySelectorAll('iframe')].filter((iframe) => /recaptcha|hcaptcha|captcha|turnstile|challenge/i.test(iframe.src || ''));
+    if (captchaIframes.length) return 'captcha';
+    if (queryAllDeep('[class*="captcha"], [id*="captcha"], .g-recaptcha, .h-captcha').length) return 'captcha';
+    const mfa = queryAllDeep('input').filter((input) => /otp|verification code|two.?factor|2fa|mfa|authenticator|security code/i.test(labelFor(input) + ' ' + (input.placeholder || '')));
+    return mfa.length ? 'mfa' : null;
+  }
+
+  function removeHamzoohOverlays() {
+    document.querySelectorAll('.hamzooh-overlay-container').forEach((el) => el.remove());
+  }
+
+  function injectHamzoohStyles() {
+    if (document.getElementById('hamzooh-overlay-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'hamzooh-overlay-styles';
+    style.textContent = `
+      @keyframes hamzoohSlideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      .hamzooh-card { background:#fff; border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.18); overflow:hidden; border:1px solid #e0e0e0; }
+      .hamzooh-header { background:linear-gradient(135deg,#00796b,#009688); padding:16px 18px; display:flex; align-items:center; gap:10px; color:#fff; }
+      .hamzooh-logo { width:32px; height:32px; border-radius:8px; background:rgba(255,255,255,.2); display:flex; align-items:center; justify-content:center; font-size:18px; }
+      .hamzooh-title { font-weight:800; font-size:14px; }
+      .hamzooh-subtitle { font-size:11px; opacity:.85; }
+      .hamzooh-body { padding:16px 18px; }
+      .hamzooh-question { font-size:13px; color:#333; font-weight:600; line-height:1.5; margin-bottom:12px; }
+      .hamzooh-input { width:100%; padding:10px 14px; border:1.5px solid #d9d9d2; border-radius:10px; font-size:14px; outline:none; box-sizing:border-box; }
+      .hamzooh-footer { padding:12px 18px; border-top:1px solid #f0f0f0; display:flex; gap:8px; flex-wrap:wrap; }
+      .hamzooh-btn { flex:1; padding:10px; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; border:none; }
+      .hamzooh-btn-primary { background:#009688; color:#fff; }
+      .hamzooh-btn-skip { background:#f5f5f5; color:#666; }
+      .hamzooh-progress { font-size:11px; color:#009688; font-weight:600; padding:8px 18px; background:#e0f2f1; }
+      .hamzooh-confirm-btn { padding:10px 16px; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; border:none; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function createOverlayContainer() {
+    const container = document.createElement('div');
+    container.className = 'hamzooh-overlay-container';
+    container.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2147483647;width:380px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;animation:hamzoohSlideIn .3s ease-out';
+    return container;
+  }
+
+  function askHamzoohQuestion(question, fieldIndex, totalFields, options = [], reason = '') {
+    return new Promise((resolve) => {
+      injectHamzoohStyles();
+      removeHamzoohOverlays();
+      const container = createOverlayContainer();
+      const hasOptions = Array.isArray(options) && options.length > 0;
+      const optHtml = hasOptions
+        ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;">${options.slice(0, 8).map((opt) =>
+          `<button type="button" class="hamzooh-chip-btn" data-val="${escapeHtml(opt)}" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;">${escapeHtml(opt)}</button>`
+        ).join('')}</div>`
+        : '';
+      container.innerHTML = `
+        <div class="hamzooh-card">
+          <div class="hamzooh-progress">${fieldIndex + 1} of ${totalFields} missing fields</div>
+          <div class="hamzooh-header"><div class="hamzooh-logo">AI</div><div>
+            <div class="hamzooh-title">Hamzooh needs one detail</div>
+            <div class="hamzooh-subtitle">${escapeHtml(reason || 'Saved to Vault — reused next time')}</div>
+          </div></div>
+          <div class="hamzooh-body">
+            <div class="hamzooh-question">"${escapeHtml(question.length > 140 ? question.slice(0, 137) + '…' : question)}"</div>
+            ${optHtml}
+            <input class="hamzooh-input" id="hamzooh-answer-input" type="text" placeholder="Your answer…" />
+            <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#475569;">
+              <input type="checkbox" id="hamzooh-remember-check" checked /> Save to Vault (never ask again)
+            </label>
+          </div>
+          <div class="hamzooh-footer">
+            <button class="hamzooh-btn hamzooh-btn-skip" id="hamzooh-skip-btn">Skip</button>
+            <button class="hamzooh-btn hamzooh-btn-primary" id="hamzooh-save-btn">Save & Continue</button>
+          </div>
+        </div>`;
+      document.body.appendChild(container);
+      const input = container.querySelector('#hamzooh-answer-input');
+      const rememberCheck = container.querySelector('#hamzooh-remember-check');
+      const finish = (answer, remember) => { container.remove(); resolve(answer == null ? null : { answer, remember }); };
+      container.querySelectorAll('.hamzooh-chip-btn').forEach((btn) => {
+        btn.addEventListener('click', () => finish(btn.getAttribute('data-val'), rememberCheck.checked));
+      });
+      container.querySelector('#hamzooh-save-btn').addEventListener('click', () => {
+        const answer = (input.value || '').trim();
+        if (!answer) { input.focus(); return; }
+        finish(answer, rememberCheck.checked);
+      });
+      container.querySelector('#hamzooh-skip-btn').addEventListener('click', () => finish(null, false));
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') container.querySelector('#hamzooh-save-btn').click(); });
+      setTimeout(() => input.focus(), 80);
+    });
+  }
+
+  function showCaptchaPauseOverlay(type) {
+    return new Promise((resolve) => {
+      injectHamzoohStyles();
+      removeHamzoohOverlays();
+      const container = createOverlayContainer();
+      container.innerHTML = `
+        <div class="hamzooh-card">
+          <div class="hamzooh-header" style="background:linear-gradient(135deg,#f57c00,#ff9800)">
+            <div class="hamzooh-logo">!</div>
+            <div><div class="hamzooh-title">Action required</div><div class="hamzooh-subtitle">Hamzooh is paused</div></div>
+          </div>
+          <div class="hamzooh-body"><div class="hamzooh-question">${escapeHtml(type === 'captcha' ? 'Complete the CAPTCHA, then continue.' : 'Complete verification, then continue.')}</div></div>
+          <div class="hamzooh-footer"><button class="hamzooh-btn hamzooh-btn-primary" id="hamzooh-captcha-continue">Continue automation</button></div>
+        </div>`;
+      document.body.appendChild(container);
+      container.querySelector('#hamzooh-captcha-continue').addEventListener('click', () => { container.remove(); resolve(); });
+    });
+  }
+
+  function showSubmitConfirmation(filledCount, emptyItems) {
+    return new Promise((resolve) => {
+      injectHamzoohStyles();
+      removeHamzoohOverlays();
+      const container = createOverlayContainer();
+      container.style.width = '420px';
+      const skipHtml = emptyItems.length
+        ? `<ul style="font-size:12px;color:#9a3412;margin:8px 0 0;padding-left:18px;max-height:120px;overflow:auto;">${emptyItems.slice(0, 8).map((s) => `<li>${escapeHtml(s.field)}: ${escapeHtml(s.reason)}</li>`).join('')}</ul>`
+        : '<p style="font-size:12px;color:#166534;margin:8px 0 0;">Required fields look complete. Resume attachment was verified where the site exposes it.</p>';
+      container.innerHTML = `
+        <div class="hamzooh-card">
+          <div class="hamzooh-header" style="background:linear-gradient(135deg,#2e7d32,#43a047)">
+            <div class="hamzooh-logo">✅</div>
+            <div><div class="hamzooh-title">Ready for your review</div><div class="hamzooh-subtitle">${filledCount} fields filled</div></div>
+          </div>
+          <div class="hamzooh-body">
+            <div class="hamzooh-question">Review the application in the job tab. Hamzooh submits only if you explicitly confirm below.</div>
+            ${skipHtml}
+          </div>
+          <div class="hamzooh-footer">
+            <button class="hamzooh-confirm-btn" id="hamzooh-do-submit" style="background:#009688;color:#fff;">Submit application</button>
+            <button class="hamzooh-confirm-btn" id="hamzooh-do-review" style="background:#fff;color:#009688;border:1.5px solid #009688;">Review without submitting</button>
+            <button class="hamzooh-confirm-btn" id="hamzooh-do-cancel" style="background:#f5f5f5;color:#666;">Cancel</button>
+          </div>
+        </div>`;
+      document.body.appendChild(container);
+      container.querySelector('#hamzooh-do-submit').addEventListener('click', () => { container.remove(); resolve('submit'); });
+      container.querySelector('#hamzooh-do-review').addEventListener('click', () => { container.remove(); resolve('review'); });
+      container.querySelector('#hamzooh-do-cancel').addEventListener('click', () => { container.remove(); resolve('cancel'); });
+    });
+  }
+
+  async function syncAnswerToServer(question, answer, approved) {
+    await proxyFetch('/api/vault/answers', { question, answer, approved });
+  }
+
+  async function queryServerVaultMatch(question) {
+    const res = await proxyFetch('/api/vault/answers/match', { question });
+    return res?.data?.match?.answer || null;
+  }
+
+  async function inferAnswerWithAI(question, options, profile, jobTitle, company, resumeText) {
+    const res = await proxyFetch('/api/vault/infer-answer', { question, options, profile, jobTitle, company, resumeText });
+    const data = res?.data;
+    if (data?.canInfer !== false && data?.answer) return { answer: data.answer, source: data.source || 'ai-inference' };
+    return { answer: null, reason: data?.reason || data?.message || 'unanswered' };
+  }
+
+  function findDescriptionApplyButtons() {
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const out = [];
+    for (const el of queryAllDeep('button, a, input[type="submit"], input[type="button"], [role="button"]')) {
+      try {
+        if (el.disabled || !visible(el)) continue;
+        const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || '');
+        if (!/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply)$/.test(text)) continue;
+        if (/sign in|log in|contact sales|attach file/i.test(text)) continue;
+        const form = el.closest('form');
+        if (form && form.querySelectorAll('input, textarea, select').length >= 3) continue;
+        const r = el.getBoundingClientRect?.() || { top: 0 };
+        out.push({ el, top: r.top });
+      } catch {}
+    }
+    out.sort((a, b) => a.top - b.top);
+    return out.map((o) => o.el);
+  }
+
+  async function realClick(el) {
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+    await sleep(400);
+    try { el.click(); } catch {}
+  }
+
+  function pageHasForm() {
+    return collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'file' && (i.getAttribute('type') || '') !== 'password').length >= 1;
+  }
+
+  function detectLoginWall() {
+    try {
+      if (queryAllDeep('input[type="password"]').some(visible)) return true;
+      const body = (document.body?.innerText || '').slice(0, 3500);
+      return /sign in to apply|log in to apply|please login to continue|create an account to apply/i.test(body);
+    } catch { return false; }
+  }
+
+  function buttonText(el) {
+    return (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function findAdvanceButton() {
+    const nodes = queryAllDeep('button, input[type="submit"], input[type="button"], a, [role="button"]');
+    return nodes.find((el) => visible(el) && !el.disabled && isAdvanceButtonText(buttonText(el))) || null;
+  }
+
+  function isAdvanceButtonText(text) {
+    if (/sign in with|attach file|paste|google|linkedin|github/i.test(text)) return false;
+    return /^(next|continue|save and continue|save & continue|proceed|next step)$/i.test(text)
+      || /save.?and.?continue|continue application|next page/i.test(text);
+  }
+
+  function isSubmitButtonText(text) {
+    if (!text || /sign in|log in|contact sales|attach file|paste|next|continue/i.test(text)) return false;
+    return /submit application|^submit$|^apply$|apply now|send application|submit my application|finish application/i.test(text);
+  }
+
+  function findSubmitButton() {
+    const nodes = queryAllDeep('button, input[type="submit"], input[type="button"]');
+    return nodes.find((el) => visible(el) && !el.disabled && isSubmitButtonText(buttonText(el))) || null;
+  }
+
+  const SUCCESS_PATTERNS = [
+    /application (has been |was )?(submitted|received|complete|sent)/i,
+    /thank you for (applying|your application|your interest)/i,
+    /we('| a)?ve received your application/i,
+    /your application (is|has been) (in|under) review/i,
+    /successfully (applied|submitted)/i,
+    /application confirmation/i,
+  ];
+
+  const VALIDATION_PATTERNS = [
+    /this (field|question) is required/i,
+    /field is required/i,
+    /please (fill|complete|enter|select)/i,
+    /invalid (e-?mail|phone|value|input|format)/i,
+    /is not a valid/i,
+  ];
+
+  function pageBodyText() {
+    try { return (document.body?.innerText || '').slice(0, 200000); } catch { return ''; }
+  }
+
+  // Submission is only reported once a success state is actually observed.
+  async function submitAndVerify(submitBtn) {
+    const beforeUrl = location.href;
+    const beforeText = pageBodyText();
+    const beforeSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
+    try {
+      submitBtn.click();
+    } catch {
+      try { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); } catch {}
+    }
+
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 25000) {
+      await sleep(800);
+
+      const text = pageBodyText();
+      if (text !== beforeText) {
+        const success = SUCCESS_PATTERNS.find((re) => re.test(text));
+        if (success) return { ok: true, reason: 'confirmation message shown' };
+      }
+
+      if (location.href !== beforeUrl && /\/(thank|thanks|confirmation|success|submitted|complete|applied)|\/apply\/(status|confirm)/i.test(location.href)) {
+        return { ok: true, reason: `redirected to ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}` };
+      }
+
+      const errors = VALIDATION_PATTERNS.filter((re) => {
+        const match = text.match(re);
+        return match && !beforeText.match(re);
+      });
+      if (errors.length) {
+        return { ok: false, reason: 'the form reported a validation error (form is still on screen)' };
+      }
+
+      const currentSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
+      const formGone = currentSnapshot !== beforeSnapshot && collectInputs().length === 0;
+      if (formGone && !findSubmitButton()) {
+        return { ok: true, reason: 'the application form was replaced after submission' };
+      }
+    }
+
+    return { ok: false, reason: 'no confirmation appeared within 25s' };
+  }
+
+  async function waitForForm() {
+    for (let i = 0; i < 30; i += 1) {
+      const inputs = collectInputs().filter((input) => !['file', 'password'].includes((input.getAttribute('type') || '')));
+      if (inputs.length >= 1) return inputs;
+      await sleep(400);
+    }
+    return collectInputs();
+  }
+
+  async function waitForContent() {
+    for (let i = 0; i < 30; i += 1) {
+      if ((document.body?.innerText || '').replace(/\s+/g, ' ').trim().length > 200) return;
+      await sleep(400);
+    }
+  }
+
+  function updatePending(patch) {
+    return new Promise((resolve) => {
+      try {
+        if (!extensionAlive()) return resolve();
+        chrome.storage.local.get(['pendingApply'], (stored) => {
+          if (!stored?.pendingApply) return resolve();
+          chrome.storage.local.set({ pendingApply: { ...stored.pendingApply, ...patch } }, () => resolve());
+        });
+      } catch { resolve(); }
+    });
+  }
+
+  function markPendingDone() {
+    return updatePending({ done: true });
+  }
+
+  async function rememberAnswer(answers, question, answer) {
+    answers[question.toLowerCase()] = answer;
+    const normKey = normalizeQuestion(question);
+    if (normKey) answers[normKey] = answer;
+    try { if (extensionAlive()) await chrome.storage.local.set({ answers }); } catch {}
+    await syncAnswerToServer(question, answer, true);
+  }
+
+  async function fillUnknownField(input, question, options, answers, profile, pending, index, total) {
+    let savedAnswer = findBestAnswer(question, answers);
+    if (!savedAnswer) savedAnswer = await queryServerVaultMatch(question);
+    if (savedAnswer) {
+      setNativeValue(input, savedAnswer);
+      sendProgress('auto_filled_saved', `✅ Vault: "${question.slice(0, 45)}"`);
+      return true;
+    }
+
+    sendProgress('ai_inferring', `🧠 Analyzing: "${question.slice(0, 50)}"`);
+    const aiResult = await inferAnswerWithAI(question, options, profile, pending.jobTitle, pending.company, pending.resumeText);
+    if (aiResult?.answer) {
+      setNativeValue(input, aiResult.answer);
+      sendProgress('auto_filled_ai', `✨ ${question.slice(0, 40)} → ${String(aiResult.answer).slice(0, 30)}`);
+      return true;
+    }
+
+    const reason = isSensitiveQuestion(question)
+      ? 'This is personal / legal information and is not in your profile.'
+      : (aiResult?.reason || 'Could not infer this from your profile or resume.');
+    sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
+    try { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+    await sleep(250);
+    const origBorder = input.style.border;
+    input.style.border = '2px solid #009688';
+    const result = await askHamzoohQuestion(question, index, total, options, reason);
+    input.style.border = origBorder;
+    if (result?.answer) {
+      setNativeValue(input, result.answer);
+      if (result.remember) await rememberAnswer(answers, question, result.answer);
+      return true;
+    }
+    skipped.push({ field: question.slice(0, 80), reason });
+    return false;
+  }
+
+  async function fillFormPhase(profile, answers, pending) {
+    const jobTitle = pending.jobTitle || '';
+    const company = pending.company || '';
+    sendProgress('finding_form', '🔍 Looking for the application form…');
+    const inputs = await waitForForm();
+
+    const captchaType = detectCaptchaOrMFA();
+    if (captchaType) {
+      sendProgress('captcha_detected', '⚠️ Verification detected — waiting for you.');
+      await showCaptchaPauseOverlay(captchaType);
+    }
+
+    sendProgress('filling', '📝 Filling known profile fields…');
+    let filledCount = 0;
+    inputs.forEach((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (type === 'file' || type === 'password' || type === 'checkbox' || type === 'radio') return;
+      if (input.tagName !== 'SELECT' && !isPlaceholderValue(input) && input.value) return;
+      const label = labelFor(input);
+      const hint = FIELD_HINTS.find((item) => item.test.test(label));
+      if (!hint) return;
+      const value = profileValue(profile, hint.key, jobTitle, company);
+      if (value && setNativeValue(input, value)) filledCount += 1;
+    });
+
+    if (await attachGeneratedResume(pending)) filledCount += 1;
+
+    filledCount += fillChoices(profile, answers, company);
+    await fillCustomDropdowns(new Map(), answers, profile, company);
+
+    const unknown = collectInputs().filter((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) return false;
+      if (!isPlaceholderValue(input)) return false;
+      const label = labelFor(input);
+      const hint = FIELD_HINTS.find((item) => item.test.test(label));
+      if (hint) {
+        const value = profileValue(profile, hint.key, jobTitle, company);
+        if (value && setNativeValue(input, value)) {
+          filledCount += 1;
+          return false;
+        }
+      }
+      const isRequired = input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(label);
+      if (!isRequired && input.tagName !== 'SELECT' && !isSensitiveQuestion(label)) return false;
+      return Boolean(label);
+    });
+
+    if (unknown.length) sendProgress('unknown_fields', `🔎 Resolving ${unknown.length} remaining fields…`);
+    for (let i = 0; i < unknown.length && i < 20; i += 1) {
+      const input = unknown[i];
+      const question = labelFor(input);
+      if (!question) continue;
+      const options = input.tagName === 'SELECT' ? optionList(input).map((o) => o.text.trim()).filter(Boolean) : [];
+      if (await fillUnknownField(input, question, options, answers, profile, pending, i, unknown.length)) filledCount += 1;
+    }
+
+    filledCount += await resolveRequiredGroups(answers, pending, profile);
+
+    const stillEmpty = collectInputs().filter((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['hidden', 'password', 'submit', 'button'].includes(type)) return false;
+      if (!(input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(questionFor(input)))) return false;
+      if (type === 'radio' || type === 'checkbox') return false;
+      return type === 'file' ? !input.files?.length : isPlaceholderValue(input);
+    });
+    requiredGroupsOf().forEach((group) => {
+      if (!group.items.some((input) => input.checked)) stillEmpty.push(group.items[0]);
+    });
+
+    return { filledCount, stillEmpty };
+  }
+
+  function requiredGroupsOf() {
+    const groups = new Map();
+    collectInputs().forEach((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (!['radio', 'checkbox'].includes(type)) return;
+      const question = questionFor(input);
+      if (!(input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(question))) return;
+      const key = type === 'radio' ? `radio:${input.name || question}` : `checkbox:${input.name || input.id || question}`;
+      if (!groups.has(key)) groups.set(key, { type, items: [], question });
+      groups.get(key).items.push(input);
+    });
+    return groups;
+  }
+
+  async function resolveRequiredGroups(answers, pending, profile) {
+    let resolved = 0;
+    const groups = [...requiredGroupsOf().values()];
+    for (let g = 0; g < groups.length; g += 1) {
+      const group = groups[g];
+      if (group.items.some((input) => input.checked)) continue;
+      const question = group.question || '';
+      if (group.type === 'checkbox' && /privacy|acknowledge|agree|terms|consent/i.test(question)) {
+        if (applyChoice(group.items[0], 'yes')) resolved += 1;
+        continue;
+      }
+      let wanted = findBestAnswer(question, answers) || chooseFromProfile(question, profile, pending.company || '');
+      const optionTexts = group.items.map((item) => (optionTextFor(item) || item.value || '').slice(0, 60));
+      if (!wanted) wanted = heuristicChoice(question, optionTexts, profile);
+      if (!wanted) wanted = await queryServerVaultMatch(question);
+      if (!wanted) {
+        const ai = await inferAnswerWithAI(question, optionTexts.filter(Boolean), profile, pending.jobTitle, pending.company, pending.resumeText);
+        wanted = ai?.answer || '';
+      }
+      if (!wanted) {
+        sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
+        const result = await askHamzoohQuestion(question, g, groups.length,
+          optionTexts.filter(Boolean),
+          isSensitiveQuestion(question)
+            ? 'This is personal / legal information and is not in your profile.'
+            : 'This required choice is not in your profile.');
+        if (result?.answer) {
+          wanted = result.answer;
+          if (result.remember) await rememberAnswer(answers, question, wanted);
+        }
+      }
+      if (!wanted) {
+        skipped.push({ field: question.slice(0, 80), reason: 'Required choice was left unanswered.' });
+        continue;
+      }
+      const hit = group.items.find((item) => applyChoice(item, wanted));
+      if (hit) {
+        answers[question.toLowerCase().slice(0, 180)] = wanted;
+        resolved += 1;
+      } else {
+        skipped.push({ field: question.slice(0, 80), reason: `"${wanted}" is not one of the available choices.` });
+      }
+    }
+    return resolved;
+  }
+
+  async function fillPage(profile, answers, pending, depth = 0) {
+    if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
+    if (depth > 12) {
+      await finish('⚠️ Too many application steps — continue manually.', { status: 'needs_attention', filledCount: 0, emptyCount: 0 });
+      return;
+    }
+    await waitForContent();
+
+    const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
+    const applyBtns = !pending.applyClicked && earlyInputs.length < 2 ? findDescriptionApplyButtons() : [];
+    if (applyBtns.length) {
+      sendProgress('apply_opening', '📄 Job page detected — clicking Apply…');
+      const beforeUrl = location.href;
+      await realClick(applyBtns[0]);
+      const start = Date.now();
+      let changed = false;
+      while (Date.now() - start < 12000) {
+        await sleep(500);
+        if (location.href !== beforeUrl || earlyInputs.length < 2 && pageHasForm()) { changed = true; break; }
+      }
+      if (!changed) {
+        if (detectLoginWall()) {
+          sendProgress('login_required', '🔐 Log in on the job site, then click Apply — Hamzooh will continue automatically.');
+          await updatePending({ awaitingManualApply: true });
+          return;
+        }
+        await updatePending({ awaitingManualApply: true });
+        sendProgress('apply_blocked', '⚠️ Click Apply yourself — Hamzooh will fill the form when it appears.');
+        return;
+      }
+      await runtimeSend({ type: 'HAMZOOH_ADOPT_TAB' });
+      await updatePending({ url: location.href, applyClicked: true });
+      await sleep(1500);
+      return fillPage(profile, answers, { ...pending, url: location.href, applyClicked: true }, depth + 1);
+    }
+
+    if (!pageHasForm() && detectLoginWall()) {
+      sendProgress('login_required', '🔐 Please sign in. Hamzooh will resume when the form appears.');
       await updatePending({ awaitingManualApply: true });
       return;
     }
-    sendProgress('form_wait', '⏳ Application form opening — watching for the next step...');
-    await waitForNextStep(clicked.beforeUrl, 22000);
-    await updatePending({ url: location.href, applyClicked: true });
-    await new Promise((r) => setTimeout(r, 2500));
-    return fillPage(profile, answers, { ...pending, url: location.href, applyClicked: true }, depth + 1);
-  }
 
-  return fillFormPhase(profile, answers, pending);
-}
+    const snapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
+    const { filledCount, stillEmpty } = await fillFormPhase(profile, answers, pending);
 
-function waitForContent() {
-  return (async () => {
-    for (let i = 0; i < 30; i += 1) {
-      const len = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().length;
-      if (len > 300) return;
-      await new Promise((r) => setTimeout(r, 400));
-    }
-  })();
-}
+    const advance = findAdvanceButton();
+    const submitBtn = findSubmitButton();
 
-// All "Apply" CTAs on a DESCRIPTION page (not submits inside a form),
-// ranked: in-viewport + truly visible first (kills hidden-duplicate mis-clicks).
-function findDescriptionApplyButtons() {
-  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  const out = [];
-  const nodes = [...document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]')];
-  for (const el of nodes) {
-    try {
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
-      const r = el.getBoundingClientRect?.();
-      if (!r || !r.width || !r.height) continue;
-      const cs = getComputedStyle(el);
-      if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity || '1') < 0.2) continue;
-      if (el.offsetParent === null && cs.position !== 'fixed' && el.tagName !== 'BODY') continue;
-      const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || '');
-      if (!/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|proceed to apply|easy apply)$/.test(text)) continue;
-      if (/sign in|log in|contact sales|attach file|paste/i.test(text)) continue;
-      // A submit button living inside a real form belongs to Phase 2, not here.
-      const form = el.closest('form');
-      if (form && form.querySelectorAll('input, textarea, select').length >= 3) continue;
-      const inView = r.top >= 0 && r.top <= innerHeight && r.left >= 0 && r.left <= innerWidth;
-      out.push({ el, inView, top: r.top });
-    } catch {}
-  }
-  out.sort((a, b) => (b.inView - a.inView) || (a.top - b.top));
-  return out.map((o) => o.el);
-}
-
-function pageChangedSince(beforeUrl) {
-  if (location.href !== beforeUrl) return true;
-  if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return true;
-  if (collectInputs().filter((input) => (input.getAttribute('type') || '') !== 'file').length >= 3) return true;
-  return [...document.querySelectorAll('[role="dialog"], .modal, [class*="modal"], [class*="drawer"]')]
-    .some((m) => m.querySelector('input, textarea, select, button'));
-}
-
-function realClick(el) {
-  try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
-  return (async () => {
-    await new Promise((r) => setTimeout(r, 600));
-    const r = el.getBoundingClientRect?.();
-    const x = r ? r.left + r.width / 2 : 0;
-    const y = r ? r.top + r.height / 2 : 0;
-    const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window };
-    try { el.dispatchEvent(new MouseEvent('mouseover', opts)); } catch {}
-    try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch {}
-    try { el.focus?.(); } catch {}
-    try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch {}
-    try { el.dispatchEvent(new MouseEvent('click', opts)); } catch {}
-    try { el.click(); } catch {}
-  })();
-}
-
-// Click candidates one by one and VERIFY each had an effect (URL/form/modal change).
-// Returns { beforeUrl } on success, null when nothing responded.
-async function clickApplyUntilEffect(candidates) {
-  const tried = new Set();
-  for (const el of candidates.slice(0, 3)) {
-    try {
-      const key = `${el.tagName}:${(el.innerText || el.value || '').slice(0, 30)}`;
-      if (tried.has(key)) continue;
-      tried.add(key);
+    // A visible submit button means we are on the final step, so show the
+    // review. Otherwise step forward to the next section.
+    if (advance && !submitBtn) {
+      sendProgress('page_advancing', '➡️ Continuing to the next section…');
       const beforeUrl = location.href;
-      await realClick(el);
-      for (let i = 0; i < 12; i += 1) {
-        await new Promise((r) => setTimeout(r, 500));
-        if (pageChangedSince(beforeUrl)) return { beforeUrl };
-        // Button itself gone / turned into something else counts as an effect too.
-        if (!document.contains(el)) return { beforeUrl };
+      await realClick(advance);
+      const startedAt = Date.now();
+      let progressed = false;
+      while (Date.now() - startedAt < 12000) {
+        await sleep(400);
+        const newSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
+        if (location.href !== beforeUrl || newSnapshot !== snapshot) {
+          progressed = true;
+          break;
+        }
+        if (advance.disabled || /loading|saving|please wait/i.test(buttonText(advance))) continue;
       }
-      sendProgress('apply_retry', '↻ That Apply button did not respond — trying the next one...');
-    } catch {}
-  }
-  return null;
-}
-
-// Candidate-login gate: password field or login/register modal on the page.
-function detectLoginWall() {
-  try {
-    const pwVisible = [...document.querySelectorAll('input[type="password"]')].some((el) => {
-      const r = el.getBoundingClientRect?.();
-      return r && r.width && r.height && el.offsetParent !== null;
-    });
-    if (pwVisible) return true;
-    const scopes = [...document.querySelectorAll('[role="dialog"], .modal, [class*="modal"], [class*="login"], [class*="signin"], [class*="auth"]')];
-    if (scopes.some((m) => /sign in|log in|register|create (an )?account|candidate login/i.test(m.innerText || ''))) return true;
-    const body = (document.body?.innerText || '').slice(0, 3000);
-    if (/sign in to apply|log in to apply|please login to continue|create an account to apply/i.test(body)) return true;
-  } catch {}
-  return false;
-}
-
-function waitForNextStep(beforeUrl, ms) {
-  const start = Date.now();
-  return (async () => {
-    while (Date.now() - start < ms) {
-      if (location.href !== beforeUrl) return true;
-      if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return true;
-      const formInputs = collectInputs().filter((input) => (input.getAttribute('type') || '') !== 'file');
-      if (formInputs.length >= 3) return true;
-      const modalForm = [...document.querySelectorAll('[role="dialog"], .modal, [class*="modal"], [class*="drawer"]')]
-        .some((m) => m.querySelector('input, textarea, select'));
-      if (modalForm) return true;
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    return false;
-  })();
-}
-
-function updatePending(patch) {
-  return new Promise((resolve) => {
-    try {
-      if (!extensionAlive()) return resolve();
-      chrome.storage.local.get(['pendingApply'], (stored) => {
-        if (!stored?.pendingApply) return resolve();
-        chrome.storage.local.set({ pendingApply: { ...stored.pendingApply, ...patch } }, () => resolve());
-      });
-    } catch { resolve(); }
-  });
-}
-
-function markPendingDone() {
-  return updatePending({ done: true });
-}
-
-async function fillFormPhase(profile, answers, pending) {
-
-  const jobTitle = pending.jobTitle || '';
-  const company = pending.company || '';
-
-  sendProgress('finding_form', '🔍 Looking for the application form...');
-  const inputs = await waitForForm();
-
-  // Step 1: Check for CAPTCHA/MFA before filling
-  const captchaType = detectCaptchaOrMFA();
-  if (captchaType) {
-    sendProgress('captcha_detected', `⚠️ ${captchaType === 'captcha' ? 'CAPTCHA' : 'Verification step'} detected. Waiting for you to complete it...`);
-    await showCaptchaPauseOverlay(captchaType);
-    sendProgress('captcha_completed', '✅ Verification completed. Resuming automation...');
-    await new Promise(r => setTimeout(r, 1500));
-  }
-
-  // Step 2: Fill known fields from profile
-  sendProgress('filling', '📝 Filling known profile information...');
-  let filledCount = 0;
-
-  inputs.forEach((input) => {
-    const type = (input.getAttribute('type') || '').toLowerCase();
-    if (type === 'file') return;
-    if (input.tagName !== 'SELECT' && !isPlaceholderValue(input) && input.value) return;
-    const label = labelFor(input);
-    const hint = FIELD_HINTS.find((item) => item.test.test(label));
-    if (!hint) return;
-    const value = profileValue(profile, hint.key, jobTitle, company);
-    if (value) {
-      setNativeValue(input, value);
-      filledCount++;
-    }
-  });
-
-  // Step 3: Attach resume
-  const resumeAttached = await attachGeneratedResume(pending, profile);
-  if (resumeAttached) {
-    filledCount++;
-    sendProgress('resume_attached', '📎 Resume attached successfully.');
-  }
-
-  // Step 4: Fill choice fields (dropdowns, radios, checkboxes)
-  fillChoices(profile, answers);
-
-  // Step 5: Detect unknown required fields (including empty/unselected <select> dropdowns)
-  const unknown = collectInputs().filter((input) => {
-    const type = (input.getAttribute('type') || '').toLowerCase();
-    if (type === 'file') return false;
-    if (!isPlaceholderValue(input)) return false;
-    const label = labelFor(input);
-
-    // Try to fill from profile one more time
-    const hint = FIELD_HINTS.find((item) => item.test.test(label));
-    if (hint) {
-      const value = profileValue(profile, hint.key, jobTitle, company);
-      if (value) {
-        setNativeValue(input, value);
-        filledCount++;
-        return false;
+      if (progressed) {
+        await updatePending({ url: location.href, applyClicked: true });
+        return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
       }
+      skipped.push({ field: 'Continue', reason: 'The application did not advance after activation. Check validation messages in the job tab.' });
+      sendProgress('advance_blocked', '⚠️ Could not confirm that the application advanced. Review the current step.');
     }
 
-    // Check if field is required
-    const isRequired = input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(label) || input.hasAttribute('required');
-    if (!isRequired && input.tagName !== 'SELECT') return false;
-    return Boolean(label);
-  });
-
-  // Step 6: For each unknown field, try saved answers -> server vault -> AI inference -> ask user
-  if (unknown.length > 0) {
-    sendProgress('unknown_fields', `🔎 Checking ${unknown.length} fields with Vault & AI...`);
-  }
-
-  for (let i = 0; i < unknown.length && i < 15; i++) {
-    const input = unknown[i];
-    const question = labelFor(input);
-    if (!question) continue;
-
-    // Get options if dropdown
-    const options = input.tagName === 'SELECT'
-      ? optionList(input).map((o) => o.text.trim()).filter(Boolean)
-      : [];
-
-    // 1. Try semantic match from local saved answers
-    let savedAnswer = findBestAnswer(question, answers);
-
-    // 2. Try match from server vault
-    if (!savedAnswer) {
-      savedAnswer = await queryServerVaultMatch(question);
+    if (stillEmpty.length > 0) {
+      stillEmpty.forEach((el) => skipped.push({ field: labelFor(el).slice(0, 80), reason: 'Required field still empty after automation.' }));
     }
 
-    if (savedAnswer) {
-      setNativeValue(input, savedAnswer);
-      filledCount++;
-      sendProgress('auto_filled_saved', `✅ Auto-filled "${question.slice(0, 45)}" from Vault memory.`);
-      continue;
-    }
-
-    // 3. Try AI Inference from candidate profile & resume
-    sendProgress('ai_inferring', `🧠 AI analyzing: "${question.slice(0, 50)}"...`);
-    const aiResult = await inferAnswerWithAI(question, options, profile, jobTitle, company, pending.resumeText);
-    if (aiResult && aiResult.answer) {
-      setNativeValue(input, aiResult.answer);
-      filledCount++;
-      answers[question.toLowerCase()] = aiResult.answer;
-      const normKey = normalizeQuestion(question);
-      if (normKey) answers[normKey] = aiResult.answer;
-      try {
-        if (extensionAlive()) await chrome.storage.local.set({ answers });
-      } catch {}
-      await syncAnswerToServer(question, aiResult.answer, true);
-      sendProgress('auto_filled_ai', `✨ AI answered & saved: "${question.slice(0, 40)}" → "${aiResult.answer.slice(0, 30)}"`);
-      continue;
-    }
-
-    // 4. Only ask user if neither Vault nor AI can infer
-    sendProgress('asking_user', `🔑 Need your input: "${question.slice(0, 60)}"...`);
-
-    // Scroll the field into view
-    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await new Promise((r) => setTimeout(r, 400));
-
-    // Highlight the field
-    const origBorder = input.style.border;
-    const origBoxShadow = input.style.boxShadow;
-    input.style.border = '2px solid #009688';
-    input.style.boxShadow = '0 0 12px rgba(0,150,136,0.3)';
-
-    const result = await askHamzoQuestion(question, i, unknown.length, options);
-
-    // Restore field styling
-    input.style.border = origBorder;
-    input.style.boxShadow = origBoxShadow;
-
-    if (result) {
-      setNativeValue(input, result.answer);
-      filledCount++;
-
-      // Save answer permanently so user is never asked again
-      if (result.remember) {
-        answers[question.toLowerCase()] = result.answer;
-        const normKey = normalizeQuestion(question);
-        if (normKey) answers[normKey] = result.answer;
-
-        try {
-          if (extensionAlive()) await chrome.storage.local.set({ answers });
-        } catch {}
-
-        await syncAnswerToServer(question, result.answer, true);
-        sendProgress('answer_saved', `💾 Answer saved to Vault: "${question.slice(0, 40)}" → will auto-fill next time!`);
+    sendProgress('confirming', '✅ Form prepared. Waiting for your review…');
+    const decision = await showSubmitConfirmation(filledCount, skipped.concat(
+      stillEmpty.map((el) => ({ field: labelFor(el).slice(0, 80), reason: 'Still empty / required.' }))
+    ));
+    if (decision === 'submit' && submitBtn && stillEmpty.length === 0) {
+      const verified = await submitAndVerify(submitBtn);
+      if (verified.ok) {
+        await finish(`✅ Application submitted — ${verified.reason}. ${filledCount} fields filled.`, { status: 'submitted', filledCount, emptyCount: 0 });
+      } else {
+        await finish(`⚠️ Submission was clicked but not confirmed (${verified.reason}). Check the job tab before assuming it went through.`, { status: 'needs_attention', filledCount, emptyCount: 0 });
       }
-    }
-  }
-
-  // Step 7: Check for any remaining CAPTCHA
-  const captchaCheck2 = detectCaptchaOrMFA();
-  if (captchaCheck2) {
-    sendProgress('captcha_detected', `⚠️ ${captchaCheck2 === 'captcha' ? 'CAPTCHA' : 'Verification step'} detected. Please complete it...`);
-    await showCaptchaPauseOverlay(captchaCheck2);
-    sendProgress('captcha_completed', '✅ Verification completed.');
-    await new Promise(r => setTimeout(r, 1000));
-  }
-
-  // Step 8: Check if there are still empty required fields
-  const stillEmpty = [...document.querySelectorAll('input, textarea, select')].filter((input) => {
-    const type = (input.getAttribute('type') || '').toLowerCase();
-    if (['hidden', 'password', 'submit', 'button', 'file'].includes(type)) return false;
-    if (!(input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(questionFor(input)))) return false;
-    if (type === 'checkbox' || type === 'radio') return false;
-    return isPlaceholderValue(input);
-  });
-
-  // Step 9: Find submit button
-  const formRoot = [...document.querySelectorAll('form, section, div')].find((node) => /apply for this job/i.test(node.innerText || '') && node.querySelector('input'));
-  const submitBtn = [...(formRoot || document).querySelectorAll('button, input[type="submit"]')].find((node) => {
-    const text = (node.innerText || node.value || '').trim();
-    if (!text) return false;
-    if (/sign in|log in|contact sales|attach file|paste/i.test(text)) return false;
-    return /submit application|^submit$|^apply$|apply now|send application|submit my application/i.test(text);
-  });
-
-  // Step 10: Show confirmation before submission
-  const autoSubmitEnabled = pending.autoSubmit === true;
-
-  if (stillEmpty.length > 0) {
-    sendProgress('needs_attention', `⚠️ ${stillEmpty.length} required fields still need attention. Please fill them manually.`);
-    await finish('📋 Form partially filled. Please review and complete remaining fields.', {
-      status: 'needs_attention',
-      filledCount,
-      emptyCount: stillEmpty.length,
-    });
-    return;
-  }
-
-  if (!submitBtn) {
-    sendProgress('no_submit', '📋 Form filled but no submit button found. Please submit manually.');
-    await finish('Form filled successfully. Please submit manually.', {
-      status: 'needs_attention',
-      filledCount,
-      emptyCount: 0,
-    });
-    return;
-  }
-
-  // If auto-submit is enabled, submit directly
-  if (autoSubmitEnabled) {
-    sendProgress('submitting', '🚀 Auto-submitting application...');
-    submitBtn.click();
-    await new Promise(r => setTimeout(r, 3000));
-    await finish(`✅ Application submitted! ${filledCount} fields filled.`, {
-      status: 'submitted',
-      filledCount,
-      emptyCount: 0,
-    });
-    return;
-  }
-
-  // Show confirmation overlay
-  sendProgress('confirming', '✅ All fields filled. Awaiting your confirmation...');
-  const decision = await showSubmitConfirmation(filledCount);
-
-  if (decision === 'submit') {
-    sendProgress('submitting', '🚀 Submitting application...');
-    submitBtn.click();
-    await new Promise(r => setTimeout(r, 3000));
-
-    // Verify submission — check for validation errors
-    const errorsAfterSubmit = [...document.querySelectorAll('[class*="error"], [class*="invalid"], [aria-invalid="true"]')].filter((el) => {
-      const text = (el.innerText || '').trim();
-      return text.length > 0 && text.length < 200 && /required|invalid|please|error|must/i.test(text);
-    });
-
-    if (errorsAfterSubmit.length > 0) {
-      await finish(`⚠️ Submission may have failed — ${errorsAfterSubmit.length} validation errors detected. Please review.`, {
-        status: 'needs_attention',
-        filledCount,
-        emptyCount: errorsAfterSubmit.length,
-      });
+    } else if (decision === 'submit' && stillEmpty.length > 0) {
+      await finish('⚠️ Required fields are still missing. Review the highlighted fields and submit manually when ready.', { status: 'needs_attention', filledCount, emptyCount: stillEmpty.length });
+    } else if (decision === 'submit' && !submitBtn) {
+      await finish('📋 No submit button on this page. Review and submit in the tab.', { status: 'needs_attention', filledCount, emptyCount: stillEmpty.length });
+    } else if (decision === 'review') {
+      await finish('👁 Review the form in this tab, then submit when you are ready.', { status: 'needs_attention', filledCount, emptyCount: stillEmpty.length });
     } else {
-      await finish(`✅ Application submitted successfully! ${filledCount} fields filled.`, {
-        status: 'submitted',
-        filledCount,
-        emptyCount: 0,
-      });
+      await finish('✗ Submission cancelled.', { status: 'cancelled', filledCount, emptyCount: stillEmpty.length });
     }
-  } else if (decision === 'review') {
-    await finish('👁 Review mode — please review the form and submit manually when ready.', {
-      status: 'needs_attention',
-      filledCount,
-      emptyCount: 0,
-    });
-  } else {
-    await finish('✗ Submission cancelled by user.', {
-      status: 'cancelled',
-      filledCount,
-      emptyCount: 0,
-    });
   }
-}
 
-function finish(message, details = {}) {
-  sendProgress('complete', message, { status: 'needs_attention', filledCount: 0, emptyCount: 0, ...details });
-  return markPendingDone();
-}
-
-// ─── Page Matching ───
-
-function sameJobPage(pendingUrl, pending) {
-  let expected;
-  try { expected = new URL(pendingUrl); } catch { return false; }
-  if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return false;
-  if (location.hostname === expected.hostname) {
-    const expectedPath = expected.pathname.replace(/\/+$/, '');
-    const currentPath = location.pathname.replace(/\/+$/, '');
-    if (currentPath === expectedPath) return true;
-    if (currentPath.startsWith(`${expectedPath}/`)) return true;
-    const expectedJob = expectedPath.match(/job[./][\w.-]+/i)?.[0];
-    const currentJob = currentPath.match(/job[./][\w.-]+/i)?.[0];
-    if (expectedJob && expectedJob === currentJob) return true;
+  function finish(message, details = {}) {
+    sendProgress('complete', message, { status: 'needs_attention', filledCount: 0, emptyCount: 0, ...details, skipped });
+    return markPendingDone();
   }
-  // Adopted host: Apply click navigated to an ATS/form host — keep automating
-  // on pages that look like application flows (not every random tab).
-  if (pending?.applyClicked) {
+
+  function sameJobPage(pendingUrl, pending) {
     try {
-      const expHost = new URL(pendingUrl).hostname;
-      if (location.hostname === expHost) return true;
-      if (/\/(apply|application|jobs?|careers)/i.test(location.pathname)) return true;
+      const expected = new URL(pendingUrl);
+      if (location.hostname === expected.hostname) return true;
     } catch {}
+    if (pending?.applyClicked && /\/(apply|application|jobs?|careers)/i.test(location.pathname)) return true;
     return false;
   }
-  return false;
-}
 
-// ─── Boot ───
+  async function shouldRun(pending) {
+    if (!pending?.url || pending.done) return false;
+    const me = await runtimeSend({ type: 'HAMZOOH_IS_JOB_TAB' });
+    if (me?.ok) return true;
+    if (sameJobPage(pending.url, pending)) {
+      await runtimeSend({ type: 'HAMZOOH_ADOPT_TAB' });
+      return true;
+    }
+    return false;
+  }
 
-let filling = false;
+  function frameLooksActionable() {
+    return pageHasForm() || findDescriptionApplyButtons().length > 0 || allFileInputs().length > 0;
+  }
 
-function runPending(stored) {
-  const pending = stored.pendingApply;
-  if (!pending?.url || pending.done || filling) return;
-  if (!sameJobPage(pending.url, pending)) return;
-  filling = true;
-  // Terminal states mark pending done themselves; no blind auto-remove here so
-  // multi-step flows (Apply click → form on new URL/modal) keep working.
-  fillPage(stored.profile || {}, stored.answers || {}, pending).finally(() => {
-    filling = false;
-  });
-}
-
-function bootApply() {
-  if (!extensionAlive()) return;
-  chrome.storage.local.get(['pendingApply', 'profile', 'answers'], runPending);
-}
-
-bootApply();
-if (extensionAlive()) {
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes.pendingApply?.newValue) return;
-    chrome.storage.local.get(['pendingApply', 'profile', 'answers'], runPending);
-  });
-  // SPA route changes (mynexthire, Workday…) don't reload the page, so the content
-  // script never re-runs — watch the URL and re-evaluate the pipeline instead.
-  let lastHref = location.href;
-  setInterval(() => {
+  async function runPending(stored) {
+    const pending = stored.pendingApply;
+    if (!pending || filling) return;
+    if (!(await shouldRun(pending))) return;
+    if (!frameLooksActionable() && detectLoginWall() === false) {
+      hamzoohLog('log', 'frame not actionable yet', location.href);
+    }
+    filling = true;
     try {
+      await fillPage(stored.profile || {}, stored.answers || {}, pending);
+    } catch (err) {
+      hamzoohLog('error', 'fill pipeline crashed', err.message);
+      await finish(`❌ Automation error: ${err.message}`, { status: 'failed' });
+    } finally {
+      filling = false;
+    }
+  }
+
+  function bootApply() {
+    if (!extensionAlive()) return;
+    chrome.storage.local.get(['pendingApply', 'profile', 'answers'], runPending);
+  }
+  window.__HAMZOOH_BOOT__ = bootApply;
+
+  bootApply();
+  if (extensionAlive()) {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === 'HAMZOOH_BEGIN_FILL') bootApply();
+    });
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes.pendingApply?.newValue) return;
+      chrome.storage.local.get(['pendingApply', 'profile', 'answers'], runPending);
+    });
+    let lastHref = location.href;
+    setInterval(() => {
       if (location.href !== lastHref) {
         lastHref = location.href;
         bootApply();
       }
-    } catch {}
-  }, 1500);
-  // Manual-Apply watcher: user clicked Apply themselves after the auto-click gave up.
-  // When a real form appears, start filling automatically (no second button press).
-  setInterval(() => {
-    try {
+    }, 1500);
+    setInterval(() => {
       if (filling || !extensionAlive()) return;
       chrome.storage.local.get(['pendingApply'], (stored) => {
-        try {
-          const p = stored?.pendingApply;
-          if (!p?.url || p.done || !p.awaitingManualApply) return;
-          if (!sameJobPage(p.url, p)) return;
-          const n = collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'file').length;
-          if (n >= 3) {
-            sendProgress('form_found', '📄 Application form detected — auto-filling now...');
-            updatePending({ awaitingManualApply: false }).then(() => bootApply());
-          }
-        } catch {}
+        const p = stored?.pendingApply;
+        if (!p?.url || p.done || !p.awaitingManualApply) return;
+        if (pageHasForm()) {
+          sendProgress('form_found', '📄 Form detected — filling now…');
+          updatePending({ awaitingManualApply: false }).then(() => bootApply());
+        }
       });
-    } catch {}
-  }, 3500);
-}
+    }, 2500);
+  }
+
+  window.__HAMZOOH_TEST_RUN__ = (profile, answers, pending) => fillPage(profile, answers || {}, pending || { url: location.href });
+  window.__HAMZOOH_DEBUG__ = { questionFor, labelFor, chooseFromProfile, heuristicChoice, applyChoice, profileValue, collectInputs };
 })();

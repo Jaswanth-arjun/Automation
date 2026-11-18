@@ -92,7 +92,7 @@ export default function TopNav({ onMenu }) {
 
       <a className="topnav-brand" href="/dashboard">
         <PawLogo size={30} />
-        <span>HAMZO</span>
+        <span>HAMZOOH</span>
       </a>
 
       <nav className="topnav-links">

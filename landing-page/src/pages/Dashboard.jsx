@@ -323,7 +323,7 @@ export default function Dashboard() {
                   <Crown size={22} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Upgrade to HAMZO Pro</h3>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Upgrade to HAMZOOH Pro</h3>
                   <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Supercharge your job application automation</p>
                 </div>
               </div>

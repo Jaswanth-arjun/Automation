@@ -7,7 +7,9 @@
     "batch": "2023",
     "institution": "N.B.K.R. Institute of Science and Technology, Tirupati CGPA: 7.5/10",
     "skills": [
+      "JavaScript",
       "Python",
+      "SQL",
       "Java",
       "C",
       "React",
@@ -15,18 +17,17 @@
       "Microservices",
       "Spring Boot",
       "MySQL",
+      "MongoDB",
       "Git",
       "GitHub",
-      "Debugging",
+      "Docker",
+      "Postman",
       "OOP",
-      "AI Agents",
-      "Version Control",
       "PHP",
-      "Flutter",
       "CI"
     ],
     "registeredAt": "2026-11-18T04:33:19.005Z",
-    "lastActiveAt": "2026-11-18T08:48:45.959Z"
+    "lastActiveAt": "2026-11-18T15:56:21.112Z"
   },
   {
     "id": "05152a76-bdf5-41c9-a048-01e5c66a2cd5",

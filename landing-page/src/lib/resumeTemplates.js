@@ -1,15 +1,15 @@
 /**
- * Resume templates for tailoring. `classic` is the layout HAMZO has always
+ * Resume templates for tailoring. `classic` is the layout HAMZOOH has always
  * rendered, so it is the default whenever the user has not picked one.
  * New templates go into this list — the tailor backend maps ids to layouts.
  */
-const STORAGE_KEY = 'hamzo_resume_template';
+const STORAGE_KEY = 'hamzooh_resume_template';
 
 export const RESUME_TEMPLATES = [
   {
     id: 'classic',
     name: 'Classic',
-    description: 'The default HAMZO one-page layout. Clean sections, ATS-friendly, accepted everywhere.',
+    description: 'The default HAMZOOH one-page layout. Clean sections, ATS-friendly, accepted everywhere.',
     isDefault: true,
   },
   {

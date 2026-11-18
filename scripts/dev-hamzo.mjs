@@ -6,7 +6,7 @@ const landingPageDir = path.join(automationRoot, 'landing-page');
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
-console.log('🚀 Starting HAMZO Backend (Port 3000) & Frontend (Port 5173)...');
+console.log('🚀 Starting HAMZOOH Backend (Port 3000) & Frontend (Port 5173)...');
 
 const children = [
   spawn(process.execPath, ['server.js'], {

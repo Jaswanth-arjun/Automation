@@ -1,4 +1,4 @@
-/* HAMZO landing v3 — Motion Graphics & Dynamic Interactive Upgrade. Scoped to .hmz-* only. */
+/* HAMZOOH landing v3 — Motion Graphics & Dynamic Interactive Upgrade. Scoped to .hmz-* only. */
 /* `clip` (not `hidden`) keeps horizontal overflow contained without creating a
    scroll container — otherwise the pinned scrollytelling stage cannot stick. */
 html,body{overflow-x:clip}
@@ -680,7 +680,7 @@ html,body{overflow-x:clip}
 .hmz-particles{display:none}
 }
 
-/* ===== HAMZO - HOW IT WORKS INTERACTIVE CARD ===== */
+/* ===== HAMZOOH - HOW IT WORKS INTERACTIVE CARD ===== */
 .hmz-hw-card{position:relative;overflow:hidden;border-radius:clamp(22px,3.4vw,40px);border:1.5px solid #f0a81c;min-height:510px;padding:clamp(24px,4vw,56px);display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:clamp(20px,3.5vw,48px);align-items:center;box-shadow:0 30px 70px -25px rgba(122,77,0,.22);background:radial-gradient(70% 60% at 8% 0%,#fbf1d6,transparent 70%),radial-gradient(60% 50% at 100% 100%,#fbf1d6,transparent 70%),#f6f2e8;margin:40px auto 32px;text-align:left}
 .hmz-hw-card::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(122,77,0,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(122,77,0,.05) 1px,transparent 1px);background-size:56px 56px;-webkit-mask:linear-gradient(#000,transparent 80%);mask:linear-gradient(#000,transparent 80%);pointer-events:none}
 .hmz-hw-arc{position:absolute;left:-170px;bottom:-190px;width:340px;height:340px;border-radius:50%;border:1.5px solid #e8dfcc;pointer-events:none}

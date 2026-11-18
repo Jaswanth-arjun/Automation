@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 /**
- * Hamzo Native DOM Mascot Loader
+ * Hamzooh Native DOM Mascot Loader
  * Fully merges the mascot into the DOM without video borders.
  * Plays the pure mascot animation strictly for the actual loading time only.
  */
@@ -70,7 +70,7 @@ export default function VideoLoader({ isLoading, fadeDurationMs = 260 }) {
             disablePictureInPicture
             controlsList="nodownload nofullscreen noremoteplayback"
           >
-            <source src="/hamzo-loader.mp4" type="video/mp4" />
+            <source src="/hamzooh-loader.mp4" type="video/mp4" />
             <source src="/hamster-loader.mp4" type="video/mp4" />
           </video>
         </div>

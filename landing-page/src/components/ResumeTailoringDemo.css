@@ -1,5 +1,5 @@
 /* ======================================================================
-   ResumeTailoringDemo — hosts hamzo-resume-demo-v2.html in a same-origin
+   ResumeTailoringDemo — hosts hamzooh-resume-demo-v2.html in a same-origin
    iframe. The document owns its own 16:9 stage, palette and GSAP timeline;
    this file only sizes the embed inside the landing page.
    ====================================================================== */

@@ -30,8 +30,8 @@ export default function Auth() {
     <div className="auth-page">
       <div className="auth-ambient" />
       <div className="auth-card">
-        <a className="brand" href="/"><i />HAMZO</a>
-        <h1>Welcome to Wayin</h1>
+        <a className="brand" href="/"><i />HAMZOOH</a>
+        <h1>Welcome to Hamzooh</h1>
         <p>Sign in with your Google Account to access your career workspace. You can connect Gmail later from the Mail page.</p>
 
         {errorMsg && (

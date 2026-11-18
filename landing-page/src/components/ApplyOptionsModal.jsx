@@ -6,7 +6,7 @@ export default function ApplyOptionsModal({ job, isOpen, onClose }) {
 
   if (!isOpen || !job) return null;
 
-  const handleApplyWithHamzo = () => {
+  const handleApplyWithHamzooh = () => {
     onClose();
     navigate(`/dashboard/apply/${job.id}`);
   };
@@ -108,9 +108,9 @@ export default function ApplyOptionsModal({ job, isOpen, onClose }) {
         {/* Options List */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', margin: '20px 0 10px' }}>
           
-          {/* OPTION 1: Apply with HAMZO (Highlighted Primary Option) */}
+          {/* OPTION 1: Apply with HAMZOOH (Highlighted Primary Option) */}
           <div
-            onClick={handleApplyWithHamzo}
+            onClick={handleApplyWithHamzooh}
             style={{
               border: '2px solid #445cf5',
               borderRadius: '14px',
@@ -159,12 +159,12 @@ export default function ApplyOptionsModal({ job, isOpen, onClose }) {
                 <Sparkles size={20} />
               </div>
               <strong style={{ fontSize: '16px', fontWeight: '800', color: '#171817' }}>
-                Apply with HAMZO
+                Apply with HAMZOOH
               </strong>
             </div>
 
             <p style={{ fontSize: '12.5px', color: '#555852', margin: '0 0 14px', lineHeight: '1.5', paddingLeft: '46px' }}>
-              Instant AI auto-fill application using your saved HAMZO profile, resume & skills match analysis.
+              Instant AI auto-fill application using your saved HAMZOOH profile, resume & skills match analysis.
             </p>
 
             <div
@@ -183,7 +183,7 @@ export default function ApplyOptionsModal({ job, isOpen, onClose }) {
                 transition: 'background 0.2s',
               }}
             >
-              <span>Apply with HAMZO Profile</span>
+              <span>Apply with HAMZOOH Profile</span>
               <ArrowRight size={15} />
             </div>
           </div>
@@ -248,7 +248,7 @@ export default function ApplyOptionsModal({ job, isOpen, onClose }) {
 
         {/* Footer info note */}
         <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '11px', color: '#888' }}>
-          🔒 Your information is transmitted securely according to your HAMZO preferences.
+          🔒 Your information is transmitted securely according to your HAMZOOH preferences.
         </div>
       </div>
     </div>

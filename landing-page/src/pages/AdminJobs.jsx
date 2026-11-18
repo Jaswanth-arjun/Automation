@@ -63,7 +63,7 @@ export default function AdminJobs() {
   // so the recruiter keeps control of the jobs they posted.
   useEffect(() => {
     if (!owner) return;
-    const flag = `hamzo_claimed_jobs_${owner.id || owner.email}`;
+    const flag = `hamzooh_claimed_jobs_${owner.id || owner.email}`;
     if (localStorage.getItem(flag)) return;
     localStorage.setItem(flag, '1');
     adminJobStore.claimOwnerless(owner).then(() => setJobs(adminJobStore.getAll()));

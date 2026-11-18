@@ -72,7 +72,7 @@ export default function ConnectAccounts() {
           </span>
           <h2 id="cca-title">Connect your accounts</h2>
           <p>
-            HAMZO runs on your own Gmail and LinkedIn. Connect them once and you can reply to recruiters and
+            HAMZOOH runs on your own Gmail and LinkedIn. Connect them once and you can reply to recruiters and
             send invites without leaving the dashboard.
           </p>
         </div>
@@ -95,7 +95,7 @@ export default function ConnectAccounts() {
             <strong>Gmail</strong>
             <span>
               {mailConnected
-                ? mail.email || 'Connected — Hamzo can draft and send recruiter replies.'
+                ? mail.email || 'Connected — Hamzooh can draft and send recruiter replies.'
                 : 'Draft and send recruiter replies straight from your inbox.'}
             </span>
           </div>
@@ -152,7 +152,7 @@ export default function ConnectAccounts() {
 
       <p className="cca-foot">
         <ShieldCheck size={13} />
-        You stay in control — HAMZO never asks for your LinkedIn password and only sends what you approve.
+        You stay in control — HAMZOOH never asks for your LinkedIn password and only sends what you approve.
       </p>
     </section>
   );

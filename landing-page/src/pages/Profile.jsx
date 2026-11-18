@@ -378,7 +378,7 @@ export default function Profile() {
       <header className="pf-header">
         <div>
           <h1>My Profile</h1>
-          <p>HAMZO uses these details to match jobs, score your fit and tailor every resume.</p>
+          <p>HAMZOOH uses these details to match jobs, score your fit and tailor every resume.</p>
         </div>
         <div className="pf-header-actions">
           {saved && (
@@ -588,7 +588,7 @@ export default function Profile() {
           icon={Briefcase}
           title="Experience"
           count={counts.experience}
-          subtitle="Roles and internships HAMZO highlights for matching jobs."
+          subtitle="Roles and internships HAMZOOH highlights for matching jobs."
           tone="green"
           action={editing ? (
             <button type="button" className="pf-add-btn" onClick={() => addEntry('experience')}>
@@ -700,7 +700,7 @@ export default function Profile() {
           <SectionCard
             icon={FileText}
             title="Resume / CV"
-            subtitle="Master file HAMZO tailors for every application."
+            subtitle="Master file HAMZOOH tailors for every application."
             tone="indigo"
           >
             <input

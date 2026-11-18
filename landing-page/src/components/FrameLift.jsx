@@ -7,7 +7,7 @@ import './FrameLift.css';
 /* --------------------------------------------------------------------------
    FrameLift — "lift, glide, settle" handoff between the Auto Apply Copilot
    section and the Autonomous Outreach section (ported from
-   hamzo-frame-lift.html, GSAP replaced by a scroll-driven render loop).
+   hamzooh-frame-lift.html, GSAP replaced by a scroll-driven render loop).
 
    The browser frame leaves the Auto Apply window, lifts off the page (scales
    down + deepens its shadow), glides across to the Outreach window slot while

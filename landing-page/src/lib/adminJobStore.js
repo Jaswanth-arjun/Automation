@@ -2,7 +2,7 @@
  * Admin Job Store — localStorage + backend API synchronization.
  * Authoritative source: Backend API (/api/jobs).
  */
-const STORAGE_KEY = 'hamzo_admin_jobs';
+const STORAGE_KEY = 'hamzooh_admin_jobs';
 
 export const adminJobStore = {
   getAll() {

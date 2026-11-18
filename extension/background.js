@@ -1,7 +1,9 @@
 /**
- * Hamzo Apply — Background Service Worker
- * Opens job application pages in NEW TABS (not new windows),
- * injects filler.js, and relays progress/results back to the dashboard.
+ * Hamzooh Apply — Background Service Worker
+ * Opens the job application in a NEW TAB in the current window, stores the
+ * tailored resume in IndexedDB (avoids chrome.storage quota failures), proxies
+ * vault/AI calls (content-script fetch is CORS-bound to the job site), and
+ * tells the job tab when to start filling.
  */
 
 const LOCAL_TABS = [
@@ -10,16 +12,20 @@ const LOCAL_TABS = [
   'http://localhost:5174/*',
   'http://127.0.0.1:5174/*',
   'http://localhost:3000/*',
-  'http://127.0.0.1:3000/*'
+  'http://127.0.0.1:3000/*',
 ];
-const APPLY_HOSTS = /greenhouse\.io$|lever\.co$|myworkdayjobs\.com$|ashbyhq\.com$|smartrecruiters\.com$|icims\.com$|workable\.com$|jobvite\.com$|taleo\.net$|successfactors\.com$|oraclecloud\.com$|linkedin\.com$|indeed\.com$/i;
+const APPLY_HOSTS = /greenhouse\.io$|lever\.co$|myworkdayjobs\.com$|ashbyhq\.com$|smartrecruiters\.com$|icims\.com$|workable\.com$|jobvite\.com$|taleo\.net$|successfactors\.com$|oraclecloud\.com$|linkedin\.com$|indeed\.com$|google\.com$|amazon\.jobs$/i;
+const API_BASE = 'http://localhost:3000';
 
-// Track which tab is the Hamzo dashboard
 let dashboardTabId = null;
-// Track which tab is the current job application
 let jobTabId = null;
+const extraJobTabIds = new Set();
 
-async function connectOpenHamzoTabs() {
+function log(...args) {
+  try { console.log('[Hamzooh Apply]', ...args); } catch {}
+}
+
+async function connectOpenHamzoohTabs() {
   const tabs = await chrome.tabs.query({ url: LOCAL_TABS });
   await Promise.all(tabs.map((tab) =>
     chrome.scripting.executeScript({
@@ -28,7 +34,6 @@ async function connectOpenHamzoTabs() {
       injectImmediately: true,
     }).catch(() => {})
   ));
-  // Remember dashboard tab
   if (tabs.length > 0) dashboardTabId = tabs[0].id;
 }
 
@@ -47,7 +52,8 @@ function isErrorUrl(raw) {
 
 function isApplyHost(raw) {
   const host = hostname(raw);
-  return APPLY_HOSTS.test(host) || APPLY_HOSTS.test(host.split('.').slice(-2).join('.')) || /\.greenhouse\.io$|\.lever\.co$|\.ashbyhq\.com$|\.myworkdayjobs\.com$/i.test(host);
+  return APPLY_HOSTS.test(host) || APPLY_HOSTS.test(host.split('.').slice(-2).join('.'))
+    || /\.greenhouse\.io$|\.lever\.co$|\.ashbyhq\.com$|\.myworkdayjobs\.com$/i.test(host);
 }
 
 function looksLikeJobUrl(raw) {
@@ -94,122 +100,247 @@ async function resolveJobUrl(raw) {
   return start;
 }
 
-// ─── Relay progress from filler.js to dashboard tab ───
+function isDashboardUrl(url) {
+  return /localhost:5173|127\.0\.0\.1:5173|localhost:5174|127\.0\.0\.1:5174|localhost:3000|127\.0\.0\.1:3000/.test(String(url || ''));
+}
+
+function isJobTab(tabId) {
+  return Boolean(tabId) && (tabId === jobTabId || extraJobTabIds.has(tabId));
+}
 
 function relayToDashboard(type, data) {
-  if (!dashboardTabId) return;
-  chrome.tabs.sendMessage(dashboardTabId, {
-    source: 'hamzo-extension',
-    type,
-    ...data,
-  }).catch(() => {
-    // Dashboard tab may have closed — try to find it again
-    chrome.tabs.query({ url: LOCAL_TABS }, (tabs) => {
-      if (tabs && tabs.length > 0) {
-        dashboardTabId = tabs[0].id;
-        chrome.tabs.sendMessage(dashboardTabId, {
-          source: 'hamzo-extension',
-          type,
-          ...data,
-        }).catch(() => {});
-      }
+  const payload = { source: 'hamzooh-extension', type, ...data };
+  const send = (id) => chrome.tabs.sendMessage(id, payload).catch(() => false);
+  if (dashboardTabId) {
+    send(dashboardTabId).then((ok) => {
+      if (ok !== false) return;
+      chrome.tabs.query({ url: LOCAL_TABS }, (tabs) => {
+        if (tabs && tabs.length > 0) {
+          dashboardTabId = tabs[0].id;
+          send(dashboardTabId);
+        }
+      });
+    });
+    return;
+  }
+  chrome.tabs.query({ url: LOCAL_TABS }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      dashboardTabId = tabs[0].id;
+      send(dashboardTabId);
+    }
+  });
+}
+
+// ─── IndexedDB resume storage (survives SW restarts, no 10MB quota surprise) ───
+
+function idbReq(mode, fn) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('hamzooh-apply', 1);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      if (!db.objectStoreNames.contains('files')) db.createObjectStore('files');
+    };
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('files', mode);
+      const store = tx.objectStore('files');
+      const req = fn(store);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    };
+  });
+}
+
+function saveResumeBlob(base64, name) {
+  if (!base64) return Promise.resolve();
+  return idbReq('readwrite', (store) => store.put({ base64, name: name || 'hamzooh-resume.pdf', savedAt: Date.now() }, 'resume'));
+}
+
+function loadResumeBlob() {
+  return idbReq('readonly', (store) => store.get('resume')).catch(() => null);
+}
+
+function storageSet(obj) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(obj, () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message));
+      else resolve();
     });
   });
 }
 
-// ─── Lifecycle ───
+async function injectFiller(tabId) {
+  if (!tabId) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['filler.js'],
+    });
+  } catch (err) {
+    log('inject filler failed', tabId, err?.message);
+  }
+}
 
-chrome.runtime.onInstalled.addListener(connectOpenHamzoTabs);
-chrome.runtime.onStartup.addListener(connectOpenHamzoTabs);
+async function beginFill(tabId) {
+  if (!tabId || !isJobTab(tabId)) return;
+  await injectFiller(tabId);
+  chrome.tabs.sendMessage(tabId, { type: 'HAMZOOH_BEGIN_FILL' }).catch(() => {});
+}
 
-// Inject filler.js when a job tab finishes loading
+chrome.runtime.onInstalled.addListener(connectOpenHamzoohTabs);
+chrome.runtime.onStartup.addListener(connectOpenHamzoohTabs);
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status !== 'complete' || !tab.url || /localhost:5173|127\.0\.0\.1:5173/.test(tab.url)) return;
-
-  // Track dashboard tab
-  if (/localhost:5173|127\.0\.0\.1:5173/.test(tab.url)) {
+  if (isDashboardUrl(tab?.url)) {
     dashboardTabId = tabId;
     return;
   }
-
+  if (changeInfo.status !== 'complete' || !tab.url || isDashboardUrl(tab.url)) return;
   chrome.storage.local.get('pendingApply', ({ pendingApply }) => {
-    // Filler self-gates on the page (sameJobPage / adopted flow host), so inject
-    // whenever an unfinished apply exists — covers Apply-click navigations to
-    // new ATS hosts and SPA route changes.
     if (!pendingApply?.url || pendingApply.done) return;
-    chrome.scripting.executeScript({ target: { tabId }, files: ['filler.js'] }).catch(() => {});
+    if (!isJobTab(tabId) && pendingApply.tabId !== tabId) return;
+    jobTabId = tabId;
+    beginFill(tabId);
   });
 });
 
-// ─── Message Handler ───
+chrome.tabs.onCreated.addListener((tab) => {
+  if (!tab?.id) return;
+  if (tab.openerTabId && isJobTab(tab.openerTabId)) {
+    extraJobTabIds.add(tab.id);
+    log('following apply tab opened from job tab', tab.id);
+    chrome.storage.local.get('pendingApply', ({ pendingApply }) => {
+      if (!pendingApply || pendingApply.done) return;
+      storageSet({ pendingApply: { ...pendingApply, tabId: tab.id, applyClicked: true } }).catch(() => {});
+    });
+  }
+});
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'HAMZOOH_IS_JOB_TAB') {
+    sendResponse({ ok: isJobTab(sender.tab?.id) });
+    return;
+  }
 
-  // ─── Filler progress relay (from filler.js content script to dashboard) ───
-  if (message?.type === 'HAMZO_FILLER_PROGRESS') {
-    relayToDashboard('HAMZO_APPLY_PROGRESS', {
+  if (message?.type === 'HAMZOOH_GET_RESUME') {
+    loadResumeBlob().then((blob) => {
+      sendResponse({ ok: Boolean(blob?.base64), resumeBase64: blob?.base64 || '', resumeName: blob?.name || 'hamzooh-resume.pdf' });
+    }).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message?.type === 'HAMZOOH_PROXY_FETCH') {
+    const { path, method, body } = message;
+    fetch(`${API_BASE}${path}`, {
+      method: method || 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      sendResponse({ ok: res.ok, status: res.status, data });
+    }).catch((err) => {
+      sendResponse({ ok: false, error: err.message || 'proxy fetch failed' });
+    });
+    return true;
+  }
+
+  if (message?.type === 'HAMZOOH_ADOPT_TAB') {
+    if (sender.tab?.id) {
+      extraJobTabIds.add(sender.tab.id);
+      jobTabId = sender.tab.id;
+      chrome.storage.local.get('pendingApply', ({ pendingApply }) => {
+        if (!pendingApply) return;
+        storageSet({
+          pendingApply: { ...pendingApply, tabId: sender.tab.id, url: sender.tab.url || pendingApply.url, applyClicked: true },
+        }).catch(() => {});
+      });
+    }
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message?.type === 'HAMZOOH_FILLER_PROGRESS') {
+    relayToDashboard('HAMZOOH_APPLY_PROGRESS', {
       step: message.step,
       message: message.message,
       timestamp: message.timestamp,
       status: message.status,
       filledCount: message.filledCount,
       emptyCount: message.emptyCount,
+      skipped: message.skipped,
+      log: message.log,
     });
-
-    // If this is a completion event, also send the dedicated complete message
     if (message.step === 'complete') {
-      relayToDashboard('HAMZO_APPLY_COMPLETE', {
+      relayToDashboard('HAMZOOH_APPLY_COMPLETE', {
         status: message.status || 'needs_attention',
         message: message.message,
         filledCount: message.filledCount || 0,
         emptyCount: message.emptyCount || 0,
+        skipped: message.skipped || [],
       });
     }
     return;
   }
 
-  // ─── Open job in a NEW TAB (from dashboard via bridge.js) ───
-  if (message?.type !== 'HAMZO_OPEN_JOB') return undefined;
+  if (message?.type !== 'HAMZOOH_OPEN_JOB') return undefined;
 
-  // Remember which tab sent this (the dashboard)
   if (sender.tab?.id) dashboardTabId = sender.tab.id;
 
-  resolveJobUrl(message.url).then((url) => {
+  resolveJobUrl(message.url).then(async (url) => {
     if (isErrorUrl(url)) {
       sendResponse({ ok: false, error: 'That job address is an error page. Paste the Apply URL from the address bar.' });
       return;
     }
 
-    // Store pending apply data including job metadata
-    chrome.storage.local.set({
-      profile: message.profile || {},
-      answers: message.answers || {},
-      pendingApply: {
-        url,
-        resumeBase64: message.resumeBase64 || '',
-        resumeName: message.resumeName || 'hamzo-resume.pdf',
-        resumeText: message.resumeText || '',
-        jobTitle: message.jobTitle || '',
-        company: message.company || '',
-        autoSubmit: message.autoSubmit || false,
-        startedAt: Date.now(),
-      },
-    }, () => {
-      // Open in a NEW TAB in the user's CURRENT browser window (not a new window!)
-      chrome.tabs.create({ url, active: true }, (newTab) => {
-        jobTabId = newTab?.id;
+    extraJobTabIds.clear();
+    const sessionId = `apply_${Date.now()}`;
+    try {
+      await saveResumeBlob(message.resumeBase64 || '', message.resumeName || 'hamzooh-resume.pdf');
+    } catch (err) {
+      log('resume IDB save failed', err?.message);
+    }
 
-        // Also check if there's already a tab open on a related page — inject filler there too
-        // (filler self-gates; unmatched pages exit immediately)
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach((tab) => {
-            if (!tab.id || tab.id === newTab?.id || !tab.url || /localhost:5173|127\.0\.0\.1:5173/.test(tab.url)) return;
-            chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['filler.js'] }).catch(() => {});
-          });
-        });
+    const pendingApply = {
+      sessionId,
+      requestId: message.requestId || '',
+      url,
+      resumeName: message.resumeName || 'hamzooh-resume.pdf',
+      resumeText: String(message.resumeText || '').slice(0, 20000),
+      jobTitle: message.jobTitle || '',
+      company: message.company || '',
+      startedAt: Date.now(),
+      hasResume: Boolean(message.resumeBase64),
+    };
 
-        sendResponse({ ok: true, url });
+    try {
+      await storageSet({
+        profile: message.profile || {},
+        answers: message.answers || {},
+        pendingApply,
       });
+    } catch (err) {
+      log('storage set failed, retrying without resume text', err.message);
+      try {
+        await storageSet({
+          profile: message.profile || {},
+          answers: message.answers || {},
+          pendingApply: { ...pendingApply, resumeText: '' },
+        });
+      } catch (err2) {
+        sendResponse({ ok: false, error: err2.message || 'Could not store apply session.' });
+        return;
+      }
+    }
+
+    chrome.tabs.create({ url, active: true }, (newTab) => {
+      jobTabId = newTab?.id;
+      extraJobTabIds.add(jobTabId);
+      pendingApply.tabId = jobTabId;
+      storageSet({ pendingApply }).catch(() => {});
+      log('opened job tab', jobTabId, url);
+      sendResponse({ ok: true, url, tabId: jobTabId });
     });
   }).catch((err) => {
     sendResponse({ ok: false, error: err.message || 'Could not open that job.' });

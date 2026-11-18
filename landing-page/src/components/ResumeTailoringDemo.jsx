@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './ResumeTailoringDemo.css';
 
 /* --------------------------------------------------------------------------
-   ResumeTailoringDemo — hosts hamzo-resume-demo-v2.html.
+   ResumeTailoringDemo — hosts hamzooh-resume-demo-v2.html.
 
    The demo is a self-contained 1280×720 GSAP timeline, so it is embedded in a
    same-origin iframe (isolated styles + script) instead of being re-implemented
@@ -25,7 +25,7 @@ export default function ResumeTailoringDemo() {
 
   const demo = () => {
     const win = frameRef.current && frameRef.current.contentWindow;
-    return win && win.HAMZO_DEMO ? win.HAMZO_DEMO : null;
+    return win && win.HAMZOOH_DEMO ? win.HAMZOOH_DEMO : null;
   };
 
   const syncHeight = useCallback(() => {
@@ -135,7 +135,7 @@ export default function ResumeTailoringDemo() {
         <iframe
           ref={frameRef}
           src={SRC}
-          title="HAMZO AI resume tailoring demonstration"
+          title="HAMZOOH AI resume tailoring demonstration"
           className="rd-embed-frame"
           style={{ height: `${height}px` }}
           onLoad={handleLoad}

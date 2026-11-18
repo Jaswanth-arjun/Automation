@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = 'hamzo_token';
+const TOKEN_KEY = 'hamzooh_token';
 const LEGACY_TOKEN_KEY = 'mailmind_token';
 const USER_KEY = 'wayin_user';
 const API_URL = '';
@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY);
+    const stored = localStorage.getItem(TOKEN_KEY) || localStorage.getItem('hamzo_token') || localStorage.getItem(LEGACY_TOKEN_KEY);
     if (stored) {
       setTokenState(stored);
       fetchUser(stored).finally(() => setLoading(false));

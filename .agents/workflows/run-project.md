@@ -1,8 +1,8 @@
 ---
-description: How to run the entire HAMZO project (backend + frontend)
+description: How to run the entire HAMZOOH project (backend + frontend)
 ---
 
-# Running the HAMZO Project
+# Running the HAMZOOH Project
 
 The project has **2 servers** that need to run simultaneously in **separate terminals**.
 

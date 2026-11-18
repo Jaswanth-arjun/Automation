@@ -522,7 +522,7 @@ export default function OutreachWalkthrough({ onOpen }) {
                 Email &amp; LinkedIn referrals on <em>autopilot.</em>
               </h2>
               <p className="ow-lede">
-                HAMZO finds the right people for every role, sends personal referral requests from your
+                HAMZOOH finds the right people for every role, sends personal referral requests from your
                 own inbox and profile, then auto-applies the moment someone replies.
               </p>
             </header>

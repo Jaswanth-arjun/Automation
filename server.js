@@ -197,7 +197,7 @@ function summarizeCandidates(list) {
 }
 
 // ─── Batch broadcast helpers ───
-const BROADCAST_FROM_NAME = process.env.COMPANY_MAIL_FROM_NAME || 'Hamzo Careers';
+const BROADCAST_FROM_NAME = process.env.COMPANY_MAIL_FROM_NAME || 'Hamzooh Careers';
 const BROADCAST_FROM_EMAIL = process.env.COMPANY_MAIL_USER || 'job-updates@hamzooh.com';
 
 function escapeHtml(value) {
@@ -254,7 +254,7 @@ function buildBroadcastEmailHtml({ htmlBody, plainText, candidate }) {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e8e8e2;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
             <tr>
               <td style="background:#171817;padding:20px 28px;">
-                <span style="display:inline-block;background:#445cf5;color:#ffffff;font-size:12px;font-weight:800;letter-spacing:.14em;padding:7px 11px;border-radius:8px;">HAMZO</span>
+                <span style="display:inline-block;background:#445cf5;color:#ffffff;font-size:12px;font-weight:800;letter-spacing:.14em;padding:7px 11px;border-radius:8px;">HAMZOOH</span>
                 <span style="color:#a5a8b8;font-size:12px;font-weight:600;margin-left:10px;">Career updates</span>
               </td>
             </tr>
@@ -265,13 +265,13 @@ function buildBroadcastEmailHtml({ htmlBody, plainText, candidate }) {
             </tr>
             <tr>
               <td style="padding:10px 28px 30px;">
-                <a href="https://hamzooh.com" style="display:inline-block;background:#445cf5;color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:11px 20px;border-radius:10px;">Open HAMZO</a>
+                <a href="https://hamzooh.com" style="display:inline-block;background:#445cf5;color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:11px 20px;border-radius:10px;">Open HAMZOOH</a>
               </td>
             </tr>
             <tr>
               <td style="border-top:1px solid #ecece6;padding:18px 28px;color:#94a3b8;font-size:11.5px;line-height:1.6;">
-                You are receiving this because you registered on HAMZO.<br />
-                Sent by Hamzo Careers &lt;${escapeHtml(BROADCAST_FROM_EMAIL)}&gt;
+                You are receiving this because you registered on HAMZOOH.<br />
+                Sent by Hamzooh Careers &lt;${escapeHtml(BROADCAST_FROM_EMAIL)}&gt;
               </td>
             </tr>
           </table>
@@ -1085,7 +1085,7 @@ async function fetchGoogleUserInfo(accessToken) {
 
 function getGeminiKey() {
   if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY.trim();
-  const files = [path.join(__dirname, '.env'), path.join(__dirname, 'Hamzo', '.env'), path.join(__dirname, 'MailMind AI', '.env')];
+  const files = [path.join(__dirname, '.env'), path.join(__dirname, 'Hamzooh', '.env'), path.join(__dirname, 'MailMind AI', '.env')];
   for (const file of files) {
     if (!fs.existsSync(file)) continue;
     const match = fs.readFileSync(file, 'utf8').match(/^GEMINI_API_KEY=(.*)$/m);
@@ -1446,7 +1446,7 @@ const GMAIL_LIST_TTL_MS = 60 * 1000;
 function friendlyGmailError(err) {
   const message = String(err?.message || '');
   if (/quota/i.test(message)) {
-    return 'Gmail rate limit reached. Wait a minute, then retry — Hamzo caches results so the next load is cheap.';
+    return 'Gmail rate limit reached. Wait a minute, then retry — Hamzooh caches results so the next load is cheap.';
   }
   if (/invalid_grant|invalid credentials/i.test(message)) {
     return 'The Gmail connection expired. Reconnect the account to continue.';
@@ -1678,7 +1678,7 @@ app.post('/api/ai/mail/summarize', async (req, res) => {
 // deliberately make no claims about the email's content.
 function firstNameOf(raw, email) {
   const clean = String(raw || '').replace(/<.*?>/g, '').replace(/["']/g, '').trim();
-  const companyish = /recruit|career|talent|hiring|team|support|help|admin|info|hello|jobs?|notif|no-?reply|mail|inc\b|labs?\b|technolog|solutions?|systems?|university|college|test|hamzo|linkedin|indeed|glassdoor/i;
+  const companyish = /recruit|career|talent|hiring|team|support|help|admin|info|hello|jobs?|notif|no-?reply|mail|inc\b|labs?\b|technolog|solutions?|systems?|university|college|test|hamzooh|linkedin|indeed|glassdoor/i;
   const words = clean.split(/\s+/).filter(Boolean);
 
   // Only trust a display name that looks like a person's name.
@@ -2914,14 +2914,14 @@ app.post('/api/auth/request-otp', async (req, res) => {
         auth: { user: gmailUser, pass: gmailAppPass },
       });
       await transporter.sendMail({
-        from: `"Hamzo" <${gmailUser}>`,
+        from: `"Hamzooh" <${gmailUser}>`,
         to: email,
-        subject: 'Your Hamzo login code',
-        text: `Your Hamzo login code is ${otp}. It expires in 10 minutes.`,
+        subject: 'Your Hamzooh login code',
+        text: `Your Hamzooh login code is ${otp}. It expires in 10 minutes.`,
         html: `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
-            <h2 style="margin: 0 0 16px; color: #0f172a; font-size: 22px; font-weight: 700;">Welcome to Hamzo</h2>
-            <p style="margin: 0 0 24px; color: #475569; font-size: 15px; line-height: 1.5;">Here is your secure one-time verification code to sign in to Hamzo:</p>
+            <h2 style="margin: 0 0 16px; color: #0f172a; font-size: 22px; font-weight: 700;">Welcome to Hamzooh</h2>
+            <p style="margin: 0 0 24px; color: #475569; font-size: 15px; line-height: 1.5;">Here is your secure one-time verification code to sign in to Hamzooh:</p>
             <div style="background: #f1f5f9; padding: 18px 24px; border-radius: 8px; text-align: center; margin-bottom: 24px;">
               <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #0f172a; font-family: monospace;">${otp}</span>
             </div>
@@ -4182,7 +4182,7 @@ app.post('/api/campaigns/:id/stop', async (req, res) => {
 // offer an honest "resume from saved progress" instead of showing "Running".
 campaignStore.reconcileAfterRestart();
 
-// ─── Vault / Answer Sync API (used by Hamzo Apply extension) ───
+// ─── Vault / Answer Sync API (used by Hamzooh Apply extension) ───
 
 // Get all saved answers for extension sync
 app.get('/api/vault/answers', (req, res) => {
@@ -4322,7 +4322,7 @@ Return ONLY JSON:
   }
 });
 
-// ─── Auto-Apply Engine (DEPRECATED — use Hamzo Apply extension instead) ───
+// ─── Auto-Apply Engine (DEPRECATED — use Hamzooh Apply extension instead) ───
 let activeAutoApply = null;
 
 app.post('/api/auto-apply', async (req, res) => {
@@ -4361,7 +4361,7 @@ app.post('/api/auto-apply', async (req, res) => {
       applyUrl,
       profile: profile || {},
       resumeBase64: resumeBase64 || '',
-      resumeName: resumeName || 'hamzo-resume.pdf',
+      resumeName: resumeName || 'hamzooh-resume.pdf',
       jobTitle: jobTitle || '',
       company: company || '',
       askAI: askGemini,

@@ -13,7 +13,7 @@
  */
 import { api, applicationStore } from './api';
 
-const OVERLAY_KEY = 'hamzo_activity_overlay';
+const OVERLAY_KEY = 'hamzooh_activity_overlay';
 
 export const APPLICATION_STATUS_OPTIONS = [
   'Not applied',

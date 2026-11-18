@@ -200,8 +200,8 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
 
   if (!isOpen) return null;
 
-  /* ── Apply with Hamzo: find-or-create the job, then open the apply flow ── */
-  const handleApplyWithHamzo = async (e) => {
+  /* ── Apply with Hamzooh: find-or-create the job, then open the apply flow ── */
+  const handleApplyWithHamzooh = async (e) => {
     if (e) e.preventDefault();
     const link = jobUrl.trim();
     if (!link) return;
@@ -443,7 +443,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                   <h3 style={{ margin: 0, fontSize: '19px', fontWeight: '800', color: '#0f172a' }}>Add Job Link</h3>
                   <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>
                     {applyMode
-                      ? 'Paste a valid job link — Hamzo opens the application flow for it'
+                      ? 'Paste a valid job link — Hamzooh opens the application flow for it'
                       : 'Paste a job URL to analyze & tailor your resume'}
                   </p>
                 </div>
@@ -451,7 +451,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
               <button onClick={onClose} style={closeButtonStyle}><X size={16} /></button>
             </div>
 
-            <form onSubmit={applyMode ? handleApplyWithHamzo : handleStartAnalysis}>
+            <form onSubmit={applyMode ? handleApplyWithHamzooh : handleStartAnalysis}>
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', marginBottom: '8px' }}>
                   Job Page URL
@@ -491,7 +491,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                   disabled={applyBusy !== ''}
                 >
                   {applyMode
-                    ? (applyBusy === 'checking' ? 'Checking jobs…' : applyBusy === 'importing' ? 'Importing job…' : 'Apply with Hamzo')
+                    ? (applyBusy === 'checking' ? 'Checking jobs…' : applyBusy === 'importing' ? 'Importing job…' : 'Apply with Hamzooh')
                     : 'Analyze & Tailor'}
                   {applyBusy === '' && <Sparkles size={15} />}
                 </button>

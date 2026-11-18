@@ -22,7 +22,7 @@
 /* Versioning + cache                                                   */
 /* ------------------------------------------------------------------ */
 
-const CACHE_KEY = 'hamzo_match_cache_v1';
+const CACHE_KEY = 'hamzooh_match_cache_v1';
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // stale after 14 days
 const CACHE_MAX_ENTRIES = 400;
 

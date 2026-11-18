@@ -157,7 +157,7 @@ export default function Apply() {
           setGmailConnected(true);
           setConnectedGmailEmail(cfg.email || '');
           if (cfg.email) {
-            localStorage.setItem('hamzo_gmail_email', cfg.email);
+            localStorage.setItem('hamzooh_gmail_email', cfg.email);
             localStorage.setItem('mailmind_gmail_email', cfg.email);
           }
         }
@@ -766,33 +766,33 @@ ${firstName}`;
       setExtensionReady(true);
       fetch('/api/vault/answers').then(r => r.json()).then(data => {
         if (data.answers) {
-          window.postMessage({ source: 'hamzo-app', type: 'HAMZO_SYNC_ANSWERS', answers: data.answers }, '*');
+          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_SYNC_ANSWERS', answers: data.answers }, '*');
         }
       }).catch(() => {});
     };
 
     // Check DOM attribute set by bridge.js
-    if (document.documentElement?.dataset?.hamzoExtension === '1' || window.__HAMZO_EXTENSION__) {
+    if (document.documentElement?.dataset?.hamzoohExtension === '1' || window.__HAMZOOH_EXTENSION__) {
       markReady();
     }
 
     const onMsg = (event) => {
       if (!alive) return;
-      if (event.data?.source === 'hamzo-extension' && (event.data.type === 'HAMZO_PONG' || event.data.type === 'HAMZO_ANSWERS_SYNCED')) {
+      if (event.data?.source === 'hamzooh-extension' && (event.data.type === 'HAMZOOH_PONG' || event.data.type === 'HAMZOOH_ANSWERS_SYNCED')) {
         markReady();
       }
     };
     window.addEventListener('message', onMsg);
 
     // Send PING immediately and retry every 400ms for 5 seconds
-    window.postMessage({ source: 'hamzo-app', type: 'HAMZO_PING' }, '*');
+    window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_PING' }, '*');
     const interval = setInterval(() => {
       if (!alive) return;
-      if (document.documentElement?.dataset?.hamzoExtension === '1') {
+      if (document.documentElement?.dataset?.hamzoohExtension === '1') {
         markReady();
         clearInterval(interval);
       } else {
-        window.postMessage({ source: 'hamzo-app', type: 'HAMZO_PING' }, '*');
+        window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_PING' }, '*');
       }
     }, 400);
 
@@ -809,9 +809,9 @@ ${firstName}`;
   // Listen for extension progress/completion messages
   useEffect(() => {
     const onExtensionMessage = (event) => {
-      if (event.data?.source !== 'hamzo-extension') return;
+      if (event.data?.source !== 'hamzooh-extension') return;
 
-      if (event.data.type === 'HAMZO_APPLY_PROGRESS') {
+      if (event.data.type === 'HAMZOOH_APPLY_PROGRESS') {
         setAutoApplyProgress(prev => [...prev, {
           step: event.data.step,
           message: event.data.message,
@@ -819,7 +819,7 @@ ${firstName}`;
         }]);
       }
 
-      if (event.data.type === 'HAMZO_APPLY_COMPLETE') {
+      if (event.data.type === 'HAMZOOH_APPLY_COMPLETE') {
         setAutoApplyResult({
           status: event.data.status || 'needs_attention',
           message: event.data.message || 'Application process completed.',
@@ -862,7 +862,7 @@ ${firstName}`;
     }
 
     if (!extensionReady) {
-      alert('Hamzo Apply extension is not detected. Please load the extension in chrome://extensions (Load unpacked → select the extension folder), then reload this page.');
+      alert('Hamzooh Apply extension is not detected. Please load the extension in chrome://extensions (Load unpacked → select the extension folder), then reload this page.');
       return;
     }
 
@@ -872,7 +872,7 @@ ${firstName}`;
     setShowAutoApplyModal(true);
 
     // Push profile to extension and trigger job open in new tab
-    const ANSWERS_KEY = 'hamzo_apply_answers';
+    const ANSWERS_KEY = 'hamzooh_apply_answers';
     let savedAnswers = {};
     try { savedAnswers = JSON.parse(localStorage.getItem(ANSWERS_KEY) || '{}'); } catch {}
     try {
@@ -925,23 +925,23 @@ ${firstName}`;
     const requestId = `apply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const readyPromise = new Promise((resolve) => {
       const onMsg = (event) => {
-        if (event.source !== window || event.data?.source !== 'hamzo-extension'
-          || event.data.type !== 'HAMZO_APPLY_READY' || event.data.requestId !== requestId) return;
+        if (event.source !== window || event.data?.source !== 'hamzooh-extension'
+          || event.data.type !== 'HAMZOOH_APPLY_READY' || event.data.requestId !== requestId) return;
         window.removeEventListener('message', onMsg);
         clearTimeout(timeout);
         resolve(event.data);
       };
       const timeout = setTimeout(() => {
         window.removeEventListener('message', onMsg);
-        resolve({ ok: false, error: 'Hamzo Apply did not respond. Reload the extension, then refresh this page.' });
+        resolve({ ok: false, error: 'Hamzooh Apply did not respond. Reload the extension, then refresh this page.' });
       }, 20000);
       window.addEventListener('message', onMsg);
     });
 
     // Send the apply request to the extension
     window.postMessage({
-      source: 'hamzo-app',
-      type: 'HAMZO_START_APPLY',
+      source: 'hamzooh-app',
+      type: 'HAMZOOH_START_APPLY',
       requestId,
       url: link,
       profile: {
@@ -960,7 +960,7 @@ ${firstName}`;
     if (!ready.ok) {
       setAutoApplyResult({
         status: 'failed',
-        message: ready.error || 'Failed to open job page. Make sure the Hamzo Apply extension is loaded.',
+        message: ready.error || 'Failed to open job page. Make sure the Hamzooh Apply extension is loaded.',
         filledFields: [],
       });
       setAutoApplying(false);
@@ -970,7 +970,7 @@ ${firstName}`;
     // Add initial progress step
     setAutoApplyProgress([{
       step: 'opened',
-      message: `🌐 Job page opened in a new tab. Hamzo is analyzing the form...`,
+      message: `🌐 Job page opened in a new tab. Hamzooh is analyzing the form...`,
       timestamp: Date.now(),
     }]);
 
@@ -1008,7 +1008,7 @@ ${firstName}`;
     );
   }
 
-  const userEmail = connectedGmailEmail || profile.email || localStorage.getItem('hamzo_gmail_email') || localStorage.getItem('mailmind_gmail_email') || 'Connected Google Account';
+  const userEmail = connectedGmailEmail || profile.email || localStorage.getItem('hamzooh_gmail_email') || localStorage.getItem('mailmind_gmail_email') || 'Connected Google Account';
   // Banner + sends: just-tailored (this session) > resume saved for this job > global active.
   const effectiveResume = (tailoredPdfBase64 && { name: tailoredFileName, pdfBase64: tailoredPdfBase64 }) || jobResume || activeResume;
   const resumeDisplayName = effectiveResume?.name || `${(profile.fullName || 'Jaswanth').split(' ')[0]}-resume.pdf`;
@@ -1092,7 +1092,7 @@ ${firstName}`;
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
               <span style={{ background: '#445cf5', color: '#fff', fontSize: '10px', fontWeight: '800', padding: '2px 8px', borderRadius: '12px', textTransform: 'uppercase' }}>
-                HAMZO Smart Outreach
+                HAMZOOH Smart Outreach
               </span>
               {job.category && (
                 <span style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: '10px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px' }}>
@@ -1416,19 +1416,19 @@ ${firstName}`;
             </div>
           </div>
 
-          {/* HAMZO Agent Banner & Configuration Box */}
+          {/* HAMZOOH Agent Banner & Configuration Box */}
           <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#319795', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '14px' }}>
                 🤖
               </div>
               <strong style={{ fontSize: '14.5px', color: '#1a202c' }}>
-                HAMZO Agent will reach out to {selectedEmployees.length} employees at {job.company}
+                HAMZOOH Agent will reach out to {selectedEmployees.length} employees at {job.company}
               </strong>
             </div>
 
             <div style={{ background: '#e6fffa', border: '1px solid #b2f5ea', borderRadius: '12px', padding: '14px 16px', fontSize: '12.5px', color: '#234e52', lineHeight: '1.5' }}>
-              ℹ️ If you confirm and send, your updated message will be saved as your default outreach template. You can edit it anytime from <span style={{ fontWeight: '800', textDecoration: 'underline', cursor: 'pointer' }}>HAMZO Agent configuration</span> in your dashboard.
+              ℹ️ If you confirm and send, your updated message will be saved as your default outreach template. You can edit it anytime from <span style={{ fontWeight: '800', textDecoration: 'underline', cursor: 'pointer' }}>HAMZOOH Agent configuration</span> in your dashboard.
             </div>
           </div>
 
@@ -1453,7 +1453,7 @@ ${firstName}`;
                 onChange={e => setAutoReplyEnabled(e.target.checked)} 
                 style={{ width: '17px', height: '17px', accentColor: '#059669', cursor: 'pointer' }}
               />
-              <span>Let HAMZO automatically reply to referrer emails</span>
+              <span>Let HAMZOOH automatically reply to referrer emails</span>
             </label>
 
             <span 
@@ -1696,7 +1696,7 @@ ${firstName}`;
                     Please connect your LinkedIn
                   </h3>
                   <p style={{ fontSize: '14px', color: '#64748b', margin: '0 0 24px', maxWidth: '460px', marginLeft: 'auto', marginRight: 'auto', lineHeight: '1.6' }}>
-                    To launch automated LinkedIn outreach campaigns for <strong>{job.company}</strong>, you need to connect your LinkedIn account first. This allows HAMZO to send personalized connection requests to recruiters and hiring managers on your behalf.
+                    To launch automated LinkedIn outreach campaigns for <strong>{job.company}</strong>, you need to connect your LinkedIn account first. This allows HAMZOOH to send personalized connection requests to recruiters and hiring managers on your behalf.
                   </p>
                   <button
                     onClick={handleLiConnect}
@@ -2332,7 +2332,7 @@ ${firstName}`;
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: extensionReady ? '#059669' : '#dc2626', flexShrink: 0 }} />
               <span style={{ fontSize: '13px', fontWeight: '700', color: extensionReady ? '#064e3b' : '#991b1b' }}>
-                {extensionReady ? 'Hamzo Apply extension connected' : 'Extension not detected — load it in chrome://extensions'}
+                {extensionReady ? 'Hamzooh Apply extension connected' : 'Extension not detected — load it in chrome://extensions'}
               </span>
             </div>
             <span style={{ fontSize: '12.5px', color: '#064e3b', fontWeight: '600' }}>Final submission always requires your confirmation.</span>
@@ -2346,7 +2346,7 @@ ${firstName}`;
               </h4>
               <p style={{ fontSize: '12.5px', color: '#aaa', margin: 0 }}>
                 {submitted 
-                  ? `HAMZO auto-applied to ${job.company} successfully.`
+                  ? `HAMZOOH auto-applied to ${job.company} successfully.`
                   : `Opens the job in a new tab, fills the form, and asks you before submitting.`}
               </p>
             </div>
@@ -2509,7 +2509,7 @@ ${firstName}`;
                   <div style={{ textAlign: 'center', padding: '30px', color: '#6b7280' }}>
                     <Loader size={28} className="spin" style={{ marginBottom: '12px', color: '#059669' }} />
                     <p style={{ margin: 0, fontWeight: '600' }}>Opening job page in a new tab...</p>
-                    <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Hamzo will fill the form directly in your browser!</p>
+                    <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Hamzooh will fill the form directly in your browser!</p>
                   </div>
                 )}
               </div>
@@ -2521,7 +2521,7 @@ ${firstName}`;
                   background: '#f0fdf4', border: '1px solid #bbf7d0',
                   fontSize: '12px', color: '#166534', fontWeight: '600'
                 }}>
-                  💡 If Hamzo needs additional information, a pop-up will appear directly on the job page in the new tab. Switch to that tab to respond.
+                  💡 If Hamzooh needs additional information, a pop-up will appear directly on the job page in the new tab. Switch to that tab to respond.
                 </div>
               )}
 

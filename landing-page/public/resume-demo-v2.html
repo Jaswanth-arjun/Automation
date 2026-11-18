@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>HAMZO – AI Resume Tailoring Demo v2</title>
+<title>HAMZOOH – AI Resume Tailoring Demo v2</title>
 <script src="/vendor/gsap.min.js"></script>
 <style>
 :root{--bg:#fffaf5;--ink:#1b1511;--mute:#6b5f57;--ac:#e8832a;--ac2:#ee6a5a;--line:#f0d9c4;--ok:#1f9d57;--warn:#d98a00;--bad:#d94a3a;
@@ -50,7 +50,7 @@ mark{background:transparent;color:inherit;border-radius:3px;padding:0 2px}
 #chrome{position:absolute;left:0;top:0;right:0;height:44px;z-index:15;background:rgba(255,250,245,.96);border-bottom:1px solid #f0d9c4;display:flex;align-items:center;gap:8px;padding:0 20px}
 #chrome i{width:12px;height:12px;border-radius:50%;background:#ff5f57}#chrome i:nth-child(2){background:#febc2e}#chrome i:nth-child(3){background:#28c840}
 #chrome .cap{position:static;flex:1;max-width:620px;margin:0 auto;height:28px;border:1px solid #f0d9c4;border-radius:14px;background:#fff;display:grid;place-items:center;font-size:12px;letter-spacing:.06em;font-weight:600;color:#6b5f57;transform:translateX(-30px)}
-#chrome .cap:before{content:"🔒 hamzo.app / ";opacity:.7;margin-right:4px}
+#chrome .cap:before{content:"🔒 hamzooh.app / ";opacity:.7;margin-right:4px}
 #chrome .brand{color:#e8832a;font-weight:800;letter-spacing:.14em;font-size:13px}
 #cam{position:absolute;inset:0;transform-origin:0 0;will-change:transform}
 .btn{display:inline-block;background:linear-gradient(90deg,#e8832a,#ee6a5a);color:#fff;font-weight:700;font-size:16px;padding:11px 22px;border-radius:12px;box-shadow:0 10px 24px -10px rgba(238,106,90,.8)}
@@ -66,9 +66,9 @@ mark{background:transparent;color:inherit;border-radius:3px;padding:0 2px}
  <span class="pill">AI RESUME TAILORING ENGINE</span>
  <h2>AI-Powered <em>Resume Tailoring</em></h2>
  <p class="sub">From job description to an ATS-optimized resume, automatically.</p>
- <div id="wrap" role="img" aria-label="Animated product demo: HAMZO analyzes a job description, scores the original resume, tailors it with AI, validates ATS keywords, generates a one-page PDF and shows the before and after match score. Illustrative demo values.">
+ <div id="wrap" role="img" aria-label="Animated product demo: HAMZOOH analyzes a job description, scores the original resume, tailors it with AI, validates ATS keywords, generates a one-page PDF and shows the before and after match score. Illustrative demo values.">
  <div id="stage">
-  <div id="chrome"><i></i><i></i><i></i><div class="cap" id="cap">1 · JOB DESCRIPTION ANALYSIS</div><span class="brand">HAMZO</span></div><div id="cam">
+  <div id="chrome"><i></i><i></i><i></i><div class="cap" id="cap">1 · JOB DESCRIPTION ANALYSIS</div><span class="brand">HAMZOOH</span></div><div id="cam">
 
   <!-- Scene 1 -->
   <div class="sc" id="s1"><div style="display:flex;gap:40px;margin-top:34px">
@@ -84,7 +84,7 @@ mark{background:transparent;color:inherit;border-radius:3px;padding:0 2px}
 <div class="jh">What We Offer</div><ul><li>Competitive compensation</li><li>Flexible working environment</li><li>Professional development opportunities</li><li>Collaborative engineering culture</li></ul>
 <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ddd;margin-top:14px;padding-top:12px"><span><b style="color:#111">Ready to make an impact?</b><br><span style="color:#5f6368;font-size:12px">Click the Apply Now button and submit your application.</span></span><span class="gbtn">Apply Now →</span></div>
 </div></div>
-   <div style="flex:1;padding-top:10px"><span class="btn" id="b1">✦ Apply with HAMZO</span><div class="stat" id="st1" style="margin-top:14px"></div><div id="tags" style="margin-top:14px;min-height:220px"></div>
+   <div style="flex:1;padding-top:10px"><span class="btn" id="b1">✦ Apply with HAMZOOH</span><div class="stat" id="st1" style="margin-top:14px"></div><div id="tags" style="margin-top:14px;min-height:220px"></div>
     <div class="glass" style="padding:16px 20px;margin-top:18px;font-size:15px;color:#6b5f57">Canonical keyword matching + alias dictionary<br><b style="color:#1b1511">k8s → Kubernetes · Postgres → SQL · ReactJS → React</b></div></div>
   </div></div>
 
@@ -234,7 +234,7 @@ $('#replay').onclick=play;
 const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 if(reduced){tl.time(58.8);played=true;cap.textContent='6 · RESULTS · BEFORE VS AFTER'}
 // Playback is driven by the host page: it starts when the section scrolls into view.
-window.HAMZO_DEMO={play,suspend:()=>tl.pause(),resume:()=>{played?tl.resume():play()},replay:play,reduced,ready:true,paused:()=>tl.paused(),progress:()=>tl.progress()};
+window.HAMZOOH_DEMO={play,suspend:()=>tl.pause(),resume:()=>{played?tl.resume():play()},replay:play,reduced,ready:true,paused:()=>tl.paused(),progress:()=>tl.progress()};
 </script>
 </body>
 </html>

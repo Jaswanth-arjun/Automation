@@ -552,7 +552,7 @@ const PILLARS = [
   {
     icon: <Puzzle size={22} />, tint: 'green', name: 'Copilot Extension',
     title: 'One-click apply, anywhere',
-    desc: 'Hamzo Apply fills application forms on Greenhouse, Lever, Ashby, Workday, mynexthire and more — then asks before submitting.',
+    desc: 'Hamzooh Apply fills application forms on Greenhouse, Lever, Ashby, Workday, mynexthire and more — then asks before submitting.',
     points: ['Auto-fill + resume attach', 'Unknown fields? It asks you', 'Answers remembered (vault)'],
     route: '/dashboard/resume', cta: 'Get the extension',
   },
@@ -592,17 +592,17 @@ const REVIEWS = [
 ];
 
 const FAQS = [
-  ['What does HAMZO actually do?', 'It is your AI referral agent, not a job board: LinkedIn connection campaigns, Gmail referral outreach and follow-ups, resume tailoring from any job link, and application tracking. You approve what goes out — nothing sends silently.'],
+  ['What does HAMZOOH actually do?', 'It is your AI referral agent, not a job board: LinkedIn connection campaigns, Gmail referral outreach and follow-ups, resume tailoring from any job link, and application tracking. You approve what goes out — nothing sends silently.'],
   ['How do I connect LinkedIn and Gmail?', 'Dashboard → LinkedIn → Connect (login popup or li_at cookie). Mail page → connect with Google OAuth or an App Password. Disconnect anytime — your control.'],
   ['How does the Chrome extension work?', 'Load it unpacked via chrome://extensions. On any application page it fills the form, attaches your tailored resume, asks you about unknown fields (and remembers answers in the vault), and confirms before submitting.'],
-  ['Will my master resume be overwritten?', 'No. Your master resume stays intact. HAMZO generates job-specific one-page versions so you always know which PDF went where.'],
+  ['Will my master resume be overwritten?', 'No. Your master resume stays intact. HAMZOOH generates job-specific one-page versions so you always know which PDF went where.'],
   ['Is it free?', 'Yes — start free, no credit card. Connect your accounts, tailor resumes, run outreach and track everything from one workspace.'],
 ];
 
 /* ================= live demo player ================= */
 
 const DEMO_STEPS = [
-  { id: 'link', label: 'Drop a job link', caption: 'Paste any job link — HAMZO reads the role, company and requirements in seconds.' },
+  { id: 'link', label: 'Drop a job link', caption: 'Paste any job link — HAMZOOH reads the role, company and requirements in seconds.' },
   { id: 'match', label: 'Match + tailor', caption: 'Skill-match score plus a one-page tailored resume in 3 formats.' },
   { id: 'outreach', label: 'Outreach autopilot', caption: 'Personal referral mails and LinkedIn invites go out — follow-ups scheduled.' },
   { id: 'track', label: 'Track to interview', caption: 'Every reply lands on one timeline until Interview is scheduled.' },
@@ -713,13 +713,13 @@ function DemoPlayer() {
     <div className="hmz-demo" id="demo" ref={wrapRef}>
       <div className="hmz-head center show">
         <span className="hmz-kicker">LIVE DEMO</span>
-        <h2>Watch HAMZO <em>work.</em></h2>
+        <h2>Watch HAMZOOH <em>work.</em></h2>
         <p>A real run, compressed into 18 seconds — from job link to interview.</p>
       </div>
       <TiltCard className="hmz-browser" maxTilt={2}>
         <div className="hmz-bbar">
           <span className="hmz-bdots"><i /><i /><i /></span>
-          <span className="hmz-burl"><Globe size={12} /> hamzo.app/dashboard</span>
+          <span className="hmz-burl"><Globe size={12} /> hamzooh.app/dashboard</span>
           <span className="hmz-blive"><span className="hmz-pulse" />live demo</span>
         </div>
         <div className="hmz-dtabs">
@@ -747,7 +747,7 @@ function DemoPlayer() {
   );
 }
 
-/* ================= HAMZO - HOW IT WORKS INTERACTIVE CARD ================= */
+/* ================= HAMZOOH - HOW IT WORKS INTERACTIVE CARD ================= */
 
 function HowItWorksCard() {
   const [activeStep, setActiveStep] = useState(0);
@@ -790,7 +790,7 @@ function HowItWorksCard() {
     {
       num: 1,
       h: "Paste a job link.",
-      p: "Drop in any posting. HAMZO reads the company, role and the skills the employer is asking for.",
+      p: "Drop in any posting. HAMZOOH reads the company, role and the skills the employer is asking for.",
       panel: (
         <div className="hmz-hw-panel">
           <div className="hmz-hw-ph">New job</div>
@@ -813,7 +813,7 @@ function HowItWorksCard() {
     {
       num: 2,
       h: "Connect Gmail and LinkedIn.",
-      p: "Link them once, add the Chrome extension, and every message HAMZO sends later goes out as you.",
+      p: "Link them once, add the Chrome extension, and every message HAMZOOH sends later goes out as you.",
       panel: (
         <div className="hmz-hw-panel">
           <div className="hmz-hw-ph">Channels</div>
@@ -833,7 +833,7 @@ function HowItWorksCard() {
             <span className="hmz-hw-ico">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 4a2 2 0 1 1 4 0v2h4v4h-2a2 2 0 1 0 0 4h2v4H4v-4h2a2 2 0 1 0 0-4H4V6h6z"/></svg>
             </span>
-            <span className="hmz-hw-rt"><b>HAMZO for Chrome</b><small>Fill forms on any job posting</small></span>
+            <span className="hmz-hw-rt"><b>HAMZOOH for Chrome</b><small>Fill forms on any job posting</small></span>
             <span className="hmz-hw-btn"><span className="b">Added</span></span>
           </div>
           <div className="hmz-hw-toast">Outreach goes out from your own inbox and your own profile.</div>
@@ -873,7 +873,7 @@ function HowItWorksCard() {
     {
       num: 4,
       h: "Apply and reach out.",
-      p: "HAMZO fills the form, attaches your PDF, then messages recruiters and hiring managers for a referral.",
+      p: "HAMZOOH fills the form, attaches your PDF, then messages recruiters and hiring managers for a referral.",
       panel: (
         <div className="hmz-hw-panel">
           <div className="hmz-hw-ph">Google · Software Engineer</div>
@@ -968,7 +968,7 @@ function TopBar({ onGetStarted, authed }) {
     /* Floating Capsule Pill Navbar with dynamic shrink-to-expand effect */
     <div className={`hmz-topwrap ${scrolled ? 'is-scrolled' : ''} ${mounted ? 'is-mounted' : 'is-entering'}`}>
         <div className="hmz-top">
-          <a className="hmz-brand" href="#top"><PawLogo size={28} /><span>HAMZO</span></a>
+          <a className="hmz-brand" href="#top"><PawLogo size={28} /><span>HAMZOOH</span></a>
           <div className="hmz-links">
             <a href="#product">Product</a>
             <a href="#demo">Demo</a>
@@ -1046,7 +1046,7 @@ function EmailOtpModal({ isOpen, onClose, onSuccess }) {
       <div className="hmz-auth-modal">
         <button className="hmz-auth-close" aria-label="Close sign in" onClick={onClose}><X size={18} /></button>
         <div className="hmz-auth-icon"><Mail size={21} /></div>
-        <span className="hmz-kicker">WELCOME TO HAMZO</span>
+        <span className="hmz-kicker">WELCOME TO HAMZOOH</span>
         <h2 id="hmz-auth-title">{step === 'email' ? 'Get your first referral.' : 'Check your inbox.'}</h2>
         <p>{step === 'email' ? 'Enter your email and we’ll send a secure one-time code.' : <>We sent a 6-digit code to <b>{email}</b>.</>}</p>
 
@@ -1120,7 +1120,7 @@ function Hero({ onGetStarted, onOpen }) {
           Get referrals,<br />not <span className="hmz-accent-blue animated-gradient">ghosting.</span>
         </h1>
         <p className="hmz-sub">
-          HAMZO is your autonomous AI referral agent — it finds the right decision-makers inside target companies, tailors your resume for ATS, and delivers real responses. Your entire job hunt on autopilot.
+          HAMZOOH is your autonomous AI referral agent — it finds the right decision-makers inside target companies, tailors your resume for ATS, and delivers real responses. Your entire job hunt on autopilot.
         </p>
         <div className="hmz-actions">
           <MagneticWrap strength={0.4}>
@@ -1347,7 +1347,7 @@ function Compare() {
     <div className="hmz-section" ref={ref}>
       <div className={`hmz-head center ${visible ? 'show' : ''}`}>
         <span className="hmz-kicker">WHY IT WORKS</span>
-        <h2>Manual grind vs <em>HAMZO agent.</em></h2>
+        <h2>Manual grind vs <em>HAMZOOH agent.</em></h2>
       </div>
       <div className={`hmz-compare fx-stagger ${cmpVisible ? 'in-view' : ''}`} ref={cmpRef}>
         <div className="hmz-cmp pain">
@@ -1360,7 +1360,7 @@ function Compare() {
           </ul>
         </div>
         <div className="hmz-cmp gain">
-          <h3>With HAMZO agent</h3>
+          <h3>With HAMZOOH agent</h3>
           <ol>
             <li><b>Send and track referrals</b> effortlessly in one place</li>
             <li><b>Skip the ATS queue</b> — reach hiring managers directly</li>
@@ -1535,7 +1535,7 @@ function Footer() {
           <div className="hmz-fcol-address">
             <span className="hmz-fsub-lbl">MEET FOR A COFFEE HERE</span>
             <p className="hmz-faddress">
-              HAMZO AI Technologies<br />
+              HAMZOOH AI Technologies<br />
               HSR Layout, 27th Main Rd, Sector 1,<br />
               Bengaluru, Karnataka 560102
             </p>
@@ -1582,7 +1582,7 @@ function Footer() {
             <a href="https://linkedin.com" target="_blank" rel="noreferrer" className="hmz-spill">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v8.37H9.25V10.9H6.46M7.86 6.72a1.49 1.49 0 1 0 0 2.98 1.49 1.49 0 0 0 0-2.98z"/></svg> LinkedIn
             </a>
-            <a href="mailto:support@hamzo.ai" className="hmz-spill">
+            <a href="mailto:support@hamzooh.ai" className="hmz-spill">
               <Mail size={15} /> Mail
             </a>
             <a href="https://twitter.com" target="_blank" rel="noreferrer" className="hmz-spill">
@@ -1600,7 +1600,7 @@ function Footer() {
         {/* Card 3: Copyright & Policy Links Bar */}
         <div className="hmz-fcard bottom-card">
           <div className="hmz-copy-text">
-            © HAMZO 2024 - 2026
+            © HAMZOOH 2024 - 2026
           </div>
           <div className="hmz-bottom-links">
             <a href="#user-agreement">User Agreement</a>
@@ -1610,7 +1610,7 @@ function Footer() {
         </div>
 
         {/* Card 4: Massive Watermark Brand Typography at bottom */}
-        <div className="hmz-footer-watermark" aria-hidden="true">HAMZO</div>
+        <div className="hmz-footer-watermark" aria-hidden="true">HAMZOOH</div>
 
       </div>
     </footer>

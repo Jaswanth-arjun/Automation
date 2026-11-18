@@ -4,7 +4,7 @@ import PawLogo from './PawLogo';
 import './AutoApplyWalkthrough.css';
 
 /* ------------------------------------------------------------------ */
-/* Step Definitions (Matching Uplers Flow & HAMZO Features)            */
+/* Step Definitions (Matching Uplers Flow & HAMZOOH Features)            */
 /* ------------------------------------------------------------------ */
 
 const STEPS = [
@@ -14,9 +14,9 @@ const STEPS = [
     title: 'Detects on any job board',
     points: [
       'Works on LinkedIn, Naukri, Greenhouse, Lever, Ashby, Workday & company career sites',
-      'HAMZO Chrome Extension activates automatically with 1 click',
+      'HAMZOOH Chrome Extension activates automatically with 1 click',
     ],
-    url: 'linkedin.com/jobs • HAMZO Apply Copilot',
+    url: 'linkedin.com/jobs • HAMZOOH Apply Copilot',
   },
   {
     n: '2',
@@ -116,11 +116,11 @@ function JobBoardScene({ onOpen }) {
           <i style={{ width: '80%' }} />
         </div>
 
-        {/* Floating HAMZO Copilot Extension Card */}
+        {/* Floating HAMZOOH Copilot Extension Card */}
         <div className="aaw-widget aaw-widget-run">
           <div className="aaw-widget-head">
             <PawLogo size={20} />
-            <strong>HAMZO</strong>
+            <strong>HAMZOOH</strong>
             <span className="aaw-tag">Copilot Active</span>
           </div>
           <button
@@ -128,7 +128,7 @@ function JobBoardScene({ onOpen }) {
             className="aaw-btn aaw-btn-mint"
             onClick={() => onOpen?.('/dashboard/resume')}
           >
-            Run HAMZO on this job <span aria-hidden="true">→</span>
+            Run HAMZOOH on this job <span aria-hidden="true">→</span>
           </button>
           <div className="aaw-widget-quota">
             <div className="aaw-quota-bar">
@@ -159,7 +159,7 @@ function FormScene() {
           <p className="aaw-form-title">Application for Senior Software Engineer</p>
         </div>
         <span className="aaw-note">
-          <PawLogo size={15} /> Filled by HAMZO from your profile
+          <PawLogo size={15} /> Filled by HAMZOOH from your profile
         </span>
       </div>
       <div className="aaw-fields">
@@ -188,7 +188,7 @@ function FormScene() {
             </span>
           </div>
           <div className="aaw-attach-note">
-            ✓ Attached automatically via DataTransfer by Hamzo AI Copilot
+            ✓ Attached automatically via DataTransfer by Hamzooh AI Copilot
           </div>
         </div>
       </div>
@@ -229,7 +229,7 @@ function VaultScene() {
         <div className="aaw-widget-head">
           <span className="aaw-robot-badge">🤖</span>
           <div>
-            <strong>HAMZO needs one detail</strong>
+            <strong>HAMZOOH needs one detail</strong>
             <small className="aaw-vault-sub">Saved to Vault — never asks again</small>
           </div>
           <span className="aaw-tag">1 of 2 fields</span>
@@ -515,7 +515,7 @@ export default function AutoApplyWalkthrough({ onOpen }) {
                 How Auto Apply works on <em>autopilot.</em>
               </h2>
               <p className="aaw-lede">
-                HAMZO detects the job, autofills 15+ fields, attaches your tailored ATS resume, and asks your confirmation before submission.
+                HAMZOOH detects the job, autofills 15+ fields, attaches your tailored ATS resume, and asks your confirmation before submission.
               </p>
             </header>
 

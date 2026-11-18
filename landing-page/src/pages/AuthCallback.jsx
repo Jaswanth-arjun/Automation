@@ -33,10 +33,10 @@ export default function AuthCallback() {
         gmailEmail: '',
       };
       localStorage.setItem('wayin_user', JSON.stringify(googleUser));
-      localStorage.setItem('hamzo_token', 'google_oauth_session');
+      localStorage.setItem('hamzooh_token', 'google_oauth_session');
       localStorage.setItem('mailmind_token', 'google_oauth_session');
-      localStorage.removeItem('hamzo_gmail_connected');
-      localStorage.removeItem('hamzo_gmail_email');
+      localStorage.removeItem('hamzooh_gmail_connected');
+      localStorage.removeItem('hamzooh_gmail_email');
       localStorage.removeItem('mailmind_gmail_connected');
       localStorage.removeItem('mailmind_gmail_email');
 
@@ -71,8 +71,8 @@ export default function AuthCallback() {
         gmailEmail: email,
       };
       localStorage.setItem('wayin_user', JSON.stringify(sessionUser));
-      localStorage.setItem('hamzo_gmail_connected', 'true');
-      localStorage.setItem('hamzo_gmail_email', email);
+      localStorage.setItem('hamzooh_gmail_connected', 'true');
+      localStorage.setItem('hamzooh_gmail_email', email);
       localStorage.setItem('mailmind_gmail_connected', 'true');
       localStorage.setItem('mailmind_gmail_email', email);
 
@@ -88,12 +88,12 @@ export default function AuthCallback() {
         } catch {}
       }
 
-      localStorage.setItem('hamzo_token', 'google_oauth_session');
+      localStorage.setItem('hamzooh_token', 'google_oauth_session');
       if (!localStorage.getItem('mailmind_token')) {
         localStorage.setItem('mailmind_token', 'google_oauth_session');
       }
 
-      handleCallback(localStorage.getItem('hamzo_token') || localStorage.getItem('mailmind_token') || 'google_oauth_session').then(() => {
+      handleCallback(localStorage.getItem('hamzooh_token') || localStorage.getItem('mailmind_token') || 'google_oauth_session').then(() => {
         navigate(`/dashboard/mail?connected=true&email=${encodeURIComponent(email)}`, { replace: true });
       });
       return;
