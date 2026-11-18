@@ -90,20 +90,26 @@ function downloadPdf(base64, filename) {
   link.click();
 }
 
-/** Small stylised preview of a template's layout (pure CSS, no PDF render). */
+/** Template preview: real sample pages for classic/modern, a CSS sketch otherwise. */
+const TEMPLATE_IMAGES = {
+  classic: { src: '/templates/classic-resume.png', alt: 'Classic resume template preview' },
+  modern: { src: '/templates/modern-resume.jpg', alt: 'Modern resume template preview' },
+};
+
 function TemplatePreview({ variant }) {
-  if (variant === 'classic') {
+  const image = TEMPLATE_IMAGES[variant];
+  if (image) {
     return (
       <div style={{ aspectRatio: '1 / 1.25', background: '#fff', border: '1px solid #d9d9d2', borderRadius: 8, overflow: 'hidden' }}>
         <img
-          src="/templates/classic-resume.png"
-          alt="Classic resume template preview"
+          src={image.src}
+          alt={image.alt}
           style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top center', background: '#fff' }}
         />
       </div>
     );
   }
-  const headingColor = variant === 'modern' ? '#445cf5' : '#171817';
+  const headingColor = '#171817';
   const compact = variant === 'compact';
   const line = (width, opacity = 1, height = 4) => (
     <div style={{ height, borderRadius: 2, background: '#d9d7d0', width, opacity, marginBottom: 5 }} />
@@ -131,89 +137,6 @@ function TemplatePreview({ variant }) {
       {section('28%')}
       {line('78%', 0.85)}{line('58%', 0.85)}
     </div>
-  );
-}
-
-/**
- * Readiness panel: what a recruiter/ATS looks for in the master resume, plus
- * the actions that are actually useful from this section.
- */
-function ResumeHealth({ resume, versions, templateName, onTailor, onReplace, onDownload }) {
-  const profile = profileStore.get() || {};
-  const text = String(resume?.text || '');
-  const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
-
-  const checks = [
-    { label: 'Contact details', hint: 'Name, email and phone',
-      ok: Boolean(profile.fullName && profile.email && profile.phone) },
-    { label: 'Skills listed', hint: 'At least 5 skills',
-      ok: (profile.skills?.length || 0) >= 5 },
-    { label: 'Experience or projects', hint: 'One role or project described',
-      ok: Boolean((profile.experience?.length || 0) + (profile.projects?.length || 0)) },
-    { label: 'Education', hint: 'Degree and institute',
-      ok: Boolean(profile.education?.length) },
-    { label: 'Profile links', hint: 'LinkedIn or GitHub',
-      ok: Boolean(profile.links?.linkedin || profile.links?.github) },
-    { label: 'Readable resume text', hint: 'Text-based PDF (250+ words)',
-      ok: words >= 250 },
-  ];
-
-  const done = checks.filter((item) => item.ok).length;
-  const score = Math.round((done / checks.length) * 100);
-  const tailoredCount = versions.filter((item) => item.jobUrl).length;
-  const tone = score >= 83 ? 'is-good' : score >= 50 ? 'is-mid' : 'is-low';
-
-  return (
-    <section className="resume-health">
-      <div className={`resume-health-score ${tone}`}>
-        <span className="resume-health-label">Resume readiness</span>
-        <strong>{score}%</strong>
-        <div className="resume-health-bar"><span style={{ width: `${score}%` }} /></div>
-        <small>{done} of {checks.length} checks passed</small>
-      </div>
-
-      <div className="resume-health-main">
-        <div className="resume-health-list">
-          {checks.map((item) => (
-            <div key={item.label} className={`resume-check ${item.ok ? 'is-ok' : ''}`}>
-              {item.ok ? <CheckCircle size={14} /> : <X size={14} />}
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.hint}</small>
-              </span>
-            </div>
-          ))}
-        </div>
-
-        <div className="resume-health-side">
-          <div className="resume-health-stat">
-            <span>Template</span>
-            <strong>{templateName}</strong>
-          </div>
-          <div className="resume-health-stat">
-            <span>Tailored versions</span>
-            <strong>{tailoredCount}</strong>
-          </div>
-          <div className="resume-health-stat">
-            <span>Resume words</span>
-            <strong>{words || '—'}</strong>
-          </div>
-          <div className="resume-health-actions">
-            <button type="button" className="btn-accent sm" onClick={onTailor}>
-              <Plus size={14} /> Tailor for a job
-            </button>
-            <button type="button" className="btn-ghost sm" onClick={onReplace}>
-              <Upload size={14} /> {resume ? 'Replace' : 'Upload'}
-            </button>
-            {resume && onDownload && (
-              <button type="button" className="btn-ghost sm" onClick={onDownload}>
-                Download master
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -647,17 +570,6 @@ export default function ResumeManager() {
           </div>
         )}
       </section>
-
-      <ResumeHealth
-        resume={profileResume}
-        versions={resumes}
-        templateName={RESUME_TEMPLATES.find((t) => t.id === selectedTemplate)?.name || 'Recommended'}
-        onTailor={() => { setError(''); setLinkOpen(true); }}
-        onReplace={() => fileRef.current?.click()}
-        onDownload={profileResume?.dataUrl?.includes('base64')
-          ? () => downloadPdf(profileResume.dataUrl.split(',')[1], profileResume.fileName || 'resume.pdf')
-          : null}
-      />
 
       {status && <p style={{ marginTop: 16, color: '#047857', fontWeight: 700 }}>{status}</p>}
       {error && <p style={{ marginTop: 16, color: '#b91c1c', fontWeight: 700 }}>{error}</p>}
