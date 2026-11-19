@@ -427,7 +427,7 @@
 
   function collectInputs() {
     // If a modal dialog is open (like LinkedIn Easy Apply modal), prioritize inputs INSIDE the modal!
-    const modal = queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
+    const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
     const root = modal || document;
     return queryAllDeep('input, textarea, select', root).filter((input) => {
       // Ignore header/nav/global search inputs and messaging inputs
@@ -1040,7 +1040,44 @@
     '.mdc-button',
   ].join(', ');
 
+  function findLinkedInModal() {
+    const candidates = queryAllDeep('.jobs-easy-apply-modal, [data-test-modal-id="easy-apply-modal"], .artdeco-modal[role="dialog"], [role="dialog"], .artdeco-modal');
+    return candidates.find((el) => {
+      const r = el.getBoundingClientRect?.() || { width: 0, height: 0 };
+      if (r.width < 100 || r.height < 100) return false;
+      const cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+      const text = (el.innerText || '').toLowerCase();
+      return text.includes('apply to') || text.includes('easy apply') || el.classList.contains('jobs-easy-apply-modal') || el.getAttribute('data-test-modal-id') === 'easy-apply-modal';
+    }) || null;
+  }
+
+  async function waitForLinkedInModalReady() {
+    const start = Date.now();
+    while (Date.now() - start < 25000) {
+      const modal = findLinkedInModal();
+      if (modal) {
+        // Check if there is an active loading spinner inside the modal
+        const spinner = modal.querySelector('.artdeco-loader, .artdeco-spinner, [data-automation-id="loading-spinner"], svg.artdeco-loader__bars, .loader');
+        const inputs = queryAllDeep('input, select, textarea', modal).filter((el) => {
+          const type = (el.getAttribute('type') || '').toLowerCase();
+          return !['hidden', 'submit', 'button'].includes(type) && visible(el);
+        });
+        const hasButtons = Boolean(queryAllDeep(ACTION_SELECTOR, modal).find((b) => isAdvanceButton(b) || isSubmitButton(b)));
+
+        if (!spinner && (inputs.length > 0 || hasButtons)) {
+          return modal;
+        }
+      }
+      await sleep(500);
+    }
+    return findLinkedInModal();
+  }
+
   function findLinkedInEasyApplyButton() {
+    // If the modal is already open, NEVER return the apply button!
+    if (findLinkedInModal()) return null;
+
     // 1. Direct LinkedIn apply button classes and data attributes
     const directCandidates = queryAllDeep('.jobs-apply-button, button.jobs-apply-button, [data-control-name*="apply"], [data-job-id]').filter((el) => {
       if (!visible(el) || el.disabled) return false;
@@ -1675,24 +1712,36 @@
     }
 
     const isLinkedIn = /linkedin\.com/i.test(location.hostname);
-    const linkedInModalOpen = isLinkedIn && Boolean(queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m)));
+    const linkedInModal = isLinkedIn ? findLinkedInModal() : null;
 
+    // Check if we need to click the initial Apply / Easy Apply button.
+    // RULE: If pending.applyClicked is true, NEVER click Easy Apply again!
+    // Also, if the modal is already open, NEVER click Easy Apply!
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
-    const applyBtns = (!pending.applyClicked && earlyInputs.length < 2) || (isLinkedIn && !linkedInModalOpen)
+    const applyBtns = (!pending.applyClicked && !linkedInModal && earlyInputs.length < 2)
       ? findDescriptionApplyButtons()
       : [];
+
     if (applyBtns.length) {
       sendProgress('apply_opening', isLinkedIn ? '💼 LinkedIn Easy Apply detected — clicking Easy Apply…' : '📄 Job page detected — clicking Apply…');
       const beforeUrl = location.href;
       await realClick(applyBtns[0]);
+      await updatePending({ url: location.href, applyClicked: true });
+
+      if (isLinkedIn) {
+        sendProgress('modal_loading', '⏳ Waiting for LinkedIn Easy Apply form to load…');
+        const modal = await waitForLinkedInModalReady();
+        if (modal) {
+          sendProgress('form_found', '📄 LinkedIn application form loaded — filling now…');
+          await sleep(800);
+          return fillPage(profile, answers, { ...pending, url: location.href, applyClicked: true }, depth + 1);
+        }
+      }
+
       const start = Date.now();
       let changed = false;
       while (Date.now() - start < 15000) {
         await sleep(500);
-        if (isLinkedIn && Boolean(queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find(visible))) {
-          changed = true;
-          break;
-        }
         if (await checkAndHandleApplyChoices()) { changed = true; break; }
         if (location.href !== beforeUrl || pageHasForm()) { changed = true; break; }
       }
@@ -1707,9 +1756,18 @@
         return;
       }
       await runtimeSend({ type: 'HAMZOOH_ADOPT_TAB' });
-      await updatePending({ url: location.href, applyClicked: true });
       await sleep(1500);
       return fillPage(profile, answers, { ...pending, url: location.href, applyClicked: true }, depth + 1);
+    }
+
+    // If on LinkedIn and modal is open, wait for the form/spinner to be ready before filling!
+    if (isLinkedIn && linkedInModal) {
+      const spinner = linkedInModal.querySelector('.artdeco-loader, .artdeco-spinner, [data-automation-id="loading-spinner"], svg.artdeco-loader__bars, .loader');
+      if (spinner) {
+        sendProgress('modal_loading', '⏳ Waiting for LinkedIn form questions to load…');
+        await waitForLinkedInModalReady();
+        await sleep(600);
+      }
     }
 
     if (!pageHasForm() && detectLoginWall()) {
@@ -1735,8 +1793,11 @@
       let progressed = false;
       while (Date.now() - startedAt < 25000) {
         await sleep(400);
+        const modal = findLinkedInModal();
+        const spinner = modal?.querySelector('.artdeco-loader, .artdeco-spinner, [data-automation-id="loading-spinner"], svg.artdeco-loader__bars, .loader');
+        if (spinner) continue;
         const newSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-        if (location.href !== beforeUrl || newSnapshot !== snapshot) {
+        if (location.href !== beforeUrl || newSnapshot !== snapshot || findSubmitButton()) {
           progressed = true;
           break;
         }
@@ -1744,6 +1805,7 @@
           || document.querySelector('[data-automation-id="loading-spinner"], [aria-busy="true"]')) continue;
       }
       if (progressed) {
+        await sleep(600);
         await updatePending({ url: location.href, applyClicked: true });
         return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
       }
@@ -1860,8 +1922,13 @@
     let lastHref = location.href;
     setInterval(() => {
       if (location.href !== lastHref) {
+        const prevPath = lastHref.split('?')[0];
+        const newPath = location.href.split('?')[0];
         lastHref = location.href;
-        bootApply();
+        // Don't restart bootApply if only tracking query params changed on the same job URL
+        if (prevPath !== newPath) {
+          bootApply();
+        }
       }
     }, 1500);
     setInterval(() => {
