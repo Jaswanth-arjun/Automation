@@ -1,9 +1,18 @@
 (function () {
-  if (window.__HAMZOOH_BRIDGE_LOADED__) {
+  function extensionAlive() {
+    try { return Boolean(chrome.runtime && chrome.runtime.id); } catch { return false; }
+  }
+
+  function reply(type, extra) {
+    window.postMessage({ source: 'hamzooh-extension', type, ...extra }, '*');
+  }
+
+  if (window.__HAMZOOH_BRIDGE_LOADED__ && window.__HAMZOOH_BRIDGE_ALIVE__ && window.__HAMZOOH_BRIDGE_ALIVE__()) {
     try { reply('HAMZOOH_PONG'); } catch {}
     return;
   }
   window.__HAMZOOH_BRIDGE_LOADED__ = true;
+  window.__HAMZOOH_BRIDGE_ALIVE__ = extensionAlive;
 
   try {
     if (document.documentElement) {
@@ -13,17 +22,9 @@
 
   /**
    * Hamzooh Apply — Bridge Content Script
-   * Runs on the Hamzooh dashboard (localhost:5173) to relay messages
+   * Runs on the Hamzooh dashboard (localhost:5173 / 5174) to relay messages
    * between the web app (window.postMessage) and the extension (chrome.runtime).
    */
-
-  function extensionAlive() {
-    try { return Boolean(chrome.runtime && chrome.runtime.id); } catch { return false; }
-  }
-
-  function reply(type, extra) {
-    window.postMessage({ source: 'hamzooh-extension', type, ...extra }, '*');
-  }
 
   // Broadcast immediate PONG on load
   reply('HAMZOOH_PONG');
@@ -74,7 +75,7 @@
     }
 
     if (!extensionAlive()) {
-      if (data.type === 'HAMZOOH_START_APPLY') reply('HAMZOOH_APPLY_READY', { requestId: data.requestId || '', ok: false, error: 'Reload Hamzooh Apply, then refresh this Resume page.' });
+      if (data.type === 'HAMZOOH_START_APPLY') reply('HAMZOOH_APPLY_READY', { requestId: data.requestId || '', ok: false, error: 'Extension was reloaded. Please refresh (F5) this page and click Auto Apply with AI again.' });
       return;
     }
 
