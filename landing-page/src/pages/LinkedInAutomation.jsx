@@ -215,6 +215,8 @@ export default function LinkedInAutomation() {
   const [roles, setRoles] = useState(DEFAULT_ROLES);
   const [newRole, setNewRole] = useState('');
   const [perRole, setPerRole] = useState(10);
+  // Stage 1 target: one company-wide referral-message count, independent of perRole.
+  const [referralTarget, setReferralTarget] = useState(5);
   const [useAI, setUseAI] = useState(true);
   const [note, setNote] = useState('');
   const [starting, setStarting] = useState(false);
@@ -310,6 +312,7 @@ export default function LinkedInAutomation() {
     if (prefs.role) setJobRole(prefs.role);
     if (Array.isArray(prefs.roles) && prefs.roles.length) setRoles(prefs.roles);
     if (typeof prefs.perRole === 'number' && prefs.perRole > 0) setPerRole(prefs.perRole);
+    if (typeof prefs.referralTarget === 'number' && prefs.referralTarget > 0) setReferralTarget(prefs.referralTarget);
     if (typeof prefs.useAI === 'boolean') setUseAI(prefs.useAI);
     if (typeof prefs.note === 'string') setNote(prefs.note);
   }, []);
@@ -322,6 +325,7 @@ export default function LinkedInAutomation() {
     if (campaign.role) setJobRole(campaign.role);
     if (Array.isArray(config.roles) && config.roles.length) setRoles(config.roles);
     if (typeof config.perRole === 'number' && config.perRole > 0) setPerRole(config.perRole);
+    if (typeof config.referralTarget === 'number' && config.referralTarget > 0) setReferralTarget(config.referralTarget);
     if (typeof config.useAINotes === 'boolean') setUseAI(config.useAINotes);
     if (typeof config.connectionNote === 'string') setNote(config.connectionNote);
   }, [campaign?.id]);
@@ -745,6 +749,7 @@ export default function LinkedInAutomation() {
         role: jobRole.trim(),
         roles,
         perRole,
+        referralTarget,
         useAI,
         note,
       });
@@ -754,6 +759,7 @@ export default function LinkedInAutomation() {
         role: jobRole.trim(),
         roles,
         perRole,
+        referralTarget,
         sendInvites: true,
         useAINotes: useAI,
         connectionNote: note.trim(),
@@ -1472,9 +1478,28 @@ export default function LinkedInAutomation() {
                     )}
                   </div>
 
+                  <div className="liq-field">
+                    <label className="liq-label" htmlFor="liq-referral-target">
+                      Messages to Network (at Company) <em>direct referral DMs to existing 1st-degree connections</em>
+                    </label>
+                    <input
+                      id="liq-referral-target"
+                      className="liq-input"
+                      type="number"
+                      min="1"
+                      max="40"
+                      value={referralTarget}
+                      onChange={(event) => {
+                        const next = Number(event.target.value) || 1;
+                        setReferralTarget(Math.max(1, Math.min(40, next)));
+                      }}
+                      disabled={campaignActive}
+                    />
+                  </div>
+
                   <div className="liq-row2">
                     <div className="liq-field">
-                      <label className="liq-label" htmlFor="liq-per-role">Invites per role</label>
+                      <label className="liq-label" htmlFor="liq-per-role">New Connection Requests per Role <em>sent to new contacts matching roles</em></label>
                       <input
                         id="liq-per-role"
                         className="liq-input"
@@ -1523,8 +1548,9 @@ export default function LinkedInAutomation() {
                   </div>
 
                   <div className="liq-estimate">
-                    <span><b>6 stages</b> in priority order · replied → seen → unseen → never messaged → pending (skipped) → invite</span>
-                    <span><Hourglass size={12} /> {formatEstimate(estimateSeconds)} for {batchTotal} invites, messages take longer</span>
+                    <span><b>Network Messages</b> · up to {referralTarget} referral DMs to existing 1st-degree connections</span>
+                    <span><b>New Connection Requests</b> · up to {perRole} invites per role filter ({batchTotal} total)</span>
+                    <span><Hourglass size={12} /> {formatEstimate(estimateSeconds)}, referral messages take longer</span>
                   </div>
 
                   <div className="liq-actions">

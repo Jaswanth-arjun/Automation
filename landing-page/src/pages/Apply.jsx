@@ -16,6 +16,7 @@ import { useAuth } from '../lib/auth';
 import CampaignStatus from '../components/CampaignStatus';
 import { ResumeRichEditor } from '../components/JobAnalyzerModal';
 import { keywordAudit, scoreValue, scoreLabel, mapProfileForBackend, extractProfilePdf } from '../components/JobAnalyzerModal.helpers';
+import MatchScore from '../components/MatchScore';
 
 const Linkedin = ({ size = 16, style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -39,6 +40,62 @@ function downloadPdf(base64, filename) {
   link.href = pdfObjectUrl(base64);
   link.download = filename?.toLowerCase().endsWith('.pdf') ? filename : `${filename || 'resume'}.pdf`;
   link.click();
+}
+
+/**
+ * Deterministic quality check of a tailored resume. These are the things a
+ * recruiter and an ATS parser both look for, so the candidate sees what to fix
+ * before the PDF is sent out. No AI call, no invented facts.
+ */
+function buildResumeChecks({ text, pageCount, matchedCount, totalKeywords }) {
+  const body = String(text || '');
+  const has = (pattern) => pattern.test(body);
+  const wordCount = body.trim().split(/\s+/).filter(Boolean).length;
+
+  return [
+    {
+      id: 'contact',
+      label: 'Contact block is complete',
+      ok: has(/[\w.+-]+@[\w-]+\.[\w.]+/) && has(/(\+?\d[\d\s().-]{8,}\d)/),
+      hint: 'Add an email and a phone number at the top — ATS parsers drop resumes without them.',
+    },
+    {
+      id: 'links',
+      label: 'Profile links included',
+      ok: has(/linkedin\.com|github\.com/i),
+      hint: 'Add your LinkedIn or GitHub URL; recruiters open it before they read further.',
+    },
+    {
+      id: 'one-page',
+      label: 'Fits on one page',
+      ok: pageCount ? pageCount <= 1 : wordCount <= 650,
+      hint: 'Trim the oldest bullets so the page stays single-sheet and every keyword stays visible.',
+    },
+    {
+      id: 'metrics',
+      label: 'Impact is measurable',
+      ok: has(/\d+\s*%|\b\d{2,}\b/),
+      hint: 'Turn one bullet into a number — users served, % faster, records handled.',
+    },
+    {
+      id: 'verbs',
+      label: 'Bullets lead with action verbs',
+      ok: has(/\b(built|develop|design|implement|automate|optimi|led|launch|improv|migrat|deploy|reduc|creat|engineer)/i),
+      hint: 'Replace “Responsible for …” with Built / Automated / Reduced.',
+    },
+    {
+      id: 'sections',
+      label: 'Core sections present',
+      ok: has(/skills/i) && has(/education/i) && has(/project|experience/i),
+      hint: 'Keep Skills, Projects or Experience, and Education — ATS reads headings to build its index.',
+    },
+    {
+      id: 'keywords',
+      label: totalKeywords ? `Job keywords covered (${matchedCount}/${totalKeywords})` : 'Job keywords covered',
+      ok: totalKeywords ? matchedCount / totalKeywords >= 0.9 : true,
+      hint: 'Add the remaining keywords from the list where they are honest for you.',
+    },
+  ];
 }
 
 export default function Apply() {
@@ -188,6 +245,8 @@ export default function Apply() {
   const [liRoles, setLiRoles] = useState(DEFAULT_ROLES);
   const [liNewRole, setLiNewRole] = useState('');
   const [liPerRole, setLiPerRole] = useState(10);
+  // Stage 1 target: one company-wide referral-message count, independent of liPerRole.
+  const [liReferralTarget, setLiReferralTarget] = useState(5);
   const [liUseAI, setLiUseAI] = useState(true);
   const [liNote, setLiNote] = useState('');
   const [liStarting, setLiStarting] = useState(false);
@@ -283,6 +342,7 @@ export default function Apply() {
     if (!prefs) return;
     if (Array.isArray(prefs.roles) && prefs.roles.length) setLiRoles(prefs.roles);
     if (typeof prefs.perRole === 'number' && prefs.perRole > 0) setLiPerRole(prefs.perRole);
+    if (typeof prefs.referralTarget === 'number' && prefs.referralTarget > 0) setLiReferralTarget(prefs.referralTarget);
     if (typeof prefs.useAI === 'boolean') setLiUseAI(prefs.useAI);
     if (typeof prefs.note === 'string') setLiNote(prefs.note);
   }, []);
@@ -294,6 +354,7 @@ export default function Apply() {
     const config = liCampaign.config || {};
     if (Array.isArray(config.roles) && config.roles.length) setLiRoles(config.roles);
     if (typeof config.perRole === 'number' && config.perRole > 0) setLiPerRole(config.perRole);
+    if (typeof config.referralTarget === 'number' && config.referralTarget > 0) setLiReferralTarget(config.referralTarget);
     if (typeof config.useAINotes === 'boolean') setLiUseAI(config.useAINotes);
     if (typeof config.connectionNote === 'string') setLiNote(config.connectionNote);
   }, [liCampaign?.id]);
@@ -321,6 +382,7 @@ export default function Apply() {
         role: liJobRole.trim(),
         roles: liRoles,
         perRole: liPerRole,
+        referralTarget: liReferralTarget,
         useAI: liUseAI,
         note: liNote,
       });
@@ -333,6 +395,7 @@ export default function Apply() {
         role,
         roles: liRoles,
         perRole: liPerRole,
+        referralTarget: liReferralTarget,
         sendInvites: true,
         useAINotes: liUseAI,
         connectionNote: liNote.trim(),
@@ -1081,6 +1144,14 @@ ${firstName}`;
   const reportPartial = keywordRows.filter(r => r.status === 'Partial');
   const reportMissing = keywordRows.filter(r => r.status === 'Missing');
   const reportRemoved = keywordRows.filter(r => r.status === 'Removed');
+  const tailoredText = chosenFormat?.editedPlainText || chosenFormat?.plainText || tailorResult?.plainText || '';
+  const resumeChecks = buildResumeChecks({
+    text: tailoredText,
+    pageCount: chosenFormat?.pageCount ?? null,
+    matchedCount,
+    totalKeywords,
+  });
+  const failedChecks = resumeChecks.filter((check) => !check.ok);
 
   const jobProgress = applyProgressStore.get(jobId || job?.id);
   const resumeReady = Boolean(tailorResult || jobResume);
@@ -1152,7 +1223,7 @@ ${firstName}`;
 
         {/* Match Score Chip */}
         <div style={{ background: 'rgba(255,255,255,0.08)', padding: '12px 18px', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.12)', textAlign: 'right' }}>
-          <div style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', fontWeight: '700' }}>Skills Match</div>
+          <div style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', fontWeight: '700' }}>Job Match</div>
           {hasMatchScore ? (
             <div style={{ fontSize: '20px', fontWeight: '800', color: matchResult.score >= 70 ? '#22a65b' : matchResult.score >= 40 ? '#d4920a' : '#ef4444' }}>
               {matchResult.score}% Match
@@ -1996,9 +2067,29 @@ ${firstName}`;
                 {/* Connections / Role + AI Notes */}
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: '160px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
-                      Connections / Role
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '4px' }}>
+                      Messages to Network
                     </label>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px', lineHeight: '1.2' }}>
+                      Existing connections at {job?.company || 'company'}
+                    </div>
+                    <input
+                      type="number" min="1" max="40" value={liReferralTarget}
+                      onChange={(e) => setLiReferralTarget(Math.max(1, Math.min(40, Number(e.target.value) || 1)))}
+                      disabled={liIsRunning}
+                      style={{
+                        width: '100%', padding: '12px 16px', border: '1px solid #e2e8f0',
+                        borderRadius: '10px', fontSize: '14px', outline: 'none', fontFamily: 'inherit'
+                      }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: '160px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '4px' }}>
+                      New Connection Requests / Role
+                    </label>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px', lineHeight: '1.2' }}>
+                      Invites sent per role filter
+                    </div>
                     <input
                       type="number" min="1" max="40" value={liPerRole}
                       onChange={(e) => setLiPerRole(Number(e.target.value) || 10)}
@@ -2010,9 +2101,12 @@ ${firstName}`;
                     />
                   </div>
                   <div style={{ flex: 1, minWidth: '160px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '4px' }}>
                       AI Personalized Notes
                     </label>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px', lineHeight: '1.2' }}>
+                      Custom note per recipient
+                    </div>
                     <button
                       onClick={() => setLiUseAI(!liUseAI)}
                       disabled={liIsRunning}
@@ -2159,7 +2253,7 @@ ${firstName}`;
         </div>
       )}
 
-      {/* STAGE 1: Tailor Resume + ATS report */}
+      {/* STAGE 1: Tailor Resume + resume report */}
       {activeTab === 'tailor' && (
         <div style={{ background: '#ffffff', border: '1px solid #e5e5e0', borderRadius: '16px', padding: '28px', boxShadow: '0 4px 16px rgba(0,0,0,0.03)' }}>
           <div style={{ marginBottom: '22px' }}>
@@ -2182,8 +2276,8 @@ ${firstName}`;
             </h3>
             <p style={{ fontSize: '13px', color: '#555852', maxWidth: '560px', margin: '0 auto 14px' }}>
               {tailorResult
-                ? `Your resume is aligned with ${job.company}'s target keywords. Review the ATS report below, then continue to the referral email.`
-                : 'Click below to re-align your resume highlights with the job description and raise your ATS score.'}
+                ? `Your resume is aligned with ${job.company}'s target keywords. Review the resume report below, then continue to the referral email.`
+                : 'Click below to re-align your resume highlights with the job description and cover more of its keywords.'}
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -2232,10 +2326,11 @@ ${firstName}`;
 
           {tailorResult && (
             <>
-              {/* ATS before/after */}
+              {/* One score: the job match (profile + resume + JD). Keyword
+                  coverage is a resume metric and is shown as counts only. */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '4px' }}>
                 <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#171817', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Target size={17} style={{ color: '#445cf5' }} /> ATS Report
+                  <Target size={17} style={{ color: '#445cf5' }} /> Resume Report
                 </h3>
                 <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
                   {matchedCount}/{totalKeywords ?? '—'} job keywords covered after tailoring
@@ -2244,27 +2339,26 @@ ${firstName}`;
 
               <div className="ats-comparison-card">
                 <div className="ats-comparison-side">
-                  <div className="ats-score-ring before">
-                    <svg width="74" height="74" viewBox="0 0 36 36">
-                      <path stroke="#dbe3ee" strokeWidth="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                      <path stroke="#64748b" strokeWidth="3.5" strokeDasharray={`${beforeScore ?? 0}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                    </svg>
-                    <strong>{beforeScore === null ? 'N/A' : `${beforeScore}%`}</strong>
-                  </div>
+                  <MatchScore
+                    score={matchResult?.score ?? null}
+                    status={matchResult?.status || 'incomplete'}
+                    size="small"
+                    missingLabels={matchResult?.missingProfileLabels || []}
+                  />
                   <div>
-                    <strong>Before</strong>
-                    <span>ATS score</span>
+                    <strong>Job match</strong>
+                    <span>Profile + resume + job description</span>
                   </div>
                 </div>
                 <div className="ats-comparison-message">
-                  {scoreDelta !== null && scoreDelta > 0 && <span className="ats-delta-badge">+{scoreDelta}%</span>}
-                  <span aria-hidden="true">→</span>
+                  {scoreDelta !== null && scoreDelta > 0 && <span className="ats-delta-badge">+{scoreDelta}</span>}
                   <p>{scoreLabel(beforeScore, afterScore)}</p>
+                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>Resume keyword coverage</span>
                 </div>
                 <div className="ats-comparison-side improved">
                   <div>
-                    <strong>After</strong>
-                    <span>ATS score</span>
+                    <strong>Keyword coverage</strong>
+                    <span>{matchedCount}/{totalKeywords ?? '—'} job keywords in the resume</span>
                   </div>
                   <div className="ats-score-ring after">
                     <svg width="74" height="74" viewBox="0 0 36 36">
@@ -2336,57 +2430,77 @@ ${firstName}`;
                   )}
                 </div>
 
-                {/* Right: application readiness. Preview/Edit/Download already sit
-                    above, and the template is chosen in the Resume section. */}
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', background: '#fff', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Right: what the tailored PDF still needs, plus the layout
+                    that Preview / Edit / Download use. */}
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: '14px', padding: '18px', background: '#fff', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div>
-                    <h4 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>Ready to apply</h4>
-                    <p style={{ margin: 0, fontSize: '11.5px', color: '#64748b' }}>
-                      Your tailored resume is attached automatically in the next steps.
+                    <h4 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>Resume check</h4>
+                    <p style={{ margin: 0, fontSize: '11.5px', color: '#64748b', lineHeight: 1.45 }}>
+                      What the tailored version still needs before it goes out. Fix the amber items with Edit.
                     </p>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: '700', color: '#166534' }}>
-                      <CheckCircle2 size={14} /> Resume tailored for {job.title} at {job.company}
-                    </div>
-                    {afterScore !== null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: '700', color: '#334155' }}>
-                        <Target size={14} style={{ color: '#445cf5' }} />
-                        ATS score {beforeScore === null ? '—' : `${beforeScore}%`} → {afterScore}%
-                        {scoreDelta !== null && scoreDelta > 0 && (
-                          <span style={{ fontSize: '10.5px', fontWeight: '800', background: '#dcfce7', color: '#166534', padding: '1px 7px', borderRadius: '10px' }}>+{scoreDelta}%</span>
-                        )}
+                  {tailorResult?.formats?.length > 1 && (
+                    <div>
+                      <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: '6px' }}>
+                        Layout
                       </div>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', fontWeight: '700', color: '#334155' }}>
-                      <CheckCircle2 size={14} style={{ color: '#059669' }} />
-                      {matchedCount}/{totalKeywords ?? '—'} job keywords covered
-                    </div>
-                    {reportMissing.length > 0 && (
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', fontSize: '11.5px', color: '#b45309', fontWeight: '600', lineHeight: 1.45 }}>
-                        <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                        <span>Still missing: {reportMissing.slice(0, 5).map(r => r.keyword).join(', ')}{reportMissing.length > 5 ? ` +${reportMissing.length - 5}` : ''}</span>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {tailorResult.formats.map((format) => {
+                          const isActive = format.id === (chosenFormat?.id || 'recommended');
+                          return (
+                            <button
+                              key={format.id}
+                              type="button"
+                              onClick={() => setFormatId(format.id)}
+                              title={`Preview, edit and download the ${format.name} layout`}
+                              style={{
+                                padding: '6px 11px',
+                                borderRadius: '8px',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                border: isActive ? '1px solid #445cf5' : '1px solid #e2e8f0',
+                                background: isActive ? '#eef2ff' : '#fff',
+                                color: isActive ? '#3730a3' : '#475569',
+                              }}
+                            >
+                              {format.name}
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
+                      <p style={{ margin: '6px 0 0', fontSize: '10.5px', color: '#94a3b8' }}>
+                        Preview, edit and download use the selected layout.
+                      </p>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+                    {resumeChecks.map((check) => (
+                      <div key={check.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
+                        {check.ok
+                          ? <CheckCircle2 size={14} style={{ color: '#059669', flexShrink: 0, marginTop: 1 }} />
+                          : <AlertCircle size={14} style={{ color: '#b45309', flexShrink: 0, marginTop: 1 }} />}
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: check.ok ? '#334155' : '#92400e' }}>
+                            {check.label}
+                          </div>
+                          {!check.ok && check.hint && (
+                            <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.45, marginTop: '1px' }}>
+                              {check.hint}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
-                  <div style={{ padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginBottom: '6px' }}>Next steps</div>
-                    <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '11.5px', color: '#475569', lineHeight: 1.65 }}>
-                      <li>Send a referral email to an employee</li>
-                      <li>Connect on LinkedIn with a short note</li>
-                      <li>Direct apply with the attached resume</li>
-                    </ol>
+                  <div style={{ marginTop: 'auto', paddingTop: '10px', borderTop: '1px dashed #e2e8f0', fontSize: '11px', color: failedChecks.length ? '#92400e' : '#047857', fontWeight: '700', lineHeight: 1.5 }}>
+                    {failedChecks.length
+                      ? `${failedChecks.length} item${failedChecks.length === 1 ? '' : 's'} to fix — edit the resume, then download the PDF again.`
+                      : 'Everything checks out — this PDF is ready to attach.'}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('referral')}
-                    style={{ marginTop: 'auto', background: '#445cf5', color: '#fff', border: 'none', borderRadius: '10px', padding: '10px 14px', fontSize: '12.5px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', cursor: 'pointer' }}
-                  >
-                    Continue to Referral Email <ArrowRight size={15} />
-                  </button>
                 </div>
               </div>
             </>
@@ -2455,8 +2569,8 @@ ${firstName}`;
                 </strong>
                 <span style={{ fontSize: '11.5px', color: '#64748b' }}>
                   {resumeReady
-                    ? `This resume will be attached to your application${tailorResult && afterScore !== null ? ` · ATS ${afterScore}%` : ''}`
-                    : 'Tailor your resume first for the best ATS match, or apply with your active resume.'}
+                    ? `This resume will be attached to your application${tailorResult && afterScore !== null ? ` · ${afterScore}% keyword coverage` : ''}`
+                    : 'Tailor your resume first to cover more of this job’s keywords, or apply with your active resume.'}
                 </span>
               </div>
             </div>

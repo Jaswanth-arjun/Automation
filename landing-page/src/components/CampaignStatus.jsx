@@ -26,15 +26,52 @@ const STATUS_META = {
   failed: { label: 'Failed', tone: 'danger' },
 };
 
+// The campaign has exactly two stages. A person row still carries a legacy
+// `stage` value (its conversation context), but that is never shown as a stage
+// number: every row belongs to Stage 1 or Stage 2.
 const STAGE_LABELS = {
-  discovery: 'Discovering connections',
-  replied: 'Stage 1 · Replied before',
-  seen: 'Stage 2 · Seen, no reply',
-  unseen: 'Stage 3 · Message not seen',
-  never_messaged: 'Stage 4 · Never messaged',
-  pending_invite: 'Stage 5 · Invite pending (skipped)',
-  not_connected: 'Stage 6 · Sending invites',
-  done: 'All stages finished',
+  discovery: 'Searching existing network at company',
+  stage1_referral: 'Messaging network connections',
+  stage2_invites: 'Sending new connection requests (per role)',
+  done: 'Outreach completed',
+};
+
+const STAGE1_PERSON_LABEL = 'Network message';
+const STAGE2_PERSON_LABEL = 'New connection request';
+
+function stageLabel(stage) {
+  if (!stage) return '';
+  if (STAGE_LABELS[stage]) return STAGE_LABELS[stage];
+  // Campaigns created by the old six-stage pipeline saved stage ids that no
+  // longer exist. Fold them into the stage they really belonged to.
+  if (/^(stage1|stage2|stage3|stage4|replied|seen|unseen|never_messaged)$/.test(stage)) {
+    return STAGE_LABELS.stage1_referral;
+  }
+  return STAGE_LABELS.stage2_invites;
+}
+
+function isInviteRow(person) {
+  if (person.phase === 'invite') return true;
+  if (person.phase) return false;
+  return person.action === 'invite' || person.stage === 'not_connected';
+}
+
+function personStageLabel(person) {
+  if (isInviteRow(person)) return STAGE2_PERSON_LABEL;
+  if (person.connection === 'pending') return 'Stage 2 · Invite pending';
+  if (person.connection === 'connected' || person.action === 'message'
+    || ['replied', 'seen', 'unseen', 'never_messaged'].includes(person.stage)) {
+    return STAGE1_PERSON_LABEL;
+  }
+  return '—';
+}
+
+const STAGE_STATUS = {
+  pending: { label: 'Pending', tone: 'neutral' },
+  in_progress: { label: 'In Progress', tone: 'warn' },
+  completed: { label: 'Completed', tone: 'success' },
+  partially_completed: { label: 'Partially Completed', tone: 'warn' },
+  no_connections: { label: 'No Eligible Connections', tone: 'neutral' },
 };
 
 const RESULT_LABEL = {
@@ -203,6 +240,74 @@ export default function CampaignStatus({
   };
 
   const stats = campaign?.stats || {};
+
+  // Campaigns started before the two-stage split have no stats.stage1/2. Derive
+  // the same two panels from their people rows so an in-flight campaign never
+  // falls back to the old numbered stages.
+  const legacyStages = useMemo(() => {
+    if (!campaign || stats.stage1 || stats.stage2) return null;
+    const list = Array.isArray(campaign.people) ? campaign.people : [];
+    if (!list.length) return null;
+
+    const target = Math.max(1, parseInt(campaign.config?.referralTarget, 10) || 5);
+    const referralRows = list.filter((person) => !isInviteRow(person) && person.connection === 'connected');
+    const sent1 = referralRows.filter((p) => p.action === 'message' && p.result === 'success').length;
+    const failed1 = referralRows.filter((p) => p.action === 'message' && p.result === 'failed').length;
+    const skipped1 = referralRows.filter((p) => p.result === 'skipped').length;
+    const attempted1 = referralRows.filter((p) => p.action === 'message').length;
+    const eligible1 = referralRows.filter((p) => !p.result && p.eligible !== false).length;
+
+    const perRole = Math.max(1, parseInt(campaign.config?.perRole, 10) || 10);
+    const inviteRows = list.filter(isInviteRow);
+    const configuredRoles = Array.isArray(campaign.config?.roles) && campaign.config.roles.length
+      ? campaign.config.roles.filter(Boolean)
+      : (campaign.role ? [campaign.role] : []);
+    const rowsByRole = new Map();
+    for (const person of inviteRows) {
+      const key = person.inviteRole || (configuredRoles.length === 1 ? configuredRoles[0] : 'All roles');
+      rowsByRole.set(key, [...(rowsByRole.get(key) || []), person]);
+    }
+    const roleKeys = [...new Set([...configuredRoles, ...rowsByRole.keys()])];
+    const roles = roleKeys.map((role) => {
+      const rows = rowsByRole.get(role) || [];
+      const sent = rows.filter((p) => p.result === 'success').length;
+      const failed = rows.filter((p) => p.result === 'failed').length;
+      const skipped = rows.filter((p) => p.result === 'skipped').length;
+      return {
+        role,
+        target: perRole,
+        sent,
+        failed,
+        skipped,
+        status: sent >= perRole ? 'completed' : (rows.some((p) => p.result) ? 'partially_completed' : 'pending'),
+      };
+    });
+
+    return {
+      stage1: {
+        target,
+        matched: referralRows.length,
+        eligible: eligible1,
+        sent: sent1,
+        failed: failed1,
+        skipped: skipped1,
+        remaining: eligible1,
+        status: sent1 >= target ? 'completed' : (attempted1 ? 'in_progress' : 'pending'),
+      },
+      stage2: roles.length ? {
+        roles,
+        target: roles.reduce((sum, row) => sum + row.target, 0),
+        sent: roles.reduce((sum, row) => sum + row.sent, 0),
+        failed: roles.reduce((sum, row) => sum + row.failed, 0),
+        skipped: roles.reduce((sum, row) => sum + row.skipped, 0),
+        status: roles.some((row) => row.status !== 'pending') ? 'in_progress' : 'pending',
+      } : null,
+    };
+  }, [campaign, stats.stage1, stats.stage2]);
+
+  const stage1 = stats.stage1 || legacyStages?.stage1 || null;
+  const stage2 = (stats.stage2 && Array.isArray(stats.stage2.roles) ? stats.stage2 : null)
+    || (legacyStages?.stage2?.roles?.length ? legacyStages.stage2 : null);
   const total = stats.totalEligible || 0;
   const processed = stats.processed || 0;
   const remaining = stats.remaining != null ? stats.remaining : Math.max(0, total - processed);
@@ -214,19 +319,6 @@ export default function CampaignStatus({
   const people = useMemo(() => {
     const list = Array.isArray(campaign?.people) ? campaign.people : [];
     return [...list].reverse();
-  }, [campaign]);
-
-  const stageRows = useMemo(() => {
-    const list = Array.isArray(campaign?.people) ? campaign.people : [];
-    const order = ['replied', 'seen', 'unseen', 'never_messaged', 'pending_invite', 'not_connected'];
-    return order
-      .map((stage) => ({
-        stage,
-        label: STAGE_LABELS[stage],
-        total: list.filter((p) => p.stage === stage).length,
-        done: list.filter((p) => p.stage === stage && p.result).length,
-      }))
-      .filter((row) => row.total > 0);
   }, [campaign]);
 
   if (loading) {
@@ -244,7 +336,7 @@ export default function CampaignStatus({
         <div className="cst-empty-title">
           <Users size={15} /> No referral campaign yet
         </div>
-        <p>Start a campaign to message these connections in stage order — the activity log appears here as soon as it runs.</p>
+        <p>Start a campaign to message your existing connections company-wide, then send role-wise connection requests — the activity log appears here as soon as it runs.</p>
       </div>
     );
   }
@@ -264,7 +356,7 @@ export default function CampaignStatus({
       <div className="cst-stage-row">
         <span className="cst-stage">
           <Clock size={12} />
-          {STAGE_LABELS[campaign.stage] || 'Preparing'}
+          {stageLabel(campaign.stage) || 'Preparing'}
         </span>
         <span className="cst-pct">{progressPct}%</span>
       </div>
@@ -280,16 +372,72 @@ export default function CampaignStatus({
         <div className="cst-count"><b>{remaining}</b><span>Remaining</span></div>
       </div>
 
-      {stageRows.length > 0 && (
-        <div className="cst-stages">
-          {stageRows.map((row) => (
-            <div key={row.stage} className="cst-stage-row-item">
-              <span className="cst-stage-label">{row.label}</span>
-              <span className={`cst-stage-value ${row.done === row.total ? 'is-done' : ''}`}>
-                {row.done}/{row.total}
-              </span>
+      {(stage1 || stage2) && (
+        <div className="cst-two-stage">
+          {stage1 && (
+            <div className="cst-stage-block">
+              <div className="cst-stage-block-head">
+                <span>Messages to Network (Existing Connections)</span>
+                <span className={`cst-pill is-${(STAGE_STATUS[stage1.status] || STAGE_STATUS.pending).tone}`}>
+                  {(STAGE_STATUS[stage1.status] || STAGE_STATUS.pending).label}
+                </span>
+              </div>
+              <div className="cst-stage-block-sub">
+                {campaign.company} · existing 1st-degree connections · no role filter
+              </div>
+              <div className="cst-counts">
+                <div className="cst-count"><b>{stage1.target}</b><span>Target</span></div>
+                <div className="cst-count"><b>{stage1.matched}</b><span>1st-Degree</span></div>
+                <div className="cst-count"><b>{stage1.eligible}</b><span>Eligible</span></div>
+                <div className="cst-count"><b>{stage1.sent}</b><span>Referrals</span></div>
+                <div className="cst-count"><b>{stage1.failed}</b><span>Failed</span></div>
+                <div className="cst-count"><b>{stage1.skipped}</b><span>Skipped</span></div>
+                <div className="cst-count"><b>{stage1.remaining}</b><span>Remaining</span></div>
+              </div>
             </div>
-          ))}
+          )}
+
+          {stage2 && stage2.roles.length > 0 && (
+            <div className="cst-stage-block">
+              <div className="cst-stage-block-head">
+                <span>New Connection Requests (Per Role)</span>
+                <span className={`cst-pill is-${(STAGE_STATUS[stage2.status] || STAGE_STATUS.pending).tone}`}>
+                  {(STAGE_STATUS[stage2.status] || STAGE_STATUS.pending).label}
+                </span>
+              </div>
+              <div className="cst-roles">
+                <div className="cst-roles-head">
+                  <span>Role</span>
+                  <span>Target</span>
+                  <span>Sent</span>
+                  <span>Failed</span>
+                  <span>Status</span>
+                </div>
+                {stage2.roles.map((row) => (
+                  <div key={row.role} className="cst-role-row">
+                    <span className="cst-role-name">{row.role}</span>
+                    <span>{row.target}</span>
+                    <span>{row.sent}</span>
+                    <span className={row.failed ? 'is-bad' : ''}>{row.failed}</span>
+                    <span className={`cst-role-status is-${(STAGE_STATUS[row.status] || STAGE_STATUS.pending).tone}`}>
+                      {(STAGE_STATUS[row.status] || STAGE_STATUS.pending).label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="cst-stage-block cst-overall">
+            <div className="cst-stage-block-head"><span>Overall campaign summary</span></div>
+            <div className="cst-counts is-five">
+              <div className="cst-count"><b>{stats.messagesSent || 0}</b><span>Referral Msgs</span></div>
+              <div className="cst-count"><b>{stats.invitesSent || 0}</b><span>Conn Requests</span></div>
+              <div className="cst-count"><b>{(stats.messagesSent || 0) + (stats.invitesSent || 0)}</b><span>Successful</span></div>
+              <div className="cst-count"><b>{stats.failed || 0}</b><span>Failed</span></div>
+              <div className="cst-count"><b>{stats.skipped || 0}</b><span>Skipped</span></div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -303,7 +451,7 @@ export default function CampaignStatus({
                 : campaign.status === 'failed' ? 'Campaign failed' : 'Notice'}
             </strong>
             <span>{error || campaign.error}</span>
-            {campaign.errorStage && <em>While running: {STAGE_LABELS[campaign.errorStage] || campaign.errorStage}</em>}
+            {campaign.errorStage && <em>While running: {stageLabel(campaign.errorStage)}</em>}
           </div>
         </div>
       )}
@@ -378,7 +526,7 @@ export default function CampaignStatus({
                   {person.message && <em className="cst-log-msg">{person.message}</em>}
                   {person.error && <em className="cst-log-err">{person.error}</em>}
                 </div>
-                <span className="cst-log-stage">{STAGE_LABELS[person.stage] || person.stage}</span>
+                <span className="cst-log-stage">{personStageLabel(person)}</span>
                 <span className="cst-log-action">{person.action || '—'}</span>
                 <span className={`cst-log-result is-${person.result || 'pending'}`}>
                   {RESULT_LABEL[person.result] || 'Pending'}
