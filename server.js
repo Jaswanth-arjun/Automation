@@ -18,7 +18,7 @@ import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion, s
 import { inferFromProfile } from './lib/apply-intelligence.js';
 
 import nodemailer from 'nodemailer';
-import puppeteer from 'puppeteer-core';
+import { chromium } from 'playwright-core';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
@@ -359,7 +359,7 @@ app.post('/api/resume/render-edited-pdf', async (req, res) => {
     const executablePath = getSystemChromePath();
     if (!executablePath) return res.status(503).json({ error: 'Chrome browser is required to create the edited PDF.' });
 
-    browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await chromium.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page = await browser.newPage();
     await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
       @page { size: A4; margin: 0; }
@@ -381,7 +381,7 @@ app.post('/api/resume/render-edited-pdf', async (req, res) => {
       .resume-page .skill-row { display: grid; grid-template-columns: 140pt 1fr; gap: 0; margin: 0; line-height: 1.12; }
       .resume-page a { color: #1649d8; text-decoration: none; }
       .resume-page i { font-weight: normal; }
-    </style></head><body>${html}</body></html>`, { waitUntil: 'networkidle0' });
+    </style></head><body>${html}</body></html>`, { waitUntil: 'load' });
     await page.evaluate(() => document.fonts?.ready);
     const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
     res.json({ pdfBase64: Buffer.from(pdf).toString('base64') });
@@ -2324,22 +2324,16 @@ async function fetchJobText(url) {
   };
 
   const browserJob = async () => {
-    const possiblePaths = [
-      process.env.CHROME_PATH,
-      'D:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : '',
-      process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : '',
-    ].filter(Boolean);
-    const executablePath = possiblePaths.find((candidate) => fs.existsSync(candidate));
+    const executablePath = getSystemChromePath();
     if (!executablePath) throw new Error('A browser is required to read this job page. Paste the complete job description instead.');
 
-    const browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const browser = await chromium.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     try {
-      const page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+      const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       // Some career sites (notably IBM) first return an AWS WAF shell and
       // populate the actual posting asynchronously after the challenge is
       // solved. Do not treat that short shell as a usable job description.
@@ -2353,7 +2347,7 @@ async function fetchJobText(url) {
         finalUrl: page.url(),
       };
     } finally {
-      await browser.close();
+      await browser.close().catch(() => {});
     }
   };
 

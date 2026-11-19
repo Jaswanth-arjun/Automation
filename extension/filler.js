@@ -71,9 +71,13 @@
 
   async function askOrSkip(question, index, total, options, reason, autoSubmit) {
     if (!autoSubmit) return askHamzoohQuestion(question, index, total, options, reason);
+    // Auto mode already asked and nobody answered: asking again would just make
+    // the run sit on another prompt the user is clearly not watching.
+    if (autoPromptMissed) return null;
     // Allow up to 90 seconds for user to answer questions via the Hamzooh overlay
     const result = await withTimeout(askHamzoohQuestion(question, index, total, options, reason), 90000, null);
     if (!result) {
+      autoPromptMissed = true;
       removeHamzoohOverlays();
     }
     return result;
@@ -1647,7 +1651,6 @@
         }
         if (advance.disabled || /loading|saving|please wait|processing/i.test(buttonText(advance))
           || document.querySelector('[data-automation-id="loading-spinner"], [aria-busy="true"]')) continue;
-      }
       }
       if (progressed) {
         await updatePending({ url: location.href, applyClicked: true });

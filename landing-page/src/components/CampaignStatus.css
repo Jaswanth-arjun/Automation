@@ -289,6 +289,60 @@
 }
 .cst-details:hover { text-decoration: underline; }
 
+/* Two independent stages: Stage 1 company-wide referrals, Stage 2 role-wise invites */
+.cst-two-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px dashed var(--cst-line);
+  padding-top: 10px;
+}
+.cst-stage-block { display: flex; flex-direction: column; gap: 7px; }
+.cst-stage-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 750;
+}
+.cst-stage-block-sub { font-size: 10.5px; color: var(--cst-muted); }
+.cst-counts.is-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.cst-roles { border: 1px solid var(--cst-line); border-radius: 10px; overflow: hidden; }
+.cst-roles-head,
+.cst-role-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) 0.6fr 0.6fr 0.6fr minmax(0, 1.2fr);
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 11.5px;
+  align-items: center;
+}
+.cst-roles-head {
+  background: #f8f9fb;
+  border-bottom: 1px solid var(--cst-line);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cst-muted);
+}
+.cst-role-row { border-bottom: 1px solid #f2f4f7; }
+.cst-role-row:last-child { border-bottom: none; }
+.cst-role-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cst-role-status { font-size: 10px; font-weight: 700; }
+.cst-role-status.is-success { color: #12683b; }
+.cst-role-status.is-warn { color: #a15c00; }
+.cst-role-status.is-neutral { color: var(--cst-muted); }
+.cst-role-row .is-bad { color: #a91d1d; font-weight: 700; }
+.cst-overall .cst-stage-block-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cst-muted);
+}
+.cst-compact .cst-two-stage { display: none; }
+
 @media (max-width: 720px) {
   .cst-counts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .cst-log-head, .cst-log-row { grid-template-columns: minmax(140px, 2fr) minmax(90px, 1.3fr) 0.8fr; }

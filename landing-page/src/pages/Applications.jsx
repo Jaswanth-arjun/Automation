@@ -135,30 +135,9 @@ export default function Applications() {
       const job = entry.jobId
         ? allJobs.find((item) => item.id === entry.jobId)
         : allJobs.find((item) => item.applyLink && item.applyLink === entry.jobUrl);
-      let matchScore = entry.matchScore;
-      if (job) {
-        const result = calculateMatchScore(profile, job, { userId });
-        if (typeof result?.score === 'number') matchScore = result.score;
-      }
-      const beforeScore = entry.beforeScore ?? matchScore;
-      let afterScore = entry.afterScore;
-      const isTailored = entry.resumeCount > 0 || Boolean(entry.stages?.tailor);
-      if (isTailored && beforeScore !== null && afterScore === null) {
-        const seedNum = (entry.title + entry.company).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-        const bump = 28 + (seedNum % 7);
-        afterScore = Math.min(97, Math.max(88, beforeScore + bump));
-      }
-      if (isTailored && beforeScore !== null && afterScore !== null && afterScore <= beforeScore) {
-        afterScore = Math.min(97, beforeScore + 15);
-      }
-      const hasAtsDelta = Boolean(isTailored && beforeScore !== null && afterScore !== null && afterScore > beforeScore);
-      return {
-        ...entry,
-        matchScore,
-        beforeScore,
-        afterScore,
-        hasAtsDelta,
-      };
+      if (!job) return entry;
+      const result = calculateMatchScore(profile, job, { userId });
+      return typeof result?.score === 'number' ? { ...entry, matchScore: result.score } : entry;
     });
   }, [trackable, statusFilter, query, user]);
 
@@ -289,7 +268,7 @@ export default function Applications() {
         <EmptyState
           icon={FolderOpen}
           title="No tracked jobs yet"
-          description="Tailor a resume from any job's Apply page and it appears here with its ATS report, outreach and application status."
+          description="Tailor a resume from any job's Apply page and it appears here with its resume report, outreach and application status."
           actionLabel="Explore Jobs"
           onAction={() => navigate('/dashboard/jobs')}
         />
@@ -334,18 +313,18 @@ export default function Applications() {
                     <div className="jt-ident">
                       <div className="jt-title-row">
                         <h3 title={entry.title}>{entry.title}</h3>
-                        {entry.hasAtsDelta ? (
+                        {entry.hasCoverage ? (
                           <span
-                            className="jt-match is-improved"
-                            title={`ATS Match: ${entry.beforeScore}% (Original) → ${entry.afterScore}% (Tailored Resume)`}
-                            aria-label={`ATS Match ${entry.beforeScore}% to ${entry.afterScore}%`}
+                            className="jt-match has-coverage"
+                            title={`Resume keyword coverage: ${entry.beforeScore}% before tailoring → ${entry.afterScore}% after. Job match: ${entry.matchScore ?? '—'}%.`}
+                            aria-label={`Resume keyword coverage ${entry.beforeScore}% to ${entry.afterScore}%`}
                           >
                             <span className="jt-match-before">{entry.beforeScore}%</span>
                             <span className="jt-match-arrow">→</span>
                             <span className="jt-match-after">{entry.afterScore}%</span>
                           </span>
                         ) : entry.matchScore !== null ? (
-                          <span className="jt-match">{entry.matchScore}%</span>
+                          <span className="jt-match" title={`Job match: ${entry.matchScore}%`}>{entry.matchScore}%</span>
                         ) : null}
                       </div>
                       <p title={`${entry.company}${entry.appliedAt ? ` · Applied ${shortDate(entry.appliedAt)}` : ''}`}>

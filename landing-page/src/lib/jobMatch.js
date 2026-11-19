@@ -22,7 +22,7 @@
 /* Versioning + cache                                                   */
 /* ------------------------------------------------------------------ */
 
-const CACHE_KEY = 'hamzooh_match_cache_v1';
+const CACHE_KEY = 'hamzooh_match_cache_v2';
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // stale after 14 days
 const CACHE_MAX_ENTRIES = 400;
 
@@ -352,8 +352,30 @@ const SKILL_LABELS = Object.fromEntries(
   Object.entries(SYNONYMS).map(([alias, canon]) => [canon, alias]),
 );
 
+// Canonical ids whose shortest alias reads badly in the UI ("DS", "object
+// oriented") get an explicit label.
+const DISPLAY_LABELS = {
+  datastructures: 'DSA',
+  deeplearning: 'Deep Learning',
+  machinelearning: 'Machine Learning',
+  cicd: 'CI/CD',
+  restapi: 'REST API',
+  oop: 'OOP',
+  ai: 'AI',
+  uiux: 'UI/UX',
+  dbms: 'DBMS',
+  problemsolving: 'Problem Solving',
+  html: 'HTML',
+  css: 'CSS',
+  sql: 'SQL',
+  gcp: 'GCP',
+  aws: 'AWS',
+  azure: 'Azure',
+  nlp: 'NLP',
+};
+
 function prettySkill(canon) {
-  const label = SKILL_LABELS[canon] || canon;
+  const label = DISPLAY_LABELS[canon] || SKILL_LABELS[canon] || canon;
   return label
     .split(' ')
     .map((word) => (word.length <= 3 ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1)))
@@ -529,6 +551,16 @@ function degreeLevel(value) {
   return key ? DEGREE_LEVEL[key] : 0;
 }
 
+/**
+ * The real bar of a posting that lists several degrees. "Bachelor / Master"
+ * means either one is acceptable, so the lowest listed level applies — taking
+ * the highest would fail a B.Tech for a job that explicitly accepts it.
+ */
+function lowestDegreeLevel(mentions) {
+  const levels = (mentions || []).map(degreeLevel).filter((level) => level > 0);
+  return levels.length ? Math.min(...levels) : 0;
+}
+
 function parseYears(duration) {
   const text = String(duration || '').toLowerCase();
   if (!text) return 0;
@@ -679,6 +711,26 @@ const WEIGHT_LABELS = {
   domain: 'Domain alignment',
 };
 
+/** Words inside a skill label that carry its meaning ("Data Structures and
+ *  Algorithms (DSA)" -> data / structures / algorithms). */
+function significantWords(label) {
+  return String(label || '')
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .split(/[^a-z0-9+#.]+/)
+    .map((word) => word.replace(/^\.+|\.+$/g, ''))
+    .filter((word) => word.length > 2 && !STOPWORDS.has(word));
+}
+
+/** True when the candidate shows the skill anywhere, declared or in the resume. */
+function evidenceHasSkill(canon, evidence) {
+  if (!canon) return false;
+  if (evidence.skillCanon.includes(canon)) return true;
+  return Object.keys(SYNONYMS)
+    .filter((alias) => SYNONYMS[alias] === canon)
+    .some((alias) => Boolean(findEvidence(evidence.evidenceText, alias)));
+}
+
 function matchSkillEntry(jobSkill, evidence) {
   const canon = canonicalSkill(jobSkill);
   const declared = evidence.skillCanon.includes(canon);
@@ -699,17 +751,33 @@ function matchSkillEntry(jobSkill, evidence) {
     );
   }
 
-  const matched = declared || Boolean(snippet) || contained;
+  // Multi-word labels rarely appear verbatim in a resume ("Data Structures and
+  // Algorithms (DSA)" vs "Data Structures & Algorithms"), so fall back to the
+  // meaningful words of the label. Half of them is a real, partial match.
+  const words = significantWords(jobSkill);
+  const wordHits = declared || snippet || contained
+    ? 0
+    : words.filter((word) => findEvidence(evidence.evidenceText, word)).length;
+  const wordCoverage = words.length ? wordHits / words.length : 0;
+  const partial = wordCoverage >= 0.5;
+
+  const matched = declared || Boolean(snippet) || contained || partial;
+
+  // A matched skill must score: "2/2 matched" can never average 0.5 because one
+  // of the two matches was a weak (contained / word-level) hit.
   let strength = 0;
-  if (declared) strength = 1;
-  else if (resumeSnippet) strength = 0.8;
-  else if (profileSnippet) strength = 0.7;
+  let via = null;
+  if (declared) { strength = 1; via = 'skills'; }
+  else if (resumeSnippet) { strength = 0.85; via = 'resume'; }
+  else if (profileSnippet) { strength = 0.75; via = 'profile'; }
+  else if (contained) { strength = 0.65; via = 'related'; }
+  else if (partial) { strength = 0.4 + Math.min(0.2, wordCoverage * 0.2); via = 'resume'; }
 
   return {
     skill: jobSkill,
     matched,
     strength,
-    via: declared ? 'skills' : resumeSnippet ? 'resume' : profileSnippet ? 'profile' : contained ? 'related' : null,
+    via,
     evidence: snippet || '',
   };
 }
@@ -718,8 +786,9 @@ function relevanceOfItem(itemText, jobTokens, jobSkillCanon, evidence) {
   const tokens = tokenize(itemText);
   if (!tokens.length) return { relevance: 0, matchedSkills: [] };
   const matchedSkills = jobSkillCanon.filter((skill) =>
-    evidence.skillCanon.includes(skill) &&
-    (tokens.includes(skill) || tokens.some((token) => token.includes(skill) || skill.includes(token))),
+    evidenceHasSkill(skill, evidence) &&
+    (tokens.includes(skill)
+      || tokens.some((token) => token.length > 2 && (token.includes(skill) || skill.includes(token)))),
   );
   const coverage = jobSkillCanon.length ? matchedSkills.length / jobSkillCanon.length : 0;
   const similarity = cosine(tokens, jobTokens);
@@ -751,6 +820,13 @@ export function scoreJobMatch(profile, job, options = {}) {
     .map(canonicalSkill)
     .filter(Boolean);
 
+  // Technologies the role talks about. Used for domain alignment and for the
+  // project/experience overlap, so a resume that proves a stack in its projects
+  // counts even when the profile's skill list is short.
+  const jobDomainSkills = detectSkills(normalized.fullText);
+  const roleSkillCanon = [...new Set([...jobSkillCanon, ...jobDomainSkills])].filter(Boolean);
+  const candidateDomainSkills = jobDomainSkills.filter((skill) => evidenceHasSkill(skill, evidence));
+
   /* 1. Skills ------------------------------------------------------- */
   const requiredMatches = normalized.requiredSkills.map((skill) => matchSkillEntry(skill, evidence));
   const preferredMatches = normalized.preferredSkills.map((skill) => matchSkillEntry(skill, evidence));
@@ -771,7 +847,7 @@ export function scoreJobMatch(profile, job, options = {}) {
   } else if (evidence.experience.length) {
     const best = Math.max(
       ...evidence.experience.map(
-        (item) => relevanceOfItem(item.text, normalized.tokens, jobSkillCanon, evidence).relevance,
+        (item) => relevanceOfItem(item.text, normalized.tokens, roleSkillCanon, evidence).relevance,
       ),
     );
     experienceScore = Math.min(1, best);
@@ -782,7 +858,7 @@ export function scoreJobMatch(profile, job, options = {}) {
     .map((project) => ({
       title: project.title || 'Project',
       technologies: project.technologies,
-      ...relevanceOfItem(project.text, normalized.tokens, jobSkillCanon, evidence),
+      ...relevanceOfItem(project.text, normalized.tokens, roleSkillCanon, evidence),
     }))
     .sort((a, b) => b.relevance - a.relevance);
   const projectsScore = projectScored.length
@@ -795,7 +871,7 @@ export function scoreJobMatch(profile, job, options = {}) {
     .map((item) => ({
       title: item.title || 'Experience',
       company: item.company,
-      ...relevanceOfItem(item.text, normalized.tokens, jobSkillCanon, evidence),
+      ...relevanceOfItem(item.text, normalized.tokens, roleSkillCanon, evidence),
     }))
     .sort((a, b) => b.relevance - a.relevance);
 
@@ -803,10 +879,7 @@ export function scoreJobMatch(profile, job, options = {}) {
   let educationScore = null;
   let educationReason = '';
   if (evidence.education.length) {
-    const jobDegreeLevel = Math.max(
-      0,
-      ...normalized.degreeMentions.map((mention) => degreeLevel(mention)),
-    );
+    const jobDegreeLevel = lowestDegreeLevel(normalized.degreeMentions);
     const candidateLevel = Math.max(
       0,
       ...evidence.education.map((item) => degreeLevel(`${item.degree} ${item.branch}`)),
@@ -819,12 +892,18 @@ export function scoreJobMatch(profile, job, options = {}) {
       jobDegreeLevel === 0
         ? 'Job description does not mandate a specific degree level.'
         : levelFit === 1
-          ? 'Your degree level meets the requirement.'
-          : 'Your degree level is below what the description asks for.';
+          ? `Your degree satisfies the stated qualification (${normalized.degreeMentions.slice(0, 2).join(' / ')}).`
+          : `The posting asks for a higher degree level than ${evidence.education[0]?.degree || 'your degree'}.`;
   }
 
   /* 5. Domain alignment --------------------------------------------- */
-  const domainScore = Math.min(1, cosine(evidence.tokens, normalized.tokens) * 1.6);
+  // Share of the role's technology vocabulary the candidate can evidence.
+  // A raw token cosine was dominated by boilerplate ("team", "experience") and
+  // pushed relevant profiles to single digits, so the skill vocabulary is the
+  // honest measure. Postings without any technology terms fall back to tokens.
+  const domainScore = jobDomainSkills.length
+    ? candidateDomainSkills.length / jobDomainSkills.length
+    : Math.min(1, cosine(evidence.tokens, normalized.tokens) * 2);
 
   /* 6. Weighted total ----------------------------------------------- */
   const jobWeights = (job && job.matchWeights) || {};
@@ -888,7 +967,7 @@ export function scoreJobMatch(profile, job, options = {}) {
   const degreeRequiredText = /must have|required|mandatory/i.test(normalized.description) &&
     normalized.degreeMentions.length > 0;
   if (normalized.degreeMentions.length) {
-    const jobDegreeLevel = Math.max(0, ...normalized.degreeMentions.map(degreeLevel));
+    const jobDegreeLevel = lowestDegreeLevel(normalized.degreeMentions);
     const candidateLevel = Math.max(0, ...evidence.education.map((item) => degreeLevel(`${item.degree} ${item.branch}`)));
     const pass = jobDegreeLevel === 0 || candidateLevel >= jobDegreeLevel;
     if (!pass && degreeRequiredText) eligible = false;
@@ -930,6 +1009,13 @@ export function scoreJobMatch(profile, job, options = {}) {
   if (normalized.preferredSkills.length) {
     reasons.push(`Matched ${matchedPreferred.length}/${normalized.preferredSkills.length} preferred skills.`);
   }
+  if (jobDomainSkills.length) {
+    const evidenced = candidateDomainSkills.slice(0, 6).map(prettySkill);
+    reasons.push(
+      `Role stack coverage: ${candidateDomainSkills.length}/${jobDomainSkills.length} technologies evidenced` +
+        (evidenced.length ? ` (${evidenced.join(', ')}).` : '.'),
+    );
+  }
   if (projectsScore !== null && projectScored[0]) {
     reasons.push(
       projectScored[0].relevance > 0.05
@@ -946,6 +1032,10 @@ export function scoreJobMatch(profile, job, options = {}) {
   });
   if (missingPreferred.length) {
     suggestions.push(`Nice-to-have skills to build next: ${missingPreferred.slice(0, 3).map((item) => item.skill).join(', ')}.`);
+  }
+  const missingDomain = jobDomainSkills.filter((skill) => !candidateDomainSkills.includes(skill));
+  if (missingDomain.length >= 2 && !missingSkills.length) {
+    suggestions.push(`This role's stack also covers ${missingDomain.slice(0, 3).map(prettySkill).join(', ')} — one small project using them lifts your domain alignment.`);
   }
   if (!eligible) {
     const blocker = checks.find((check) => check.status === 'fail');
@@ -1017,7 +1107,13 @@ export function scoreJobMatch(profile, job, options = {}) {
       company: normalized.company,
       skillsSource: normalized.skillsSource,
       requiredSkills: normalized.requiredSkills,
+      preferredSkills: normalized.preferredSkills,
       gradYears: normalized.gradYears,
+      domainSkills: jobDomainSkills.length,
+      domainMatched: candidateDomainSkills.map(prettySkill),
+      domainMissing: jobDomainSkills
+        .filter((skill) => !candidateDomainSkills.includes(skill))
+        .map(prettySkill),
     },
     computedAt: now,
   };

@@ -366,7 +366,7 @@ export default function Dashboard() {
       <CompleteProfileModal
         isOpen={showProfilePromptModal}
         onClose={handleDismissProfileModal}
-        matchScore={bestMatchScore || 92}
+        matchScore={bestMatchScore}
       />
     </div>
   );

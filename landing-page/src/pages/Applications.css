@@ -353,6 +353,14 @@
   padding: 2px 8px;
 }
 
+/* Keyword coverage reads as a resume metric, not a green "score went up" badge. */
+.jt-match.has-coverage {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+}
+
 .jt-match-before {
   color: #64748b;
   font-weight: 700;

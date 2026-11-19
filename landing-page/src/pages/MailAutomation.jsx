@@ -150,6 +150,8 @@ export default function MailAutomation() {
   const [composer, setComposer] = useState(null);
   const [ai, setAi] = useState(null);
   const [copiedId, setCopiedId] = useState('');
+  const [threadMessages, setThreadMessages] = useState([]);
+  const [threadState, setThreadState] = useState('idle');
 
   const searchRef = useRef(null);
   const splitRef = useRef(null);
@@ -600,6 +602,32 @@ export default function MailAutomation() {
     () => [...inbox, ...sent].find((mail) => mail.id === selectedId) || null,
     [inbox, sent, selectedId],
   );
+
+  /* Load every message in the opened email's Gmail thread, so the reader shows
+     the whole back-and-forth instead of just the one message that was clicked. */
+  useEffect(() => {
+    const threadId = selected?.threadId;
+    if (!threadId) {
+      setThreadMessages([]);
+      setThreadState('idle');
+      return undefined;
+    }
+    let alive = true;
+    setThreadMessages([]);
+    setThreadState('loading');
+    api.getThread(threadId)
+      .then((result) => {
+        if (!alive) return;
+        setThreadMessages(Array.isArray(result?.messages) ? result.messages : []);
+        setThreadState('ready');
+      })
+      .catch(() => {
+        if (!alive) return;
+        setThreadMessages([]);
+        setThreadState('error');
+      });
+    return () => { alive = false; };
+  }, [selected?.threadId]);
 
   const stats = useMemo(() => {
     const needsReply = inbox.filter((mail) => mail.needsReply).length;
@@ -1084,6 +1112,8 @@ export default function MailAutomation() {
                     copied={copiedId === selected?.id}
                     bodyState={selected ? bodyState[selected.id] : null}
                     onLoadBody={() => ensureBody(selected)}
+                    threadMessages={threadMessages}
+                    threadState={threadState}
                   />
                 </div>
               </div>
@@ -1151,6 +1181,8 @@ export default function MailAutomation() {
                     copied={copiedId === selected?.id}
                     bodyState={selected ? bodyState[selected.id] : null}
                     onLoadBody={() => ensureBody(selected)}
+                    threadMessages={threadMessages}
+                    threadState={threadState}
                   />
                 </div>
               </div>
@@ -1186,6 +1218,8 @@ export default function MailAutomation() {
               copied={copiedId === selected.id}
               bodyState={bodyState[selected.id]}
               onLoadBody={() => ensureBody(selected)}
+              threadMessages={threadMessages}
+              threadState={threadState}
             />
           </div>
         </div>
@@ -1509,6 +1543,8 @@ function ReadingPane({
   copied,
   bodyState,
   onLoadBody,
+  threadMessages = [],
+  threadState = 'idle',
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1644,6 +1680,32 @@ function ReadingPane({
           <button type="button" className="mm-link" onClick={() => setExpanded((value) => !value)}>
             {expanded ? 'Show less' : 'Show full email'} <ChevronRight size={12} style={{ transform: expanded ? 'rotate(-90deg)' : 'rotate(90deg)' }} />
           </button>
+        </div>
+      )}
+
+      {threadState === 'loading' && threadMessages.length === 0 && (
+        <div className="mm-thread mm-thread-loading">
+          <Loader2 size={13} className="spin" /> Loading the full conversation…
+        </div>
+      )}
+      {threadMessages.length > 1 && (
+        <div className="mm-thread">
+          <div className="mm-thread-head">
+            <span>Conversation</span>
+            <strong>{threadMessages.length} messages</strong>
+          </div>
+          {threadMessages.map((item) => {
+            const fromCounterparty = String(item.fromEmail || '').toLowerCase() === String(mail.senderEmail || '').toLowerCase();
+            return (
+              <article key={item.id} className={`mm-thread-msg ${fromCounterparty ? 'in' : 'out'}`}>
+                <header>
+                  <span>{fromCounterparty ? (item.fromName || item.fromEmail || sender) : 'You'}</span>
+                  <time>{formatWhen(item.at)}</time>
+                </header>
+                <p>{item.bodyText || item.snippet || '(No readable text)'}</p>
+              </article>
+            );
+          })}
         </div>
       )}
 

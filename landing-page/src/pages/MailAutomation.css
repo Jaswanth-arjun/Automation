@@ -1356,6 +1356,98 @@
   padding: 0 16px 14px;
 }
 
+/* ---------- Full conversation ---------- */
+.mm-thread {
+  margin: 0 14px 14px;
+  padding: 12px;
+  border: 1px solid #eef0f4;
+  border-radius: 12px;
+  background: #fbfbfd;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.mm-thread-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: #8a8d96;
+  padding: 14px;
+}
+
+.mm-thread-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 2px;
+  border-bottom: 1px solid #eceef4;
+  margin-bottom: 2px;
+}
+
+.mm-thread-head span {
+  font: 800 10px 'DM Mono', monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #8a8c86;
+}
+
+.mm-thread-head strong {
+  font-size: 11px;
+  font-weight: 700;
+  color: #445cf5;
+}
+
+.mm-thread-msg {
+  border: 1px solid #e8eaf1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #ffffff;
+}
+
+.mm-thread-msg.out {
+  background: #f7f9ff;
+  border-color: #e2e7fb;
+}
+
+.mm-thread-msg.in {
+  background: #fff8f1;
+  border-color: #ffe1c4;
+}
+
+.mm-thread-msg header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.mm-thread-msg header span {
+  font-size: 11px;
+  font-weight: 800;
+  color: #3f4254;
+}
+
+.mm-thread-msg header time {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #9a9da6;
+}
+
+.mm-thread-msg p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #4b4e57;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .mm-summary {
   margin: 0 14px 14px;
   border: 1px solid #dfe4f5;

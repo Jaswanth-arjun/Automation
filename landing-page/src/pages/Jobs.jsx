@@ -7,10 +7,12 @@ import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
 import { savedJobsStore } from '../lib/savedJobsStore';
+import { useAuth } from '../lib/auth';
 
 const JOB_TYPES = ['All', 'Full Time', 'Internship', 'Part Time', 'Contract'];
 
 export default function Jobs() {
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
   const [sortBy, setSortBy] = useState('match');
@@ -51,8 +53,8 @@ export default function Jobs() {
   const allJobs = useMemo(() => [...adminJobs, ...DEMO_JOBS], [adminJobs]);
 
   const scoredJobs = useMemo(
-    () => computeJobScores(profile || {}, allJobs, { userId: profile?.email || 'anon' }),
-    [profile, allJobs, resumeTick],
+    () => computeJobScores(profile || {}, allJobs, { userId: user?.id || user?.email || 'anon' }),
+    [profile, allJobs, user, resumeTick],
   );
 
   const filtered = useMemo(() => {

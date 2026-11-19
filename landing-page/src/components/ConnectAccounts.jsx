@@ -81,15 +81,24 @@ export default function ConnectAccounts() {
             <strong>{done}</strong> of 2 connected
           </span>
           <span className="cca-progress-track">
-            <span className="cca-progress-fill" style={{ width: `${(done / 2) * 100}%` }} />
+            {[0, 1].map((index) => (
+              <span key={index} className={`cca-progress-seg ${index < done ? 'is-filled' : ''}`}>
+                <span />
+              </span>
+            ))}
           </span>
         </div>
       </div>
 
       <div className="cca-rows">
         <div className={`cca-row ${mailConnected ? 'is-done' : ''}`}>
-          <div className="cca-row-icon is-mail">
-            <Mail size={17} />
+          <div className="cca-row-top">
+            <div className="cca-row-icon is-mail">
+              <Mail size={17} />
+            </div>
+            <span className={`cca-state ${mailConnected ? 'is-live' : ''}`}>
+              {mailConnected ? 'Connected' : 'Not connected'}
+            </span>
           </div>
           <div className="cca-row-text">
             <strong>Gmail</strong>
@@ -119,8 +128,13 @@ export default function ConnectAccounts() {
         </div>
 
         <div className={`cca-row ${liConnected ? 'is-done' : ''}`}>
-          <div className="cca-row-icon is-linkedin">
-            <LinkedinIcon />
+          <div className="cca-row-top">
+            <div className="cca-row-icon is-linkedin">
+              <LinkedinIcon />
+            </div>
+            <span className={`cca-state ${liConnected ? 'is-live' : ''}`}>
+              {liConnected ? 'Connected' : linkedin.state === 'expired' ? 'Expired' : 'Not connected'}
+            </span>
           </div>
           <div className="cca-row-text">
             <strong>LinkedIn</strong>

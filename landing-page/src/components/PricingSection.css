@@ -215,6 +215,7 @@
 
 .hp-plan-name p {
   margin: 4px 0 0;
+  min-height: 38px;
   font-size: 12.5px;
   line-height: 1.5;
   color: #6a7186;
@@ -252,8 +253,8 @@
 .hp-card.is-featured .hp-price-main span { color: #a9b3d0; }
 
 .hp-price-sub {
-  min-height: 18px;
-  margin: 9px 0 0;
+  min-height: 34px;
+  margin: 8px 0 0;
   font-size: 11.5px;
   line-height: 1.5;
   color: #8a91a3;
@@ -312,12 +313,15 @@
 .hp-cta:active { transform: translateY(0); }
 
 .hp-note {
+  min-height: 16px;
   margin: 9px 0 0;
   text-align: center;
   font-size: 10.5px;
   line-height: 1.5;
   color: #b6c0dc;
 }
+
+.hp-note.is-light { color: #8a91a3; }
 
 /* Feature list */
 .hp-includes {
@@ -404,6 +408,46 @@
 }
 
 .hp-card.is-featured .hp-card-foot { color: #8e9ab9; }
+
+/* Free card baseline block */
+.hp-free-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: auto;
+  padding: 14px 15px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f7f9ff, #eef2ff);
+  border: 1px solid #e2e8fb;
+}
+
+.hp-free-banner-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #335CFF;
+  box-shadow: 0 4px 12px rgba(51, 92, 255, 0.14);
+}
+
+.hp-free-banner strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #1f2740;
+  letter-spacing: -0.01em;
+}
+
+.hp-free-banner span:not(.hp-free-banner-icon) {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #6a7186;
+}
 
 /* ── Full comparison ───────────────────────────────────── */
 .hp-compare {

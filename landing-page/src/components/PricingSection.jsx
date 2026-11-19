@@ -197,12 +197,13 @@ export default function PricingSection({ onGetStarted }) {
               <strong>₹0</strong>
               <span>forever</span>
             </div>
-            <p className="hp-price-sub">No card required — start in minutes.</p>
+            <p className="hp-price-sub">Free forever — no trial clock.</p>
           </div>
 
           <button type="button" className="hp-cta ghost" onClick={() => onGetStarted?.()}>
             Get started — it&apos;s free
           </button>
+          <p className="hp-note is-light">No card required · upgrade anytime</p>
 
           <div className="hp-includes">
             <span className="hp-includes-title">What&apos;s included</span>
@@ -213,9 +214,13 @@ export default function PricingSection({ onGetStarted }) {
             </ul>
           </div>
 
-          <p className="hp-card-foot">
-            Job board, saved jobs, match score, tracker, PDF extraction and all resume templates.
-          </p>
+          <div className="hp-free-banner">
+            <span className="hp-free-banner-icon" aria-hidden="true"><Sparkles size={15} /></span>
+            <div>
+              <strong>All the essentials, free forever</strong>
+              <span>Job board, saved jobs, match score, tracker and PDF extraction — keep it all when you upgrade.</span>
+            </div>
+          </div>
         </article>
 
         {/* ── Pro ──────────────────────────────────────────── */}
@@ -252,9 +257,11 @@ export default function PricingSection({ onGetStarted }) {
           <button type="button" className="hp-cta primary" onClick={goPro}>
             Upgrade to Pro <ArrowUpRight size={16} />
           </button>
-          {!paymentsReady && (
-            <p className="hp-note">Secure checkout activates as soon as the payment gateway is configured.</p>
-          )}
+          <p className="hp-note">
+            {paymentsReady
+              ? 'Secure Razorpay checkout · cancel anytime'
+              : 'Secure checkout activates as soon as the payment gateway is configured.'}
+          </p>
 
           <div className="hp-includes">
             <span className="hp-includes-title">Everything in Free, plus</span>

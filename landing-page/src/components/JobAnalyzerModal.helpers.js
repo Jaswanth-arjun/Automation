@@ -86,10 +86,36 @@ export function keywordAudit(ats = {}) {
 }
 
 export function scoreValue(value) { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
+
+/**
+ * Wording for the keyword-coverage comparison. This metric is *not* the job
+ * match score — it only counts how many of the posting's keywords the resume
+ * text contains before and after tailoring — so never label it "ATS score".
+ */
 export function scoreLabel(before, after) {
   const b = scoreValue(before); const a = scoreValue(after);
-  if (b === null || a === null) return 'ATS comparison unavailable';
-  if (a > b) return 'Improved';
-  if (a === b) return 'Unchanged';
-  return 'Lower after tailoring';
+  if (b === null || a === null) return 'Keyword coverage unavailable';
+  if (a > b) return 'More keywords covered';
+  if (a === b) return 'Coverage unchanged';
+  return 'Coverage dropped after tailoring';
+}
+
+/** The job object the canonical match engine should score for a tailored job. */
+export function matchJobFromTailored(job = {}) {
+  const description = job.description || '';
+  // Prefer the posting's own description so requirements are read exactly the
+  // same way as on the Jobs page. Keywords are only a fallback for postings
+  // whose description did not come back from the page.
+  const requiredSkills = Array.isArray(job.requiredSkills) && job.requiredSkills.length
+    ? job.requiredSkills
+    : (description.trim() ? [] : (Array.isArray(job.keywords) ? job.keywords : []));
+  return {
+    id: job.id || job.url || `${job.company || ''}-${job.title || ''}`,
+    title: job.title || '',
+    company: job.company || '',
+    location: job.location || '',
+    description,
+    requiredSkills,
+    preferredSkills: Array.isArray(job.preferredSkills) ? job.preferredSkills : [],
+  };
 }

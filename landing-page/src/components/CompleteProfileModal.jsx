@@ -16,9 +16,14 @@ const SKILLS = [
   { label: 'Phone', delay: 3.6, endY: 0, tilt: -2 },
 ];
 
-export default function CompleteProfileModal({ isOpen, onClose, matchScore = 92 }) {
+export default function CompleteProfileModal({ isOpen, onClose, matchScore = null }) {
   const navigate = useNavigate();
-  const targetScore = Math.max(0, Math.min(100, Math.round(Number(matchScore) || 92)));
+  // This modal is a setup prompt, not a match report. Show the user's real best
+  // score when one exists; otherwise leave the ring empty rather than invent a
+  // number that will not match the score they see on their jobs.
+  const measured = Number(matchScore);
+  const hasScore = matchScore !== null && matchScore !== undefined && Number.isFinite(measured);
+  const targetScore = hasScore ? Math.max(0, Math.min(100, Math.round(measured))) : 0;
 
   const canvasRef = useRef(null);
   const paperRef = useRef(null);
@@ -54,7 +59,7 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = 92 
      score counts up in three steps, locks at the target score with a verified
      badge, then the loop restarts. */
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!isOpen || !hasScore) return undefined;
 
     const measureFlight = () => {
       const canvas = canvasRef.current;
@@ -155,7 +160,7 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = 92 
       clearTimeout(settleTimer);
       window.removeEventListener('resize', measureFlight);
     };
-  }, [isOpen, targetScore]);
+  }, [isOpen, hasScore, targetScore]);
 
   if (!isOpen) return null;
 
@@ -273,7 +278,7 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = 92 
               </svg>
               <div className="cpm-score-ring-inner">
                 <span className="cpm-score-number" ref={scoreNumberRef}>
-                  0%
+                  {hasScore ? '0%' : '—'}
                 </span>
               </div>
               <span className="cpm-score-check" aria-hidden="true">
@@ -283,7 +288,9 @@ export default function CompleteProfileModal({ isOpen, onClose, matchScore = 92 
                 ✦
               </span>
             </div>
-            <span className="cpm-score-label">Job match</span>
+            <span className="cpm-score-label">
+              {hasScore ? 'Your best match' : 'Score after setup'}
+            </span>
           </div>
         </div>
 

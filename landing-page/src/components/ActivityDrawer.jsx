@@ -209,7 +209,15 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     let alive = true;
     const refreshing = liRefreshFor.current === selectedContact.id;
     if (refreshing) liRefreshFor.current = '';
-    setLiLoading(refreshing);
+    // Reading a live thread takes a while; without this the pane says "No
+    // messages yet" until LinkedIn answers. Also drop the previous contact's
+    // thread so one person's conversation never shows under another's name.
+    if (!refreshing) {
+      setLiMessages([]);
+      setLiThreadError('');
+      setLiThreadNote('');
+    }
+    setLiLoading(true);
     api.getLinkedInThread({
       personName: selectedContact.name,
       profileUrl: selectedContact.linkedin.profileUrl,
@@ -217,9 +225,12 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     })
       .then((result) => {
         if (!alive) return;
-        setLiMessages(Array.isArray(result?.messages) ? result.messages : []);
+        const loaded = Array.isArray(result?.messages) ? result.messages : [];
+        setLiMessages(loaded);
         setLiThreadNote(result?.noThread ? (result.notice || 'No LinkedIn conversation yet.') : '');
-        setLiThreadError(result?.refreshError || '');
+        // A failed background refresh is not worth an error banner when the
+        // conversation is already on screen — the messages are what matters.
+        setLiThreadError(loaded.length ? '' : (result?.refreshError || ''));
         // Show the saved thread first, then quietly check LinkedIn for newer messages.
         if (result?.cached && !refreshing) {
           api.getLinkedInThread({
@@ -228,8 +239,10 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
             refresh: true,
           }).then((latest) => {
             if (!alive) return;
-            if (Array.isArray(latest?.messages)) setLiMessages(latest.messages);
-            setLiThreadError(latest?.refreshError || '');
+            if (Array.isArray(latest?.messages) && latest.messages.length) {
+              setLiMessages(latest.messages);
+              setLiThreadError('');
+            }
           }).catch(() => {});
         }
       })

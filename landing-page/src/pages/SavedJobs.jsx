@@ -8,33 +8,46 @@ import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore } from '../lib/api';
 import { computeJobScores } from '../lib/matchScore';
 import { savedJobsStore } from '../lib/savedJobsStore';
+import { useAuth } from '../lib/auth';
 
 export default function SavedJobs() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [savedJobIds, setSavedJobIds] = useState(() => savedJobsStore.get());
   const [adminJobs, setAdminJobs] = useState(() => adminJobStore.getWithFreshDates());
 
-  const profile = profileStore.get();
+  const [profile, setProfile] = useState(() => profileStore.get() || {});
+  const [resumeTick, setResumeTick] = useState(0);
 
   useEffect(() => {
     adminJobStore.syncWithBackend();
     const refreshJobs = () => setAdminJobs(adminJobStore.getWithFreshDates());
     const refreshSaved = () => setSavedJobIds(savedJobsStore.get());
+    const refreshProfile = () => setProfile(profileStore.get() || {});
+    const bumpResume = () => setResumeTick((value) => value + 1);
 
     window.addEventListener('admin_jobs_updated', refreshJobs);
     window.addEventListener('saved_jobs_updated', refreshSaved);
+    window.addEventListener('profile_updated', refreshProfile);
+    window.addEventListener('resumes_updated', bumpResume);
     window.addEventListener('storage', refreshSaved);
 
     return () => {
       window.removeEventListener('admin_jobs_updated', refreshJobs);
       window.removeEventListener('saved_jobs_updated', refreshSaved);
+      window.removeEventListener('profile_updated', refreshProfile);
+      window.removeEventListener('resumes_updated', bumpResume);
       window.removeEventListener('storage', refreshSaved);
     };
   }, []);
 
   const allJobs = useMemo(() => [...adminJobs, ...DEMO_JOBS], [adminJobs]);
-  const scoredJobs = useMemo(() => computeJobScores(profile || {}, allJobs), [profile, allJobs]);
+  // Same cache bucket as Top Matches / Jobs / Job Detail so every page reads one score.
+  const scoredJobs = useMemo(
+    () => computeJobScores(profile, allJobs, { userId: user?.id || user?.email || 'anon' }),
+    [profile, allJobs, user, resumeTick],
+  );
 
   const savedJobs = useMemo(() => {
     const idSet = new Set(savedJobIds);

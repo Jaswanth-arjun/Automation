@@ -452,23 +452,12 @@ export function buildTrackerEntries(sources = {}) {
       }) || null;
     }
 
+    // Keyword coverage from a real tailoring report, when one was saved for
+    // this job. No report means no coverage figures — never invent a delta.
     const atsObj = matchedReport?.report?.ats || matchedReport?.report || {};
-    const repBefore = typeof atsObj.beforeScore === 'number' ? atsObj.beforeScore : null;
-    const repAfter = typeof atsObj.afterScore === 'number' ? atsObj.afterScore : null;
-
-    const isTailored = tailorDone || resumes.length > 0 || Boolean(progress.tailor);
-    const beforeScore = repBefore ?? entry.matchScore;
-    let afterScore = repAfter;
-
-    if (isTailored && beforeScore !== null && afterScore === null) {
-      const seedNum = (entry.title + entry.company).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const bump = 28 + (seedNum % 7);
-      afterScore = Math.min(97, Math.max(88, beforeScore + bump));
-    }
-    if (isTailored && beforeScore !== null && afterScore !== null && afterScore <= beforeScore) {
-      afterScore = Math.min(97, beforeScore + 15);
-    }
-    const hasAtsDelta = Boolean(isTailored && beforeScore !== null && afterScore !== null && afterScore > beforeScore);
+    const beforeScore = typeof atsObj.beforeScore === 'number' ? atsObj.beforeScore : null;
+    const afterScore = typeof atsObj.afterScore === 'number' ? atsObj.afterScore : null;
+    const hasCoverage = beforeScore !== null && afterScore !== null;
 
     return {
       key: entry.key,
@@ -480,7 +469,7 @@ export function buildTrackerEntries(sources = {}) {
       matchScore: entry.matchScore,
       beforeScore,
       afterScore,
-      hasAtsDelta,
+      hasCoverage,
       resumes,
       resumeCount: resumes.length,
       latestResume: resumes[0] || null,

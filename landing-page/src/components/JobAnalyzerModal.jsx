@@ -11,7 +11,9 @@ import { DEMO_JOBS } from '../lib/mockData';
 import { useAuth } from '../lib/auth';
 import { jobOwner } from '../lib/jobOwnership';
 import { shortenJobTitle } from './jobTitle';
-import { mapProfileForBackend, extractResumeLocation, profileResumeText, keywordAudit, scoreValue, scoreLabel, extractProfilePdf } from './JobAnalyzerModal.helpers';
+import { mapProfileForBackend, extractResumeLocation, profileResumeText, keywordAudit, scoreValue, extractProfilePdf, matchJobFromTailored } from './JobAnalyzerModal.helpers';
+import { calculateMatchScore } from '../lib/matchScore';
+import MatchScore from './MatchScore';
 import './JobAnalyzerModal.css';
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -400,6 +402,13 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
   const shortJobTitle = shortenJobTitle(job.title) || 'Job Role';
   const chosenFormat = tailoredData?.formats?.find(f => f.id === formatId) || tailoredData?.formats?.[0];
   const profile = profileStore.get() || {};
+  // The single job match score: profile + resume + job description, computed by
+  // the same engine every other page uses. Prefer the stored copy of this job so
+  // the number is identical to Top Matches / Jobs / Job Detail.
+  const storedJob = tailoredData ? findExistingJob(job.applyUrl || job.sourceUrl || job.url || jobUrl) : null;
+  const matchResult = tailoredData
+    ? calculateMatchScore(profile, storedJob || matchJobFromTailored(job), { userId: user?.id || user?.email || 'anon' })
+    : null;
   const ats = chosenFormat?.ats ?? tailoredData?.ats ?? {};
   const beforeScore = scoreValue(ats.beforeScore);
   const afterScore = scoreValue(ats.afterScore);
@@ -628,40 +637,25 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                   </div>
                 </div>
 
-                {/* Before/after ATS comparison */}
-                <div className="ats-comparison-card">
-                  <div className="ats-comparison-side">
-                    <div className="ats-score-ring before">
-                      <svg width="74" height="74" viewBox="0 0 36 36">
-                        <path stroke="#dbe3ee" strokeWidth="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                        <path stroke="#64748b" strokeWidth="3.5" strokeDasharray={`${beforeScore ?? 0}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                      </svg>
-                      <strong>{beforeScore === null ? 'N/A' : `${beforeScore}%`}</strong>
+                {/* One score: the job match. Keyword coverage is a resume metric. */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#94a3b8', marginBottom: '6px' }}>
+                      Job match
                     </div>
-                    <div>
-                      <strong>Before</strong>
-                      <span>ATS score</span>
-                    </div>
+                    <MatchScore
+                      score={matchResult?.score ?? null}
+                      status={matchResult?.status || 'incomplete'}
+                      size="small"
+                      missingLabels={matchResult?.missingProfileLabels || []}
+                    />
                   </div>
-                  <div className="ats-comparison-message">
-                    {scoreDelta !== null && scoreDelta > 0 && (
-                      <span className="ats-delta-badge">+{scoreDelta}%</span>
-                    )}
-                    <span aria-hidden="true">→</span>
-                    <p>{scoreLabel(beforeScore, afterScore)}</p>
-                  </div>
-                  <div className="ats-comparison-side improved">
-                    <div>
-                      <strong>After</strong>
-                      <span>ATS score</span>
-                    </div>
-                    <div className="ats-score-ring after">
-                      <svg width="74" height="74" viewBox="0 0 36 36">
-                        <path stroke="#dbe3ee" strokeWidth="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                        <path stroke="#10b981" strokeWidth="3.5" strokeDasharray={`${afterScore ?? 0}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                      </svg>
-                      <strong>{afterScore === null ? 'N/A' : `${afterScore}%`}</strong>
-                    </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textAlign: 'right' }}>
+                    Resume keyword coverage{' '}
+                    <b style={{ color: '#0f172a' }}>{beforeScore === null ? 'N/A' : `${beforeScore}%`}</b>
+                    {' → '}
+                    <b style={{ color: '#059669' }}>{afterScore === null ? 'N/A' : `${afterScore}%`}</b>
+                    {scoreDelta !== null && scoreDelta > 0 && <span className="ats-delta-badge" style={{ marginLeft: '6px' }}>+{scoreDelta}</span>}
                   </div>
                 </div>
               </div>
@@ -710,7 +704,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                 <h4 style={{ margin: '0 0 14px', fontSize: '14.5px', fontWeight: '800', color: '#0f172a' }}>
                   Keyword Analysis
                 </h4>
-                <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 12px' }}>JD keyword coverage — shows which keywords were added, already present, removed, or still missing after tailoring.</p>
+                <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 12px' }}>Resume keyword coverage — which job-description keywords were already present, newly added, removed, or still missing after tailoring. This is a resume metric, separate from the job match score above.</p>
                 {!keywordRows.length ? <p style={{ fontSize: '13px', color: '#94a3b8' }}>No keyword audit returned by the server.</p> : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                     {keywordRows.map(({ keyword, status, tagIcon, added }) => (
@@ -822,7 +816,7 @@ export default function JobAnalyzerModal({ isOpen, onClose, initialUrl = '', onA
                   </ul>
                   {tailoredData.ats && (
                     <details style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #ddd6fe', fontSize: '11px', color: '#475569' }}>
-                      <summary style={{ cursor: 'pointer', fontWeight: '700' }}>View full keyword audit</summary>
+                      <summary style={{ cursor: 'pointer', fontWeight: '700' }}>View full keyword coverage</summary>
                       <div style={{ marginTop: '7px' }}>
                         {keywordRows.map(({ keyword, status }) => <div key={keyword}><b>{keyword}:</b> {status}</div>)}
                         {ats.details && <div><b>Details:</b> {ats.details}</div>}
