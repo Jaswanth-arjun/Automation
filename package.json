@@ -5,12 +5,13 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "hamzooh": "node scripts/dev-hamzooh.mjs",
+    "hamzo": "node scripts/dev-hamzo.mjs",
+    "hamzooh": "node scripts/dev-hamzo.mjs",
     "start": "node server.js",
     "dev": "node scripts/dev-with-freellmapi.mjs",
     "dev:automation": "node server.js",
     "dev:all": "node scripts/dev-with-freellmapi.mjs",
-    "cli": "node examples/linkedin-connect.js"
+    "cli": "node linkdin-automation/linkedin-connect.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

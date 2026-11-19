@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hamzooh Mock Application — Layout B</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 24px auto; }
+    .field { margin-bottom: 16px; }
+    .field > label:first-child { display: block; font-weight: 600; margin-bottom: 6px; }
+    input[type="text"], input[type="email"], input[type="tel"], textarea { width: 100%; padding: 9px; box-sizing: border-box; }
+    .combo { border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px; cursor: pointer; background: #fff; }
+    .combo .value { color: #334155; }
+    .listbox { border: 1px solid #cbd5e1; border-top: 0; display: none; }
+    .listbox.open { display: block; }
+    .listbox [role="option"] { padding: 8px 10px; cursor: pointer; }
+    .listbox [role="option"]:hover { background: #eef2ff; }
+    .step2 { display: none; }
+    .step2.active { display: block; }
+    .error { color: #b91c1c; font-size: 12px; display: none; }
+    .error.show { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Senior Frontend Engineer — Apply</h1>
+  <form id="gh-form" novalidate>
+    <div class="step1 active" id="step-1">
+      <div class="field">
+        <label for="applicant_name">Applicant name *</label>
+        <input id="applicant_name" name="applicant_name" type="text" required />
+      </div>
+      <div class="field">
+        <label for="applicant_email">Email *</label>
+        <input id="applicant_email" name="applicant_email" type="email" required />
+      </div>
+      <div class="field">
+        <label for="applicant_phone">Mobile number *</label>
+        <input id="applicant_phone" name="applicant_phone" type="tel" required />
+      </div>
+      <div class="field">
+        <label for="portfolio_url">Portfolio / website</label>
+        <input id="portfolio_url" name="portfolio_url" type="text" />
+      </div>
+      <div class="field">
+        <label for="grad_year">Expected graduation year</label>
+        <input id="grad_year" name="grad_year" type="text" />
+      </div>
+
+      <div class="field">
+        <label id="source-label">Where did you hear about this role?</label>
+        <div class="combo" id="source-combo" role="combobox" aria-haspopup="listbox" aria-labelledby="source-label" tabindex="0">
+          <span class="value" id="source-value">Select an option</span>
+        </div>
+        <div class="listbox" id="source-listbox" role="listbox">
+          <div role="option">LinkedIn</div>
+          <div role="option">Company careers page</div>
+          <div role="option">Job board</div>
+          <div role="option">Referral</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Highest level of education completed</label>
+        <div role="group">
+          <label><input type="radio" name="education_level" value="High school" /> High school</label>
+          <label><input type="radio" name="education_level" value="Bachelor's degree" required /> Bachelor's degree</label>
+          <label><input type="radio" name="education_level" value="Master's degree" /> Master's degree</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="resume_upload">Resume *</label>
+        <input id="resume_upload" name="resume_upload" type="file" accept=".pdf,.doc,.docx" required />
+      </div>
+
+      <div class="field">
+        <label><input type="checkbox" name="consent_data" required /> I consent to Hamzooh processing my application data.</label>
+      </div>
+
+      <div class="field">
+        <label for="pitch">Tell us about a project you are proud of</label>
+        <textarea id="pitch" name="pitch" rows="4"></textarea>
+      </div>
+
+      <button type="button" id="next-step">Save and continue</button>
+      <div class="error" id="step1-error">Please complete the required fields.</div>
+    </div>
+
+    <div class="step2" id="step-2">
+      <div class="field">
+        <label>Are you currently authorized to work in India? *</label>
+        <div role="group">
+          <label><input type="radio" name="work_auth_in" value="Yes" required /> Yes</label>
+          <label><input type="radio" name="work_auth_in" value="No" /> No</label>
+        </div>
+      </div>
+      <div class="field">
+        <label for="notice">Notice period</label>
+        <select id="notice" name="notice">
+          <option value="">Select</option>
+          <option>Immediate</option>
+          <option>30 days</option>
+          <option>60 days</option>
+        </select>
+      </div>
+      <button type="submit" id="final-submit">Submit application</button>
+      <div class="error" id="step2-error">Please answer the required question.</div>
+    </div>
+  </form>
+  <div id="success" style="display:none">Thank you for applying! We have received your application.</div>
+  <script>
+    const combo = document.getElementById('source-combo');
+    const listbox = document.getElementById('source-listbox');
+    const valueEl = document.getElementById('source-value');
+    const state = { source: '' };
+    combo.addEventListener('click', () => listbox.classList.toggle('open'));
+    listbox.querySelectorAll('[role="option"]').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        state.source = opt.textContent.trim();
+        valueEl.textContent = state.source;
+        listbox.classList.remove('open');
+      });
+    });
+
+    document.getElementById('next-step').addEventListener('click', () => {
+      const name = document.getElementById('applicant_name').value.trim();
+      const email = document.getElementById('applicant_email').value.trim();
+      const phone = document.getElementById('applicant_phone').value.trim();
+      const edu = document.querySelector('input[name="education_level"]:checked');
+      if (!name || !email || !phone || !edu) {
+        document.getElementById('step1-error').classList.add('show');
+        return;
+      }
+      document.getElementById('step-1').style.display = 'none';
+      document.getElementById('step-2').classList.add('active');
+    });
+
+    document.getElementById('gh-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const auth = document.querySelector('input[name="work_auth_in"]:checked');
+      if (!auth) {
+        document.getElementById('step2-error').classList.add('show');
+        return;
+      }
+      document.getElementById('gh-form').style.display = 'none';
+      document.getElementById('success').style.display = 'block';
+    });
+  </script>
+</body>
+</html>

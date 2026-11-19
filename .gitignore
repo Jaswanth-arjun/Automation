@@ -22,6 +22,7 @@ build/
 data/gmail_tokens.json
 data/sent_emails.json
 data/user_vault.json
+data/billing/
 github-profile/
 temp_scripts/
 HR-Email/backend/__pycache__/

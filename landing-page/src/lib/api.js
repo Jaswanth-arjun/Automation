@@ -5,7 +5,7 @@ function getToken() {
   return localStorage.getItem('hamzooh_token') || localStorage.getItem('hamzo_token') || localStorage.getItem('mailmind_token');
 }
 
-async function apiFetch(baseUrl, path, options = {}) {
+export async function apiFetch(baseUrl, path, options = {}) {
   const token = getToken();
   const headers = {
     'Content-Type': 'application/json',

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hamzooh Mock — MDC / Angular Material ATS</title>
+  <style>
+    body { font-family: Roboto, Arial, sans-serif; max-width: 760px; margin: 24px auto; }
+    .q { margin-bottom: 28px; }
+    mdc-question { display: block; font-weight: 500; margin-bottom: 10px; }
+    /* MDC radios: the real input is fully hidden and the label carries the UI. */
+    .mdc-form-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+    .mdc-radio input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .mdc-radio__outer { width: 18px; height: 18px; border: 2px solid #5f6368; border-radius: 50%; display: inline-block; }
+    .mdc-radio input:checked + .mdc-radio__outer { border-color: #1a73e8; background: #1a73e8; }
+    /* Google renders actions as MDC <div> buttons, not <button> elements. */
+    .VfPpkd-LgbsSe {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #1a73e8; color: #fff; border-radius: 4px; padding: 10px 24px;
+      font-size: 14px; font-weight: 500; cursor: pointer; user-select: none;
+    }
+    .VfPpkd-LgbsSe[aria-disabled="true"] { background: #dadce0; cursor: default; }
+    input[type="text"], input[type="email"], textarea {
+      width: 100%; padding: 9px; box-sizing: border-box; border: 1px solid #dadce0; border-radius: 4px;
+    }
+    .step2 { display: none; }
+    .step2.active { display: block; }
+    .err { color: #d93025; font-size: 13px; display: none; }
+    .err.show { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Forward Deployed Engineer Intern</h1>
+  <form id="mdcform" novalidate>
+    <div id="step-1">
+      <div class="q">
+        <!-- aria-required lives on the group wrapper, not on each input -->
+        <mat-radio-group aria-required="true" role="radiogroup" aria-label="Are you currently enrolled in a degree program?">
+          <mdc-question>Are you currently enrolled in a degree program?</mdc-question>
+          <label class="mdc-form-field"><span class="mdc-radio"><input type="radio" name="enrolled" value="Yes" /><span class="mdc-radio__outer"></span></span><span>Yes</span></label>
+          <label class="mdc-form-field"><span class="mdc-radio"><input type="radio" name="enrolled" value="No" /><span class="mdc-radio__outer"></span></span><span>No</span></label>
+        </mat-radio-group>
+      </div>
+
+      <div class="q">
+        <mat-radio-group aria-required="true" role="radiogroup" aria-label="Are you legally authorized to work in India?">
+          <mdc-question>Are you legally authorized to work in India?</mdc-question>
+          <label class="mdc-form-field"><span class="mdc-radio"><input type="radio" name="workauth" value="Yes" /><span class="mdc-radio__outer"></span></span><span>Yes</span></label>
+          <label class="mdc-form-field"><span class="mdc-radio"><input type="radio" name="workauth" value="No" /><span class="mdc-radio__outer"></span></span><span>No</span></label>
+        </mat-radio-group>
+      </div>
+
+      <div class="q">
+        <label for="fullname">Full name</label>
+        <input id="fullname" name="fullname" type="text" required />
+      </div>
+      <div class="q">
+        <label for="mail">Email</label>
+        <input id="mail" name="mail" type="email" required />
+      </div>
+      <div class="q">
+        <label for="cv">Resume</label>
+        <input id="cv" name="cv" type="file" accept="application/pdf" required />
+      </div>
+
+      <div class="VfPpkd-LgbsSe" id="next" role="button" tabindex="0">Next</div>
+      <div class="err" id="e1">Please answer all required questions.</div>
+    </div>
+
+    <div class="step2" id="step-2">
+      <div class="q">
+        <label for="school">University</label>
+        <input id="school" name="school" type="text" />
+      </div>
+      <div class="q">
+        <label for="grad">Graduation year</label>
+        <input id="grad" name="grad" type="text" />
+      </div>
+      <div class="VfPpkd-LgbsSe" id="final" role="button" tabindex="0">Submit application</div>
+    </div>
+  </form>
+  <div id="done" style="display:none">Thanks for applying! Your application has been submitted.</div>
+  <script>
+    document.getElementById('next').addEventListener('click', () => {
+      const enrolled = document.querySelector('input[name="enrolled"]:checked');
+      const auth = document.querySelector('input[name="workauth"]:checked');
+      const name = document.getElementById('fullname').value.trim();
+      const mail = document.getElementById('mail').value.trim();
+      if (!enrolled || !auth || !name || !mail) {
+        document.getElementById('e1').classList.add('show');
+        return;
+      }
+      document.getElementById('step-1').style.display = 'none';
+      document.getElementById('step-2').classList.add('active');
+    });
+    document.getElementById('final').addEventListener('click', () => {
+      document.getElementById('mdcform').style.display = 'none';
+      document.getElementById('done').style.display = 'block';
+    });
+  </script>
+</body>
+</html>

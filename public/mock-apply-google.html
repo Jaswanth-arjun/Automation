@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hamzooh Mock — Google-style ATS</title>
+  <style>
+    body { font-family: Roboto, Arial, sans-serif; max-width: 760px; margin: 24px auto; }
+    .q { margin-bottom: 28px; }
+    .q-label { font-weight: 500; margin-bottom: 10px; display: block; }
+    /* Material Design: the real input is invisible, the label carries the UI. */
+    .md-radio { display: block; position: relative; padding-left: 34px; margin-bottom: 10px; cursor: pointer; }
+    .md-radio input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+    .md-radio .dot {
+      position: absolute; left: 0; top: 2px; width: 18px; height: 18px;
+      border: 2px solid #5f6368; border-radius: 50%; box-sizing: border-box;
+    }
+    .md-radio input:checked + .dot { border-color: #1a73e8; }
+    .md-radio input:checked + .dot::after {
+      content: ''; position: absolute; inset: 3px; border-radius: 50%; background: #1a73e8;
+    }
+    input[type="text"], input[type="email"], select, textarea {
+      width: 100%; padding: 9px; box-sizing: border-box; border: 1px solid #dadce0; border-radius: 4px;
+    }
+    button { background: #1a73e8; color: #fff; border: 0; border-radius: 4px; padding: 10px 22px; cursor: pointer; font-size: 14px; }
+    .step2 { display: none; }
+    .step2.active { display: block; }
+    .err { color: #d93025; font-size: 13px; display: none; }
+    .err.show { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Forward Deployed Engineer Intern</h1>
+  <form id="gform" novalidate>
+    <div id="step-1">
+      <div class="q">
+        <span class="q-label">Are you currently enrolled in a degree program?</span>
+        <label class="md-radio"><input type="radio" name="enrolled" value="Yes" required /><span class="dot"></span>Yes</label>
+        <label class="md-radio"><input type="radio" name="enrolled" value="No" /><span class="dot"></span>No</label>
+      </div>
+
+      <div class="q">
+        <span class="q-label">Are you legally authorized to work in India?</span>
+        <label class="md-radio"><input type="radio" name="workauth" value="Yes" required /><span class="dot"></span>Yes</label>
+        <label class="md-radio"><input type="radio" name="workauth" value="No" /><span class="dot"></span>No</label>
+      </div>
+
+      <div class="q">
+        <label class="q-label" for="fullname">Full name</label>
+        <input id="fullname" name="fullname" type="text" required />
+      </div>
+      <div class="q">
+        <label class="q-label" for="mail">Email</label>
+        <input id="mail" name="mail" type="email" required />
+      </div>
+      <div class="q">
+        <label class="q-label" for="cv">Resume</label>
+        <input id="cv" name="cv" type="file" accept="application/pdf" required />
+      </div>
+
+      <button type="button" id="next">Next</button>
+      <div class="err" id="e1">Please answer all required questions.</div>
+    </div>
+
+    <div class="step2" id="step-2">
+      <div class="q">
+        <label class="q-label" for="school">University</label>
+        <input id="school" name="school" type="text" />
+      </div>
+      <div class="q">
+        <label class="q-label" for="grad">Graduation year</label>
+        <input id="grad" name="grad" type="text" />
+      </div>
+      <button type="submit" id="final">Submit application</button>
+    </div>
+  </form>
+  <div id="done" style="display:none">Thanks for applying! Your application has been submitted.</div>
+  <script>
+    document.getElementById('next').addEventListener('click', () => {
+      const enrolled = document.querySelector('input[name="enrolled"]:checked');
+      const auth = document.querySelector('input[name="workauth"]:checked');
+      const name = document.getElementById('fullname').value.trim();
+      const mail = document.getElementById('mail').value.trim();
+      if (!enrolled || !auth || !name || !mail) {
+        document.getElementById('e1').classList.add('show');
+        return;
+      }
+      document.getElementById('step-1').style.display = 'none';
+      document.getElementById('step-2').classList.add('active');
+    });
+    document.getElementById('gform').addEventListener('submit', (e) => {
+      e.preventDefault();
+      document.getElementById('gform').style.display = 'none';
+      document.getElementById('done').style.display = 'block';
+    });
+  </script>
+</body>
+</html>

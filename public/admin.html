@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="admin-subscriptions.css" />
 </head>
 <body>
   <header class="topbar">
@@ -26,6 +27,7 @@
           <span class="stat-label">active postings</span>
         </div>
         <a href="#candidatesSection" class="btn btn-outline btn-sm">Candidates ↓</a>
+        <a href="#subscriptionsSection" class="btn btn-outline btn-sm">Subscriptions ↓</a>
         <a href="/" class="btn btn-outline btn-sm" id="backToDashboardBtn">← Back to dashboard</a>
       </div>
     </div>
@@ -332,7 +334,249 @@
         </form>
       </div>
     </section>
+
+    <!-- ── Subscriptions & premium control ── -->
+    <section class="card subs-card" id="subscriptionsSection">
+      <div class="card-head contacts-head">
+        <div>
+          <h2>Subscription management</h2>
+          <p>Turn Free/Pro entitlements on or off, grant premium access to a single account, and review real payment records.</p>
+        </div>
+        <div class="subs-head-actions">
+          <span class="subs-live-pill is-off" id="premiumStatePill">Premium: OFF</span>
+          <button type="button" class="btn btn-secondary btn-sm" id="subsRefreshBtn">Refresh</button>
+        </div>
+      </div>
+
+      <div class="premium-switch-row">
+        <div class="premium-switch-copy">
+          <strong>Premium features</strong>
+          <p id="premiumSwitchHint">Off — the app behaves exactly as it did before subscriptions: no limits, no pricing, upgrades disabled.</p>
+        </div>
+        <button type="button" class="switch" id="premiumToggle" role="switch" aria-checked="false" aria-label="Toggle premium features">
+          <span class="switch-track"><span class="switch-knob"></span></span>
+          <span class="switch-label" id="premiumToggleLabel">DISABLED</span>
+        </button>
+      </div>
+
+      <div class="subs-stats" id="subsStats"></div>
+
+      <div class="subs-revenue" id="subsRevenue"></div>
+
+      <details class="subs-settings">
+        <summary>Prices &amp; feature limits</summary>
+        <form id="subsSettingsForm" onsubmit="return false;">
+          <div class="subs-settings-grid">
+            <div class="field">
+              <label for="priceMonthly">Pro monthly price (₹)</label>
+              <input type="number" id="priceMonthly" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="priceYearly">Pro yearly price (₹)</label>
+              <input type="number" id="priceYearly" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeContacts">Free unlocked contacts / company</label>
+              <input type="number" id="freeContacts" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeResume">Free resume tailors / month</label>
+              <input type="number" id="freeResume" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeAi">Free AI communication / month</label>
+              <input type="number" id="freeAi" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeLiCampaigns">Free LinkedIn campaigns / month</label>
+              <input type="number" id="freeLiCampaigns" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeLiRequests">Free LinkedIn requests / month</label>
+              <input type="number" id="freeLiRequests" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeAutoApply">Free auto-applies / month</label>
+              <input type="number" id="freeAutoApply" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="proResume">Pro resume tailors / month</label>
+              <input type="number" id="proResume" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="proAi">Pro AI communication / month</label>
+              <input type="number" id="proAi" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="proLiRequestsPerCampaign">Pro requests / campaign</label>
+              <input type="number" id="proLiRequestsPerCampaign" min="0" step="1" />
+            </div>
+            <div class="field">
+              <label for="freeLiRequestsPerCampaign">Free requests / campaign</label>
+              <input type="number" id="freeLiRequestsPerCampaign" min="0" step="1" />
+            </div>
+          </div>
+
+          <div class="subs-settings-actions">
+            <button type="button" class="btn btn-primary" id="subsSettingsSave">Save settings</button>
+            <button type="button" class="btn btn-ghost" id="subsSweepBtn">Run expiry sweep</button>
+            <span class="subs-settings-meta" id="subsSettingsMeta"></span>
+          </div>
+          <p class="subs-status hidden" id="subsSettingsStatus"></p>
+        </form>
+      </details>
+
+      <div class="subs-block">
+        <div class="subs-block-head">
+          <h3>Subscribers</h3>
+          <span id="subsUserCount">0 users</span>
+        </div>
+
+        <div class="subs-toolbar">
+          <input type="search" id="subsUserSearch" class="contacts-search" placeholder="Search by email or name…" />
+          <select id="subsUserFilter" class="subs-select">
+            <option value="all">All users</option>
+            <option value="free">Free users</option>
+            <option value="pro">Pro users</option>
+            <option value="monthly">Pro monthly</option>
+            <option value="yearly">Pro yearly</option>
+            <option value="active">Active subscriptions</option>
+            <option value="expired">Expired subscriptions</option>
+            <option value="cancelled">Cancelled subscriptions</option>
+            <option value="admin">Admin-granted premium</option>
+            <option value="paid">Has successful payment</option>
+          </select>
+          <select id="subsUserSort" class="subs-select">
+            <option value="createdAt:desc">Newest accounts</option>
+            <option value="createdAt:asc">Oldest accounts</option>
+            <option value="email:asc">Email A → Z</option>
+            <option value="expiryDate:asc">Expiring soonest</option>
+            <option value="expiryDate:desc">Expiring latest</option>
+          </select>
+          <button type="button" class="btn btn-secondary btn-sm" id="subsCsvBtn">Export CSV</button>
+        </div>
+
+        <div class="subs-table-wrap">
+          <table class="subs-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Plan</th>
+                <th>Cycle</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th class="hide-sm">Expiry</th>
+                <th class="hide-sm">Payments</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="subsUsersBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state hidden" id="subsUsersEmpty">
+          <span class="empty-icon">👤</span>
+          <p>No users match this filter.</p>
+        </div>
+        <div class="subs-pager" id="subsPager"></div>
+      </div>
+
+      <div class="subs-block">
+        <div class="subs-block-head">
+          <h3>Recent transactions</h3>
+          <span id="subsTxCount">0 payments</span>
+        </div>
+        <div class="subs-toolbar">
+          <select id="subsTxStatus" class="subs-select">
+            <option value="all">All statuses</option>
+            <option value="paid">Successful</option>
+            <option value="created">Created (checkout opened)</option>
+            <option value="failed">Failed</option>
+            <option value="refunded">Refunded</option>
+            <option value="review">Needs review</option>
+          </select>
+          <input type="search" id="subsTxSearch" class="contacts-search" placeholder="Email, payment id or order id…" />
+        </div>
+        <div class="subs-table-wrap">
+          <table class="subs-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>User</th>
+                <th>Plan</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th class="hide-sm">Razorpay payment</th>
+                <th class="hide-sm">Order</th>
+              </tr>
+            </thead>
+            <tbody id="subsTxBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state hidden" id="subsTxEmpty">
+          <span class="empty-icon">🧾</span>
+          <p>No transactions yet. They appear here the moment a checkout is created.</p>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <!-- Grant premium modal -->
+  <div class="subs-modal hidden" id="grantModal" role="dialog" aria-modal="true" aria-labelledby="grantTitle">
+    <div class="subs-modal-card">
+      <header>
+        <h3 id="grantTitle">Enable premium access</h3>
+        <button type="button" class="subs-modal-x" id="grantClose" aria-label="Close">✕</button>
+      </header>
+      <p class="subs-modal-user" id="grantUserLine"></p>
+      <div class="field">
+        <label for="grantReason">Reason (required, stored in the audit log)</label>
+        <textarea id="grantReason" rows="3" placeholder="e.g. Partner program — 30 days of Pro"></textarea>
+      </div>
+      <div class="field">
+        <label for="grantDays">Expires in days <span class="muted">(leave blank for no expiry)</span></label>
+        <input type="number" id="grantDays" min="1" step="1" placeholder="30" />
+      </div>
+      <p class="subs-status hidden" id="grantStatus"></p>
+      <div class="subs-modal-actions">
+        <button type="button" class="btn btn-ghost" id="grantCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="grantSubmit">Enable premium</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Revoke premium modal -->
+  <div class="subs-modal hidden" id="revokeModal" role="dialog" aria-modal="true" aria-labelledby="revokeTitle">
+    <div class="subs-modal-card">
+      <header>
+        <h3 id="revokeTitle">Revoke manual premium</h3>
+        <button type="button" class="subs-modal-x" id="revokeClose" aria-label="Close">✕</button>
+      </header>
+      <p class="subs-modal-user" id="revokeUserLine"></p>
+      <div class="subs-note">
+        A paid Razorpay subscription is never touched. If this user pays, they keep Pro after the grant is revoked.
+      </div>
+      <div class="field">
+        <label for="revokeReason">Reason</label>
+        <textarea id="revokeReason" rows="3" placeholder="e.g. Trial ended"></textarea>
+      </div>
+      <p class="subs-status hidden" id="revokeStatus"></p>
+      <div class="subs-modal-actions">
+        <button type="button" class="btn btn-ghost" id="revokeCancel">Cancel</button>
+        <button type="button" class="btn btn-danger" id="revokeSubmit">Revoke premium</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- User detail modal -->
+  <div class="subs-modal hidden" id="userModal" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
+    <div class="subs-modal-card is-wide">
+      <header>
+        <h3 id="userModalTitle">User</h3>
+        <button type="button" class="subs-modal-x" id="userModalClose" aria-label="Close">✕</button>
+      </header>
+      <div id="userModalBody" class="subs-user-body"></div>
+    </div>
+  </div>
 
   <div id="toastNotification" class="toast hidden">
     <span id="toastMessage"></span>

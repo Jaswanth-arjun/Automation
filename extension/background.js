@@ -307,9 +307,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       requestId: message.requestId || '',
       url,
       resumeName: message.resumeName || 'hamzooh-resume.pdf',
+      // Keep the bytes inline as a fallback: if IndexedDB or the resume
+      // request fails, the content script can still attach the tailored PDF.
+      resumeBase64: String(message.resumeBase64 || ''),
       resumeText: String(message.resumeText || '').slice(0, 20000),
       jobTitle: message.jobTitle || '',
       company: message.company || '',
+      autoSubmit: message.autoSubmit === true,
       startedAt: Date.now(),
       hasResume: Boolean(message.resumeBase64),
     };
@@ -326,7 +330,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await storageSet({
           profile: message.profile || {},
           answers: message.answers || {},
-          pendingApply: { ...pendingApply, resumeText: '' },
+          // Drop the inline copy first (IndexedDB still holds the blob).
+          pendingApply: { ...pendingApply, resumeBase64: '', resumeText: '' },
         });
       } catch (err2) {
         sendResponse({ ok: false, error: err2.message || 'Could not store apply session.' });

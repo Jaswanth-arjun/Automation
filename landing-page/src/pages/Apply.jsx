@@ -4,7 +4,8 @@ import {
   ArrowLeft, ArrowRight, Mail, FileText, Sparkles, ExternalLink, 
   Copy, Check, Send, UserPlus, Download, CheckCircle2, 
   MapPin, Clock, Building, Bookmark, AlertCircle, RefreshCw,
-  Upload, Eye, ChevronRight, UserCheck, ShieldCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil
+  Upload, Eye, ChevronRight, UserCheck, ShieldCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil,
+  Lock, Gem
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
@@ -379,10 +380,13 @@ export default function Apply() {
 
   const [employeeList, setEmployeeList] = useState([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
+  // Counts come from the backend so the UI never invents locked contacts.
+  const [contactAccess, setContactAccess] = useState(null);
 
   useEffect(() => {
     if (!job?.company) {
       setEmployeeList([]);
+      setContactAccess(null);
       return;
     }
     let cancelled = false;
@@ -397,7 +401,18 @@ export default function Apply() {
       .then((rows) => {
         if (cancelled) return;
         const serverRows = Array.isArray(rows) ? rows : [];
-        const cached = employeeStore.getAll().filter((emp) => sameCompany(emp.company));
+        // Never resurrect a locked contact from the browser cache: locked rows
+        // arrive masked and cached copies of the same person are skipped.
+        const lockedNames = new Set(
+          serverRows
+            .filter((row) => row.locked)
+            .map((row) => String(row.name || '').trim().toLowerCase())
+            .filter(Boolean),
+        );
+        const cached = employeeStore.getAll()
+          .filter((emp) => sameCompany(emp.company))
+          .filter((emp) => !String(emp.email || '').includes('•'))
+          .filter((emp) => !lockedNames.has(String(emp.name || '').trim().toLowerCase()));
         const merged = [...serverRows];
         cached.forEach((emp) => {
           if (!merged.some((row) => row.email === emp.email && sameCompany(row.company))) merged.push(emp);
@@ -405,15 +420,24 @@ export default function Apply() {
         const list = merged;
         setEmployeeList(list.map((emp) => ({
           ...emp,
-          selected: true,
-          role: emp.role && job.company && !emp.role.toLowerCase().includes(job.company.toLowerCase())
+          selected: !emp.locked,
+          role: emp.role && job.company && !String(emp.role).toLowerCase().includes(job.company.toLowerCase())
             ? `${emp.role} at ${emp.company || job.company}`
             : (emp.role || emp.company || ''),
         })));
+        const lockedCount = list.filter((row) => row.locked).length;
+        setContactAccess({
+          discovered: list.length,
+          unlocked: list.length - lockedCount,
+          locked: lockedCount,
+          cap: lockedCount ? list.length - lockedCount : null,
+        });
       })
       .catch(() => {
         if (cancelled) return;
-        const cached = employeeStore.getAll().filter((emp) => sameCompany(emp.company));
+        const cached = employeeStore.getAll()
+          .filter((emp) => sameCompany(emp.company))
+          .filter((emp) => !String(emp.email || '').includes('•'));
         setEmployeeList(cached.map((emp) => ({ ...emp, selected: true })));
       })
       .finally(() => {
@@ -423,7 +447,7 @@ export default function Apply() {
   }, [job?.company, job?.id]);
 
   const toggleEmployeeSelect = (id) => {
-    setEmployeeList(prev => prev.map(e => e.id === id ? { ...e, selected: !e.selected } : e));
+    setEmployeeList(prev => prev.map(e => (e.id === id && !e.locked) ? { ...e, selected: !e.selected } : e));
   };
 
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -439,9 +463,10 @@ export default function Apply() {
       if (res && Array.isArray(res.contacts) && res.contacts.length > 0) {
         setEmployeeList(res.contacts.map((emp) => ({
           ...emp,
-          selected: true,
+          selected: !emp.locked,
           role: emp.role || `${emp.company || job.company} Representative`,
         })));
+        if (res.contactAccess) setContactAccess(res.contactAccess);
       }
     } catch (err) {
       console.error('Discovery error:', err);
@@ -450,7 +475,9 @@ export default function Apply() {
     }
   };
 
-  const selectedEmployees = employeeList.filter(e => e.selected);
+  const selectedEmployees = employeeList.filter(e => e.selected && !e.locked);
+  const lockedContacts = employeeList.filter(e => e.locked);
+  const unlockViaPro = () => navigate('/dashboard/subscription?plan=monthly');
 
   // Referral Email Template Draft (matching reference image format)
   const generateInitialDraft = () => {
@@ -866,6 +893,18 @@ ${firstName}`;
       return;
     }
 
+    const alreadyApplied = applicationStore.getAll().some((app) => {
+      if (app.stage === 'referral' || app.status === 'Outreach') return false;
+      if (app.jobId && jobId && app.jobId === jobId) return true;
+      return String(app.company || '').toLowerCase() === String(job?.company || '').toLowerCase()
+        && String(app.title || '').toLowerCase() === String(job?.title || '').toLowerCase();
+    });
+    if (alreadyApplied && !window.confirm(
+      'You already recorded an application for this role at this company. Start the automation again?',
+    )) {
+      return;
+    }
+
     setAutoApplying(true);
     setAutoApplyProgress([]);
     setAutoApplyResult(null);
@@ -944,9 +983,11 @@ ${firstName}`;
       type: 'HAMZOOH_START_APPLY',
       requestId,
       url: link,
+      autoSubmit: true,
       profile: {
         ...(profile || {}),
         jobLocation: job?.location || job?.filters?.location || '',
+        jobSource: job?.source || job?.sourceName || job?.provider || '',
       },
       answers: savedAnswers,
       resumeBase64: pdfToAttach,
@@ -1340,6 +1381,26 @@ ${firstName}`;
               Extracted from verified employee records for <strong>{job.company}</strong>. Each employee will receive a personalized version of your referral request.
             </p>
 
+            {contactAccess && contactAccess.locked > 0 && (
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px',
+                padding: '10px 14px', marginBottom: '14px', borderRadius: '12px',
+                background: '#fffbeb', border: '1px solid #fde68a'
+              }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#92400e' }}>
+                  {contactAccess.discovered} employees discovered
+                </span>
+                <span style={{ fontSize: '11px', color: '#a16207' }}>·</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#047857' }}>
+                  {contactAccess.unlocked} unlocked
+                </span>
+                <span style={{ fontSize: '11px', color: '#a16207' }}>·</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#b45309' }}>
+                  {contactAccess.locked} additional locked
+                </span>
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {employeesLoading || isDiscovering ? (
                 <div style={{ padding: '16px 20px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', textAlign: 'center' }}>
@@ -1373,7 +1434,46 @@ ${firstName}`;
                   </button>
                 </div>
               ) : null}
-              {employeeList.map((emp) => (
+              {employeeList.map((emp) => {
+                if (emp.locked) {
+                  return (
+                    <div
+                      key={emp.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        flexWrap: 'wrap',
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        border: '1px dashed #fcd34d',
+                        background: 'linear-gradient(135deg, #fffdf5, #fffbeb)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                        <span style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                          <Lock size={15} style={{ color: '#b45309' }} />
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <strong style={{ fontSize: '14px', color: '#1a202c', display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+                            <span style={{ filter: 'blur(3.5px)', userSelect: 'none' }}>{emp.name || 'Employee name'}</span>
+                            <span style={{ fontSize: '9.5px', fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '2px 7px', borderRadius: '999px' }}>
+                              Premium
+                            </span>
+                          </strong>
+                          <span style={{ fontSize: '12px', color: '#92400e', display: 'block', marginTop: '2px' }}>
+                            {emp.role || 'Employee'} · <code style={{ filter: 'blur(3px)', userSelect: 'none' }}>{emp.email || '•••••@company.com'}</code>
+                          </span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '3px 10px', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                        <Lock size={11} /> Locked
+                      </span>
+                    </div>
+                  );
+                }
+                return (
                 <div 
                   key={emp.id}
                   onClick={() => toggleEmployeeSelect(emp.id)}
@@ -1412,7 +1512,50 @@ ${firstName}`;
                     {emp.selected ? 'Selected' : 'Skipped'}
                   </span>
                 </div>
-              ))}
+                );
+              })}
+
+              {lockedContacts.length > 0 && (
+                <div style={{
+                  marginTop: '4px',
+                  padding: '18px 20px',
+                  borderRadius: '14px',
+                  border: '1px solid #fde68a',
+                  background: 'linear-gradient(135deg, #fffbeb 0%, #fff7ed 100%)',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '13.5px', fontWeight: 800, color: '#92400e' }}>
+                    <Gem size={16} /> Unlock More Employee Contacts with Pro
+                  </div>
+                  <p style={{ margin: '7px auto 12px', maxWidth: '460px', fontSize: '12px', lineHeight: 1.6, color: '#a16207' }}>
+                    Discover and unlock more eligible company employees and recruiters to expand your referral
+                    opportunities and improve your chances of getting noticed.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={unlockViaPro}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '7px',
+                      padding: '9px 20px',
+                      borderRadius: '999px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                      color: '#fff',
+                      fontSize: '12.5px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      boxShadow: '0 10px 24px rgba(217, 119, 6, 0.28)'
+                    }}
+                  >
+                    <Gem size={14} /> Upgrade to Pro — Unlock More Contacts
+                  </button>
+                  <p style={{ margin: '9px 0 0', fontSize: '10.5px', color: '#b45309' }}>
+                    {lockedContacts.length} more contact{lockedContacts.length === 1 ? '' : 's'} available on Pro. Pro improves your chances — it never guarantees a referral or an offer.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

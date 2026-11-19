@@ -27,6 +27,14 @@ import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calcu
 import { buildJobDraft } from './lib/job-import.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
+import { AsyncLocalStorage } from 'async_hooks';
+import { registerBillingRoutes } from './lib/billing/routes.js';
+import {
+  accessForUser, accessFromRequest, applyContactAccess, consumeFeature, guardFeature,
+  isAdminUser, resolveUser, upgradePayload,
+} from './lib/billing/entitlements.js';
+import { CAMPAIGN_REQUESTS, FEATURE_KEYS } from './lib/billing/plans.js';
+import { createSession, getSettings, upsertUser } from './lib/billing/store.js';
 import { campaignStore } from './lib/campaign-store.js';
 import { ReferralCampaignEngine } from './lib/referral-campaign-engine.js';
 import { connectMongo, isMongoActive, CandidateModel, BroadcastModel } from './lib/mongodb.js';
@@ -307,14 +315,38 @@ const PORT = process.env.PORT || 3000;
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-app.use(express.json({ limit: '15mb' }));
+// Keep the raw body so Razorpay webhooks can be signature-verified byte-for-byte.
+app.use(express.json({
+  limit: '15mb',
+  verify: (req, res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+/**
+ * The plan a request runs under, available to the AI engine without threading
+ * a parameter through every call site. Free → gemini-2.5-flash, Pro → 2.5-pro.
+ */
+const aiTierStorage = new AsyncLocalStorage();
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api')) return next();
+  let tier = 'legacy';
+  try {
+    tier = accessForUser(resolveUser(req)).planId;
+  } catch (err) {
+    console.warn('[billing] plan resolution failed:', err.message);
+  }
+  return aiTierStorage.run(tier, next);
+});
+
+// Subscriptions, Razorpay checkout/webhooks and the admin billing console.
+registerBillingRoutes(app);
 
 // Turn the edited HTML resume into a real PDF. This is separate from the
 // original structured PDF renderer because the editor may contain newly-added
@@ -877,7 +909,11 @@ app.get('/api/employees', async (req, res) => {
     }
   }
 
-  res.json(list);
+  // Free users unlock the first 5 contacts for this company; the rest are
+  // returned blurred. Locked emails never leave the server.
+  const access = accessForUser(resolveUser(req));
+  const gated = applyContactAccess(list, access);
+  res.json(gated.contacts);
 });
 
 app.post('/api/employees/discover', async (req, res) => {
@@ -904,13 +940,16 @@ app.post('/api/employees/discover', async (req, res) => {
       })), 'auto-discovery');
     }
     const updated = readEmployees().filter(e => companiesMatch(e.company, company || result.company));
+    const access = accessForUser(resolveUser(req));
+    const gated = applyContactAccess(updated, access);
     res.json({
       success: true,
       company: company || result.company,
       domain: result.domain,
       mailServerVerified: result.mailServerVerified,
       mailProvider: result.mailProvider,
-      contacts: updated,
+      contacts: gated.contacts,
+      contactAccess: gated.access,
     });
   } catch (err) {
     console.error('[Employee Discovery] Error:', err);
@@ -1106,6 +1145,11 @@ async function askGemini(prompt) {
   const isTransient = (error) => /\b(408|425|429|500|502|503|504)\b|timeout|timed out|abort|temporarily unavailable|service unavailable/i.test(String(error?.message || error));
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  // Plan-aware engine: Free runs the fast model, Pro runs the premium one.
+  const tier = aiTierStorage.getStore();
+  const planModel = tier === 'pro' ? 'gemini-2.5-pro' : tier === 'free' ? 'gemini-2.5-flash' : '';
+  const flashFirst = tier === 'free';
+
   // RadoxAI / Coarena is the primary high-speed OpenAI-compatible provider.
   const radoxEnabled = String(process.env.ENABLE_RADOX_FALLBACK || 'true').toLowerCase() !== 'false';
   if (radoxEnabled && (process.env.RADOX_API_KEY || process.env.RADOXAI_API_KEY)) {
@@ -1144,7 +1188,7 @@ async function askGemini(prompt) {
   let geminiError = null;
   if (apiKey) {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const requestedModel = String(process.env.GEMINI_MODEL || '').trim().replace(/^models\//, '');
+    const requestedModel = String(process.env.GEMINI_MODEL || '').trim().replace(/^models\//, '') || planModel;
     let modelNames = requestedModel ? [requestedModel] : [];
     try {
       // Do not guess model IDs: model availability is account/project specific
@@ -1157,7 +1201,7 @@ async function askGemini(prompt) {
           .map((item) => String(item.name || '').replace(/^models\//, ''))
           .filter((name) => /^gemini-/i.test(name) && !/embedding|aqa|robotics|image|tts|audio|computer/i.test(name));
         if (!requestedModel) {
-          const preferPro = String(process.env.GEMINI_PREFER_PRO || 'true').toLowerCase() !== 'false';
+          const preferPro = flashFirst ? false : String(process.env.GEMINI_PREFER_PRO || 'true').toLowerCase() !== 'false';
           const rank = (name) => {
             const flash = /flash/i.test(name) ? (preferPro ? 10 : 40) : 0;
             const preview = /preview/i.test(name) ? -20 : 0;
@@ -1658,6 +1702,7 @@ app.post('/api/gmail/sync', async (req, res) => {
 });
 
 app.post('/api/ai/mail/summarize', async (req, res) => {
+  if (!guardFeature(req, res, FEATURE_KEYS.AI_COMM)) return;
   try {
     const { subject, from, body } = req.body || {};
     const textBody = String(body || '').trim();
@@ -1727,6 +1772,7 @@ function templateFollowUp({ subject }) {
 }
 
 app.post('/api/ai/mail/reply', async (req, res) => {
+  if (!guardFeature(req, res, FEATURE_KEYS.AI_COMM)) return;
   const { subject, from, email, body } = req.body || {};
   try {
     const text = await askGemini(`Write a polite, concise email reply the user can send. Do not invent facts that are not in the email. Keep it under 140 words.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${String(body || '').slice(0, 6000)}`);
@@ -1737,6 +1783,7 @@ app.post('/api/ai/mail/reply', async (req, res) => {
 });
 
 app.post('/api/ai/mail/followup', async (req, res) => {
+  if (!guardFeature(req, res, FEATURE_KEYS.AI_COMM)) return;
   const { subject, to, body } = req.body || {};
   const nextSubject = subject?.toLowerCase().startsWith('follow') ? subject : `Following up: ${subject || 'my last email'}`;
   try {
@@ -1777,6 +1824,7 @@ app.post('/api/ai/mail/followup/send', async (req, res) => {
  * last one) and answers in that context, in the user's voice.
  */
 app.post('/api/ai/conversation/reply', async (req, res) => {
+  if (!guardFeature(req, res, FEATURE_KEYS.AI_COMM)) return;
   const { channel, contactName, role, company, messages = [], instruction = '' } = req.body || {};
   const history = (Array.isArray(messages) ? messages : [])
     .filter((item) => item && String(item.text || '').trim())
@@ -2642,6 +2690,8 @@ function editableResumeHtml(profile, resume) {
 const RESUME_TEMPLATE_FORMATS = { classic: 'recommended', modern: 'modern', compact: 'compact' };
 
 app.post('/api/external-job/tailor', async (req, res) => {
+  // Resume tailoring is the metered AI action (Free 5/mo, Pro 50/mo).
+  if (!guardFeature(req, res, FEATURE_KEYS.RESUME_TAILOR)) return;
   try {
     const { url, profile, resumeText, profileResumeText, jobDescription, title, company, template } = req.body || {};
     const preferredFormatId = RESUME_TEMPLATE_FORMATS[String(template || '').toLowerCase()] || RESUME_TEMPLATE_FORMATS.classic;
@@ -2966,9 +3016,20 @@ app.post('/api/auth/verify-otp', (req, res) => {
 
   otpStore.delete(email);
   const user = createOtpUser(email);
+  const billingUser = upsertUser({
+    email,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    provider: 'email',
+  });
+  const access = billingUser ? accessForUser(billingUser) : null;
   res.json({
-    token: crypto.randomBytes(32).toString('hex'),
-    user,
+    token: billingUser ? createSession(billingUser.id) : crypto.randomBytes(32).toString('hex'),
+    user: {
+      ...user,
+      plan: access?.planId || 'free',
+      isPro: Boolean(access?.isPro),
+    },
   });
 });
 
@@ -3029,11 +3090,15 @@ app.get('/api/gmail/callback', async (req, res) => {
     }
 
     if (oauthState === 'login') {
+      const billingUser = userEmail
+        ? upsertUser({ email: userEmail, displayName, avatarUrl, provider: 'google' })
+        : null;
       const params = new URLSearchParams({
         login: 'true',
         email: userEmail,
         name: displayName,
-        picture: avatarUrl
+        picture: avatarUrl,
+        ...(billingUser ? { token: createSession(billingUser.id) } : {}),
       });
       return res.redirect(`${FRONTEND_URL}/auth/callback?${params.toString()}`);
     }
@@ -3087,10 +3152,11 @@ app.post('/api/gmail/disconnect', (req, res) => {
 });
 
 app.get('/api/dashboard', async (req, res) => {
+  const sessionUser = resolveUser(req);
   const tokens = readGmailTokens();
-  let displayName = tokens.displayName || '';
-  let avatarUrl = tokens.picture || '';
-  let email = tokens.email || '';
+  let displayName = sessionUser?.displayName || tokens.displayName || '';
+  let avatarUrl = sessionUser?.avatarUrl || tokens.picture || '';
+  let email = sessionUser?.email || tokens.email || '';
 
   if (tokens.connected && (!displayName || !email)) {
     try {
@@ -3112,10 +3178,12 @@ app.get('/api/dashboard', async (req, res) => {
 
   res.json({
     user: {
-      id: email ? `google-${email}` : 'default-user',
+      id: sessionUser?.id || (email ? `google-${email}` : 'default-user'),
       email: email,
       displayName: displayName || (email ? email.split('@')[0] : 'User'),
       avatarUrl: avatarUrl,
+      plan: sessionUser ? accessForUser(sessionUser).planId : 'free',
+      isPro: sessionUser ? accessForUser(sessionUser).isPro : false,
       gmailConnection: {
         connected: Boolean(tokens.connected && tokens.email),
         gmailEmail: tokens.email || '',
@@ -3385,6 +3453,28 @@ app.post('/api/send-email', async (req, res) => {
 
   if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
     return res.status(400).json({ error: 'Recipients array is required.' });
+  }
+
+  // Email referral campaign cap: Free can reach 5 contacts per campaign.
+  {
+    const access = accessForUser(resolveUser(req));
+    if (access.planId !== 'legacy' && access.unlockedContacts !== Infinity) {
+      const unique = new Set(
+        recipients
+          .map((r) => String(typeof r === 'string' ? r : r?.email || '').trim().toLowerCase())
+          .filter(Boolean),
+      );
+      if (unique.size > access.unlockedContacts) {
+        return res.status(402).json({
+          error: `The Free plan can email up to ${access.unlockedContacts} referral contacts per campaign. Upgrade to Pro to reach every discovered contact.`,
+          code: 'UPGRADE_REQUIRED',
+          feature: 'email_referral_send',
+          limit: access.unlockedContacts,
+          used: unique.size,
+          plan: access.planId,
+        });
+      }
+    }
   }
 
   try {
@@ -4052,6 +4142,38 @@ app.post('/api/campaigns', async (req, res) => {
       return res.status(400).json({ error: 'The connection-request campaign is running. Stop it before starting a referral campaign.' });
     }
 
+    // LinkedIn referral campaign entitlements: campaign count per month,
+    // requests per campaign, and the monthly request budget.
+    {
+      const { user, access } = accessFromRequest(req);
+      if (access.planId !== 'legacy') {
+        const roleCount = Array.isArray(roles) && roles.length ? roles.length : 1;
+        const perRoleCount = Math.max(1, Number(perRole) || 10);
+        const requested = roleCount * perRoleCount;
+        const perCampaignCap = access.campaignRequests;
+
+        if (perCampaignCap !== Infinity && requested > perCampaignCap) {
+          return res.status(402).json({
+            error: `The Free plan allows ${perCampaignCap} referral requests per campaign. Reduce the roles/requests, or upgrade to Pro for up to 100 a week.`,
+            code: 'UPGRADE_REQUIRED',
+            feature: 'linkedin_request',
+            limit: perCampaignCap,
+            used: requested,
+            plan: access.planId,
+          });
+        }
+
+        const campaignGuard = consumeFeature(user, FEATURE_KEYS.LINKEDIN_CAMPAIGN, 1, access);
+        if (!campaignGuard.ok) {
+          return res.status(402).json(upgradePayload(campaignGuard, access));
+        }
+        const requestGuard = consumeFeature(user, FEATURE_KEYS.LINKEDIN_REQUEST, requested, access);
+        if (!requestGuard.ok) {
+          return res.status(402).json(upgradePayload(requestGuard, access));
+        }
+      }
+    }
+
     await releaseLinkedInProfileForCampaign();
 
     // A paused or recovery-paused campaign for the exact same company + role is
@@ -4326,6 +4448,8 @@ Return ONLY JSON:
 let activeAutoApply = null;
 
 app.post('/api/auto-apply', async (req, res) => {
+  // Free: 5 auto-applies/month. Pro: unlimited (still single-flight below).
+  if (!guardFeature(req, res, FEATURE_KEYS.AUTO_APPLY)) return;
   const { applyUrl, profile, resumeBase64, resumeName, jobTitle, company } = req.body || {};
 
   if (!applyUrl) {

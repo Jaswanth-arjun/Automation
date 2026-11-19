@@ -117,6 +117,7 @@
         resumeText: data.resumeText || '',
         jobTitle: data.jobTitle || '',
         company: data.company || '',
+        autoSubmit: data.autoSubmit === true,
       }, (result) => {
         const error = chrome.runtime.lastError?.message || result?.error || '';
         reply('HAMZOOH_APPLY_READY', { requestId: data.requestId || '', ok: Boolean(result?.ok) && !error, error, url: result?.url || '' });

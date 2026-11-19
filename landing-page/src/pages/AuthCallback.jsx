@@ -16,7 +16,7 @@ export default function AuthCallback() {
     const name = params.get('name') || '';
     const picture = params.get('picture') || '';
 
-    if (token) {
+    if (token && login !== 'true') {
       handleCallback(token).then(() => {
         navigate('/dashboard', { replace: true });
       });
@@ -32,9 +32,11 @@ export default function AuthCallback() {
         gmailConnected: false,
         gmailEmail: '',
       };
+      const loginToken = token || 'google_oauth_session';
       localStorage.setItem('wayin_user', JSON.stringify(googleUser));
-      localStorage.setItem('hamzooh_token', 'google_oauth_session');
-      localStorage.setItem('mailmind_token', 'google_oauth_session');
+      localStorage.setItem('hamzooh_token', loginToken);
+      localStorage.setItem('hamzo_token', loginToken);
+      localStorage.setItem('mailmind_token', loginToken);
       localStorage.removeItem('hamzooh_gmail_connected');
       localStorage.removeItem('hamzooh_gmail_email');
       localStorage.removeItem('mailmind_gmail_connected');
@@ -52,7 +54,7 @@ export default function AuthCallback() {
         } catch {}
       }
 
-      handleCallback('google_oauth_session').then(() => {
+      handleCallback(loginToken).then(() => {
         navigate('/dashboard', { replace: true });
       });
       return;

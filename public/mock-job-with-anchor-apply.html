@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hamzooh Mock — Job page with stretched-anchor Apply</title>
+  <style>
+    body { font-family: Roboto, Arial, sans-serif; max-width: 760px; margin: 24px auto; }
+    /* Google's MDC button: an outer <div> with a stretched <a> overlay inside
+       that carries the real href. Clicking the div does not follow the link. */
+    .VfPpkd-LgbsSe {
+      position: relative;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #1a73e8; color: #fff; border-radius: 4px;
+      padding: 10px 24px; font-size: 14px; font-weight: 500; cursor: pointer;
+    }
+    .VfPpkd-mRLv6 { position: absolute; inset: 0; opacity: 0; }
+    .VfPpkd-vQzf8d { pointer-events: none; }
+  </style>
+</head>
+<body>
+  <h1>Forward Deployed Engineer Intern, 2027</h1>
+  <p>Google</p>
+  <p>Bengaluru, Karnataka, India</p>
+
+  <div class="VfPpkd-LgbsSe" jsaction="click:cOuCgd">
+    <span class="VfPpkd-vQzf8d" aria-hidden="true">Apply</span>
+    <a class="WpHeLc VfPpkd-mRLv6" href="./mock-apply-mdc.html" aria-label="Apply"></a>
+  </div>
+
+  <p>Minimum qualifications: experience in Python, data structures and algorithms.</p>
+</body>
+</html>

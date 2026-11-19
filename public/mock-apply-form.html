@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hamzooh Mock Application</title>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 32px auto; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    input, select, textarea { width: 100%; padding: 8px; }
+    .row { margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Apply for this job</h1>
+  <form id="app-form">
+    <label for="full_name">Full name</label>
+    <input id="full_name" name="full_name" required />
+
+    <label for="email">Email address</label>
+    <input id="email" name="email" type="email" required />
+
+    <label for="phone">Phone number</label>
+    <input id="phone" name="phone" type="tel" required />
+
+    <label for="linkedin">LinkedIn URL</label>
+    <input id="linkedin" name="linkedin" />
+
+    <label for="github">GitHub URL</label>
+    <input id="github" name="github" />
+
+    <label for="university">University</label>
+    <input id="university" name="university" />
+
+    <label for="hear">How did you hear about us?</label>
+    <select id="hear" name="hear">
+      <option value="">Please select</option>
+      <option>LinkedIn</option>
+      <option>Company website</option>
+      <option>Referral</option>
+    </select>
+
+    <label>Have you previously been employed by Google?</label>
+    <div class="row">
+      <label><input type="radio" name="prev" value="Yes" /> Yes</label>
+      <label><input type="radio" name="prev" value="No" /> No</label>
+    </div>
+
+    <label for="resume">Resume / CV</label>
+    <input id="resume" name="resume" type="file" accept="application/pdf" />
+
+    <label><input type="checkbox" name="terms" /> I agree to the terms and privacy policy</label>
+
+    <label for="cover">Why do you want this role?</label>
+    <textarea id="cover" name="cover" rows="4"></textarea>
+
+    <button type="button" id="continue-btn">Continue</button>
+    <section id="page-2" hidden>
+      <label for="workauth">Are you legally authorized to work in the United States?</label>
+      <select id="workauth" name="workauth" required>
+        <option value="">Please select</option>
+        <option>Yes</option>
+        <option>No</option>
+      </select>
+      <button type="submit">Submit Application</button>
+    </section>
+  </form>
+  <script>
+    document.getElementById('continue-btn').addEventListener('click', () => {
+      document.getElementById('page-2').hidden = false;
+    });
+  </script>
+</body>
+</html>

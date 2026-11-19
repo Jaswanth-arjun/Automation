@@ -57,10 +57,43 @@
     return new Promise((r) => setTimeout(r, ms));
   }
 
+  // Auto-apply must never sit on a prompt forever: a user who walked away would
+  // see the run silently stop. Every blocking prompt in auto mode is raced
+  // against this fallback instead.
+  function withTimeout(promise, ms, fallback) {
+    return Promise.race([promise, sleep(ms).then(() => fallback)]);
+  }
+
+  // In auto mode, prompting once is enough: if the user is not around to answer
+  // the first question, they will not answer the next five either. Prompt
+  // dismissal also has to remove the leftover card from the page.
+  let autoPromptMissed = false;
+
+  async function askOrSkip(question, index, total, options, reason, autoSubmit) {
+    if (!autoSubmit) return askHamzoohQuestion(question, index, total, options, reason);
+    if (autoPromptMissed) return null;
+    const result = await withTimeout(askHamzoohQuestion(question, index, total, options, reason), 30000, null);
+    if (!result) {
+      autoPromptMissed = true;
+      removeHamzoohOverlays();
+    }
+    return result;
+  }
+
   function hamzoohLog(level, message, extra) {
     const entry = { level, message, extra, t: Date.now(), href: location.href };
     logs.push(entry);
     try { console[level === 'error' ? 'error' : 'log']('[Hamzooh Apply]', message, extra || ''); } catch {}
+  }
+
+  function uniqueSkipped() {
+    const seen = new Set();
+    return skipped.filter((item) => {
+      const key = `${item?.field || ''}|${item?.reason || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function sendProgress(step, message, details = {}) {
@@ -71,7 +104,7 @@
         step,
         message,
         timestamp: Date.now(),
-        skipped: skipped.slice(),
+        skipped: uniqueSkipped(),
         ...details,
       });
     } catch {}
@@ -117,6 +150,38 @@
       if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity || '1') < 0.1) return false;
       if (r && (r.width === 0 || r.height === 0)) return false;
       return true;
+    } catch { return false; }
+  }
+
+  function isRendered(el) {
+    if (!el) return false;
+    try {
+      if (el.closest('[hidden]')) return false;
+      const r = el.getBoundingClientRect?.();
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none') return false;
+      if (r && (r.width === 0 || r.height === 0)) return false;
+      return true;
+    } catch { return false; }
+  }
+
+  // Material Design (and many design systems) render the real <input> at zero
+  // size with opacity 0 for styling, so a plain visibility test would skip
+  // every radio/checkbox on the page. Judge those by their visible label.
+  function choiceVisible(el) {
+    if (visible(el)) return true;
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (type !== 'radio' && type !== 'checkbox') return false;
+    try {
+      if (el.disabled) return false;
+      const holders = [
+        el.closest('label'),
+        el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null,
+        el.closest('[role="radio"], [role="checkbox"], [role="radiogroup"]'),
+        el.closest('mat-radio-button, mat-checkbox, mat-radio-group, .mat-mdc-radio-button, .mat-mdc-checkbox, .mat-radio-button, .md-radio-button, .mdc-radio, .mdc-checkbox'),
+        el.parentElement,
+      ].filter(Boolean);
+      return holders.some((holder) => isRendered(holder) && (holder.innerText || '').trim().length > 0);
     } catch { return false; }
   }
 
@@ -199,6 +264,28 @@
     return '';
   }
 
+  // Many design systems put the question text inside the same wrapper as the
+  // options (a <legend>, a .q-label span, an aria-labelledby target) rather
+  // than in a preceding sibling.
+  function promptInside(container) {
+    if (!container) return '';
+    const candidates = container.querySelectorAll(
+      'legend, .q-label, [class*="question"], [class*="prompt"], [class*="label"], [data-testid*="label"]',
+    );
+    for (const el of candidates) {
+      if (el.closest('label') && el.closest('label').querySelector('input')) continue;
+      if (el.querySelector('input, select, textarea')) continue;
+      const text = cleanPrompt(el.innerText || el.textContent);
+      if (text) return text;
+    }
+    for (const child of container.children) {
+      if (child.querySelector('input, select, textarea') || child.matches('input, select, textarea')) continue;
+      const text = cleanPrompt(child.innerText || child.textContent);
+      if (text) return text;
+    }
+    return '';
+  }
+
   function questionFor(el) {
     const type = (el.getAttribute('type') || '').toLowerCase();
     const aria = (el.getAttribute('aria-label') || '').trim();
@@ -210,14 +297,25 @@
 
     if (aria || labelledByText) return cleanPrompt([legend, aria, labelledByText, labelText].filter(Boolean).join(' '));
 
-    if (type === 'radio' || type === 'checkbox') {
+    if (type === 'radio' || type === 'checkbox' || el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'checkbox') {
       if (legend) return legend;
-      const group = choiceGroupContainer(el, type);
+      // Angular Material labels the wrapper, not the inputs.
+      const groupWidget = el.closest('mat-radio-group, mat-checkbox-group, [role="radiogroup"], [role="group"]');
+      if (groupWidget) {
+        const groupAria = groupWidget.getAttribute('aria-label') || '';
+        const groupBy = (groupWidget.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+          .map((id) => document.getElementById(id)?.innerText || '').join(' ');
+        const widgetText = cleanPrompt([groupAria, groupBy].filter(Boolean).join(' '));
+        if (widgetText) return widgetText;
+        const widgetPrompt = promptBefore(groupWidget) || promptInside(groupWidget);
+        if (widgetPrompt) return widgetPrompt;
+      }
+      const group = choiceGroupContainer(el, type === 'radio' ? 'radio' : 'checkbox');
       if (group) {
-        const prompt = promptBefore(group);
+        const prompt = promptBefore(group) || promptInside(group);
         if (prompt) return prompt;
         const closest = group.closest('.field, .form-group, fieldset, li');
-        const earlier = closest && closest !== group ? promptBefore(closest) : '';
+        const earlier = closest && closest !== group ? promptBefore(closest) || promptInside(closest) : '';
         if (earlier) return earlier;
       }
       const own = cleanPrompt(labelFor(el).replace(new RegExp(`\\b${el.name}\\b`, 'g'), ''));
@@ -255,10 +353,10 @@
       github: profile.links?.github || profile.github || '',
       portfolio: profile.links?.portfolio || profile.portfolio || profile.links?.github || profile.github || '',
       projectLink: projectUrl,
-      university: education.school || education.university || '',
-      gpa: education.gpa || education.detail || education.score || '',
+      university: education.school || education.university || education.institution || education.college || '',
+      gpa: education.gpa || education.cgpa || education.detail || education.score || '',
       internship: intern || '',
-      degree: education.degree || '',
+      degree: [education.degree, education.branch].filter(Boolean).join(' ') || '',
       graduation: education.dates || education.graduationYear || profile.batch || '',
       salary: profile.expectedSalary || profile.salary || '',
       experience_years: profile.yearsOfExperience != null && profile.yearsOfExperience !== ''
@@ -328,8 +426,9 @@
     return queryAllDeep('input, textarea, select').filter((input) => {
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) return false;
-      if (input.disabled || !visible(input)) return false;
-      return true;
+      if (input.disabled) return false;
+      if (type === 'radio' || type === 'checkbox') return choiceVisible(input);
+      return visible(input);
     });
   }
 
@@ -386,11 +485,33 @@
       const flag = p.workAuthorized ?? p.authorizedToWork ?? p.workAuth;
       if (flag === true || /^(yes|true)$/i.test(String(flag || ''))) return 'Yes';
       if (flag === false || /^(no|false)$/i.test(String(flag || ''))) return 'No';
+      // Applying to a role in the user's own country/region is not a
+      // sponsorship question — "authorized to work in India" for someone based
+      // in India is a fact we can state without guessing.
+      const country = String(p.country || String(p.location || '').split(',').pop() || '').trim().toLowerCase();
+      const asked = (q.match(/authorized to work in ([a-z ]+)/) || [])[1];
+      if (country && asked && (country.includes(asked.trim()) || asked.trim().includes(country))) return 'Yes';
     }
     if (/require .*sponsorship|need .*sponsorship|sponsorship/.test(q)) {
       const flag = p.requireSponsorship ?? p.sponsorshipRequired;
       if (flag === true) return 'Yes';
       if (flag === false) return 'No';
+    }
+    // Derive enrolment from the user's real education dates rather than
+    // guessing: a graduation year still in the future means still studying.
+    if (/currently (enrolled|studying|pursuing)|still (in|at) (college|university|school)|are you a student|pursuing a (bachelor|master|degree)/.test(q)) {
+      const explicit = p.currentlyEnrolled ?? p.isStudent;
+      if (explicit === true) return 'Yes';
+      if (explicit === false) return 'No';
+      const years = (p.education || [])
+        .map((item) => parseInt(item?.graduationYear || item?.endYear || item?.year || '', 10))
+        .filter((n) => Number.isFinite(n));
+      if (years.length) {
+        const latest = Math.max(...years);
+        const thisYear = new Date().getFullYear();
+        if (latest >= thisYear) return 'Yes';
+        return 'No';
+      }
     }
     if (/expected (salary|ctc|compensation)|salary expectation/.test(q)) {
       const salary = p.expectedSalary || p.salary;
@@ -424,7 +545,9 @@
     if (!texts.length) return '';
     const find = (re) => texts.find((t) => re.test(t));
     if (/how did you hear|referral source|source of application|where did you (find|hear)/.test(q)) {
-      return find(/linkedin/i) || find(/job board|naukri|indeed/i) || find(/company website|careers/i) || '';
+      const source = String(profile?.jobSource || '').toLowerCase();
+      const fromSource = source && (find(new RegExp(source.replace(/[^a-z0-9]/g, '.'), 'i')) || '');
+      return fromSource || find(/linkedin/i) || find(/company website|careers/i) || find(/job board|naukri|indeed/i) || '';
     }
     if (/gender|hispanic|race|ethnicity|veteran|disability|sexual orientation/.test(q)) {
       return find(/decline|prefer not|do not wish/i) || '';
@@ -451,6 +574,36 @@
     return '';
   }
 
+  // Styled radios/checkboxes (Material, Ant, Chakra…) keep the native input
+  // hidden, so clicking the input alone doesn't always register. Click the
+  // visible label instead and fall back to the input.
+  function clickChoice(input) {
+    if (input.checked) return true;
+    const targets = [
+      input.closest('label'),
+      input.id ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`) : null,
+      // Angular Material / MDC put the click handler on the button wrapper.
+      input.closest('mat-radio-button, mat-checkbox, .mat-mdc-radio-button, .mat-mdc-checkbox, .mdc-form-field, .mat-radio-button, .md-radio-button'),
+    ].filter(Boolean);
+
+    for (const target of targets) {
+      if (!isRendered(target)) continue;
+      try {
+        target.click();
+        if (input.checked) return true;
+      } catch {}
+    }
+
+    if (!input.checked) {
+      try { input.click(); } catch {}
+    }
+    if (!input.checked) {
+      // Last resort for controlled components that only react to real events.
+      try { input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); } catch {}
+    }
+    return input.checked;
+  }
+
   function applyChoice(input, wanted) {
     if (!wanted) return false;
     if (input.tagName === 'SELECT') {
@@ -472,7 +625,7 @@
       const decline = /decline|prefer not|do not wish/.test(value) && /decline|prefer not|do not wish/.test(optionText);
       const exact = optionText.trim() === value || String(input.value).trim().toLowerCase() === value;
       if (yes || no || decline || exact) {
-        if (!input.checked) input.click();
+        clickChoice(input);
         input.dispatchEvent(new Event('change', { bubbles: true }));
         return input.checked;
       }
@@ -481,8 +634,8 @@
       const value = String(wanted).toLowerCase();
       const shouldCheck = /^(yes|y|true|agree|accepted)$/.test(value) && !/decline|prefer not/.test(value);
       const shouldUncheck = /^(no|n|false|decline|prefer not)$/.test(value);
-      if (shouldCheck && !input.checked) input.click();
-      if (shouldUncheck && input.checked) input.click();
+      if (shouldCheck && !input.checked) clickChoice(input);
+      if (shouldUncheck && input.checked) clickChoice(input);
       return (shouldCheck || shouldUncheck) && input.checked === shouldCheck;
     }
     return false;
@@ -523,9 +676,27 @@
     }
   }
 
+  // Radios that omit a `name` attribute would all collapse onto the same key,
+  // so later groups were silently skipped. Group by name when present, else by
+  // the question the options belong to.
+  function radioGroupKey(input, question, type = 'radio') {
+    return `${type}:${input.name || question || input.id || ''}`;
+  }
+
+  function radiosInGroup(input, question) {
+    if (input.name) {
+      return queryAllDeep(`input[type="radio"][name="${CSS.escape(input.name)}"]`).filter(choiceVisible);
+    }
+    const container = choiceGroupContainer(input, 'radio');
+    const nodes = container ? container.querySelectorAll('input[type="radio"]') : null;
+    return (nodes ? [...nodes] : queryAllDeep('input[type="radio"]').filter((el) => questionFor(el) === question))
+      .filter(choiceVisible);
+  }
+
   function fillChoices(profile, answers, company) {
-    const controls = queryAllDeep('select, input[type="radio"], input[type="checkbox"]').filter(visible);
-    const radioNames = new Set();
+    const controls = queryAllDeep('select, input[type="radio"], input[type="checkbox"]')
+      .filter((el) => (el.tagName === 'SELECT' ? visible(el) : choiceVisible(el)));
+    const seenGroups = new Set();
     let filledCount = 0;
     controls.forEach((input) => {
       const type = (input.getAttribute('type') || '').toLowerCase();
@@ -537,10 +708,11 @@
         wanted = heuristicChoice(question, optionList(input).map((o) => o.text.trim()), profile);
       }
       if (type === 'radio') {
-        if (radioNames.has(input.name)) return;
-        radioNames.add(input.name);
+        const groupKey = radioGroupKey(input, question);
+        if (seenGroups.has(groupKey)) return;
+        seenGroups.add(groupKey);
         if (!wanted) return;
-        const group = queryAllDeep(`input[type="radio"][name="${CSS.escape(input.name)}"]`).filter(visible);
+        const group = radiosInGroup(input, question);
         if (group.some((item) => item.checked)) return;
         const hit = group.find((item) => applyChoice(item, wanted));
         if (hit) {
@@ -815,10 +987,25 @@
     return { answer: null, reason: data?.reason || data?.message || 'unanswered' };
   }
 
+  // Google Careers renders its actions as MDC buttons: a <div class="VfPpkd-LgbsSe">
+  // rather than a <button>/<a>. Selecting only native tags silently misses every
+  // Next/Submit control there, so include the design-system wrappers too.
+  const ACTION_SELECTOR = [
+    'button',
+    'a',
+    'input[type="submit"]',
+    'input[type="button"]',
+    '[role="button"]',
+    '.VfPpkd-LgbsSe',
+    '.mat-mdc-button-base',
+    '.mat-button-base',
+    '.mdc-button',
+  ].join(', ');
+
   function findDescriptionApplyButtons() {
     const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const out = [];
-    for (const el of queryAllDeep('button, a, input[type="submit"], input[type="button"], [role="button"]')) {
+    for (const el of queryAllDeep(ACTION_SELECTOR)) {
       try {
         if (el.disabled || !visible(el)) continue;
         const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || '');
@@ -834,10 +1021,36 @@
     return out.map((o) => o.el);
   }
 
+  // MDC renders a button as a <div> whose real navigation lives in a stretched
+  // <a href> overlay inside it. Dispatching on the div never reaches that
+  // anchor, so resolve to the anchor when one exists.
+  function clickTarget(el) {
+    if (!el) return el;
+    if (el.tagName === 'A' || el.tagName === 'BUTTON') return el;
+    const inner = el.querySelector?.('a[href]');
+    return inner && isRendered(inner) ? inner : el;
+  }
+
+  // MDC/Angular buttons bind through jsaction rather than a native <button>,
+  // and they react to the full pointer sequence instead of a synthetic click.
   async function realClick(el) {
-    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+    const target = clickTarget(el);
+    try { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
     await sleep(400);
-    try { el.click(); } catch {}
+    try {
+      const rect = target.getBoundingClientRect();
+      const base = {
+        bubbles: true, cancelable: true, view: window,
+        clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0,
+      };
+      for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        try {
+          const Ctor = type.startsWith('pointer') && typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+          target.dispatchEvent(new Ctor(type, base));
+        } catch {}
+      }
+    } catch {}
+    try { target.click(); } catch {}
   }
 
   function pageHasForm() {
@@ -852,12 +1065,45 @@
     } catch { return false; }
   }
 
+  // Identity providers reached by redirecting an Apply link. Filling these is
+  // both wrong and a credential risk, so the automation must stop and wait.
+  const AUTH_HOST_RE = /(^|\.)(accounts\.google\.com|accounts\.youtube\.com|login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|appleid\.apple\.com|auth0\.com|okta\.com|onfido\.com|login\.workday\.com|.*\.workday\.com\/login|.*\.myworkdayjobs\.com\/.*login|sso\.|.*\.sso\.|idp\.|.*\.okta\.com)$/i;
+  const AUTH_PATH_RE = /\/(signin|sign-in|login|log-in|oauth|authorize|sso|auth|session\/new|Account\/Login|users\/sign_in)\b/i;
+
+  function detectAuthGate() {
+    try {
+      const host = location.hostname;
+      if (host && AUTH_HOST_RE.test(host)) return true;
+      if (AUTH_PATH_RE.test(location.pathname)) {
+        // A path-only hit counts when the page really looks like a sign-in
+        // screen, not when a job board merely lives under /login.
+        const hasPw = queryAllDeep('input[type="password"]').some(visible);
+        const body = (document.body?.innerText || '').slice(0, 2500).toLowerCase();
+        const signInish = /sign in|log in|login to|continue with (google|microsoft|apple|linkedin)|single sign-on/.test(body);
+        if (hasPw || signInish) return true;
+      }
+      // Host-independent check: a sign-in screen is a tiny page whose title
+      // and body both announce signing in, with no application fields.
+      const title = (document.title || '').toLowerCase();
+      const body = (document.body?.innerText || '').slice(0, 1500).toLowerCase();
+      const titleSignIn = /\b(sign in|sign-in|log in|login)\b/.test(title);
+      const bodySignIn = /\b(sign in|use your \w+ account|forgot (email|password)|create an account)\b/.test(body);
+      const fields = collectInputs();
+      const looksLikeForm = fields.some((el) => {
+        const t = (el.getAttribute('type') || '').toLowerCase();
+        return !['email', 'text', 'password'].includes(t);
+      });
+      if (titleSignIn && bodySignIn && !looksLikeForm) return true;
+      return false;
+    } catch { return false; }
+  }
+
   function buttonText(el) {
     return (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
   }
 
   function findAdvanceButton() {
-    const nodes = queryAllDeep('button, input[type="submit"], input[type="button"], a, [role="button"]');
+    const nodes = queryAllDeep(ACTION_SELECTOR);
     return nodes.find((el) => visible(el) && !el.disabled && isAdvanceButtonText(buttonText(el))) || null;
   }
 
@@ -873,7 +1119,7 @@
   }
 
   function findSubmitButton() {
-    const nodes = queryAllDeep('button, input[type="submit"], input[type="button"]');
+    const nodes = queryAllDeep(ACTION_SELECTOR);
     return nodes.find((el) => visible(el) && !el.disabled && isSubmitButtonText(buttonText(el))) || null;
   }
 
@@ -942,9 +1188,12 @@
   }
 
   async function waitForForm() {
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < 45; i += 1) {
       const inputs = collectInputs().filter((input) => !['file', 'password'].includes((input.getAttribute('type') || '')));
       if (inputs.length >= 1) return inputs;
+      // A step can open with nothing but a choice group or a single Next
+      // button; treat a clickable action as proof the app has rendered.
+      if (findAdvanceButton() || findSubmitButton()) return collectInputs();
       await sleep(400);
     }
     return collectInputs();
@@ -1006,7 +1255,7 @@
     await sleep(250);
     const origBorder = input.style.border;
     input.style.border = '2px solid #009688';
-    const result = await askHamzoohQuestion(question, index, total, options, reason);
+    const result = await askOrSkip(question, index, total, options, reason, pending.autoSubmit === true);
     input.style.border = origBorder;
     if (result?.answer) {
       setNativeValue(input, result.answer);
@@ -1061,7 +1310,11 @@
         }
       }
       const isRequired = input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(label);
-      if (!isRequired && input.tagName !== 'SELECT' && !isSensitiveQuestion(label)) return false;
+      if (!isRequired) {
+        // Optional fields never block the flow: record why instead of asking.
+        if (label) skipped.push({ field: label.slice(0, 80), reason: 'Optional field — no value in your profile or saved answers.' });
+        return false;
+      }
       return Boolean(label);
     });
 
@@ -1090,14 +1343,27 @@
     return { filledCount, stillEmpty };
   }
 
+  // Required can be declared on the group wrapper (aria-required on
+  // mat-radio-group / role=radiogroup) rather than on each option.
+  function groupIsRequired(input, question) {
+    if (input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(question)) return true;
+    const wrapper = input.closest(
+      'mat-radio-group, mat-checkbox-group, [role="radiogroup"], [role="group"], fieldset, .field, .form-group',
+    );
+    if (!wrapper) return false;
+    return wrapper.getAttribute('aria-required') === 'true'
+      || Boolean(wrapper.querySelector('[required], [aria-required="true"]'))
+      || /\*/.test(cleanPrompt(wrapper.querySelector('legend, .q-label, [class*="label"]')?.innerText || ''));
+  }
+
   function requiredGroupsOf() {
     const groups = new Map();
     collectInputs().forEach((input) => {
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (!['radio', 'checkbox'].includes(type)) return;
       const question = questionFor(input);
-      if (!(input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(question))) return;
-      const key = type === 'radio' ? `radio:${input.name || question}` : `checkbox:${input.name || input.id || question}`;
+      if (!groupIsRequired(input, question)) return;
+      const key = radioGroupKey(input, question, type);
       if (!groups.has(key)) groups.set(key, { type, items: [], question });
       groups.get(key).items.push(input);
     });
@@ -1125,11 +1391,12 @@
       }
       if (!wanted) {
         sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
-        const result = await askHamzoohQuestion(question, g, groups.length,
+        const result = await askOrSkip(question, g, groups.length,
           optionTexts.filter(Boolean),
           isSensitiveQuestion(question)
             ? 'This is personal / legal information and is not in your profile.'
-            : 'This required choice is not in your profile.');
+            : 'This required choice is not in your profile.',
+          pending.autoSubmit === true);
         if (result?.answer) {
           wanted = result.answer;
           if (result.remember) await rememberAnswer(answers, question, wanted);
@@ -1156,6 +1423,19 @@
       await finish('⚠️ Too many application steps — continue manually.', { status: 'needs_attention', filledCount: 0, emptyCount: 0 });
       return;
     }
+
+    // Never type profile data into a sign-in screen. Pause and let the user
+    // authenticate; the automation resumes on its own afterwards.
+    if (detectAuthGate()) {
+      if (pending.awaitingManualApply && pending.loginHost === location.hostname) return;
+      sendProgress(
+        'login_required',
+        `🔐 ${location.hostname} needs you to sign in first. Finish signing in — Hamzooh resumes automatically.`,
+      );
+      await updatePending({ awaitingManualApply: true, loginHost: location.hostname });
+      return;
+    }
+
     await waitForContent();
 
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
@@ -1197,6 +1477,7 @@
 
     const advance = findAdvanceButton();
     const submitBtn = findSubmitButton();
+    let advanceBlocked = false;
 
     // A visible submit button means we are on the final step, so show the
     // review. Otherwise step forward to the next section.
@@ -1219,6 +1500,7 @@
         await updatePending({ url: location.href, applyClicked: true });
         return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
       }
+      advanceBlocked = true;
       skipped.push({ field: 'Continue', reason: 'The application did not advance after activation. Check validation messages in the job tab.' });
       sendProgress('advance_blocked', '⚠️ Could not confirm that the application advanced. Review the current step.');
     }
@@ -1228,7 +1510,23 @@
     }
 
     sendProgress('confirming', '✅ Form prepared. Waiting for your review…');
-    const decision = await showSubmitConfirmation(filledCount, skipped.concat(
+    const canSubmitCleanly = Boolean(submitBtn) && stillEmpty.length === 0;
+    const autoSubmit = pending.autoSubmit === true;
+
+    // Auto-apply never blocks on the review overlay: an unattended run must end
+    // with a clear report instead of stalling behind a dialog nobody clicks.
+    if (autoSubmit && !canSubmitCleanly) {
+      const missing = stillEmpty.map((el) => labelFor(el).slice(0, 60)).filter(Boolean);
+      const details = advanceBlocked
+        ? 'the Next button did not advance the form — the page likely rejected a required answer'
+        : `required field(s) could not be answered automatically${missing.length ? `: ${missing.join(', ')}` : ''}`;
+      await finish(`⚠️ Stopped before submitting — ${details}.`, {
+        status: 'needs_attention', filledCount, emptyCount: stillEmpty.length,
+      });
+      return;
+    }
+
+    const decision = autoSubmit && canSubmitCleanly ? 'submit' : await showSubmitConfirmation(filledCount, skipped.concat(
       stillEmpty.map((el) => ({ field: labelFor(el).slice(0, 80), reason: 'Still empty / required.' }))
     ));
     if (decision === 'submit' && submitBtn && stillEmpty.length === 0) {
@@ -1250,10 +1548,9 @@
   }
 
   function finish(message, details = {}) {
-    sendProgress('complete', message, { status: 'needs_attention', filledCount: 0, emptyCount: 0, ...details, skipped });
+    sendProgress('complete', message, { status: 'needs_attention', filledCount: 0, emptyCount: 0, ...details, skipped: uniqueSkipped() });
     return markPendingDone();
   }
-
   function sameJobPage(pendingUrl, pending) {
     try {
       const expected = new URL(pendingUrl);
@@ -1286,6 +1583,7 @@
       hamzoohLog('log', 'frame not actionable yet', location.href);
     }
     filling = true;
+    autoPromptMissed = false;
     try {
       await fillPage(stored.profile || {}, stored.answers || {}, pending);
     } catch (err) {
@@ -1323,9 +1621,11 @@
       chrome.storage.local.get(['pendingApply'], (stored) => {
         const p = stored?.pendingApply;
         if (!p?.url || p.done || !p.awaitingManualApply) return;
+        // Stay parked while a sign-in screen is showing; resume after it closes.
+        if (detectAuthGate()) return;
         if (pageHasForm()) {
           sendProgress('form_found', '📄 Form detected — filling now…');
-          updatePending({ awaitingManualApply: false }).then(() => bootApply());
+          updatePending({ awaitingManualApply: false, loginHost: '' }).then(() => bootApply());
         }
       });
     }, 2500);

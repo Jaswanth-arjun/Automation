@@ -32,6 +32,7 @@ import AutoApplyWalkthrough from '../components/AutoApplyWalkthrough';
 import OutreachWalkthrough from '../components/OutreachWalkthrough';
 import FrameLift from '../components/FrameLift';
 import ResumeTailoringDemo from '../components/ResumeTailoringDemo';
+import PricingSection from '../components/PricingSection';
 import './Landing.css';
 import './scroll-fx.css';
 
@@ -1653,6 +1654,7 @@ export default function Landing() {
         <WaveDivider color="#0B1533" />
         <Workflow />
         <Reviews />
+        <PricingSection onGetStarted={() => go()} />
         <FreeBand onGetStarted={() => go()} />
         <Faq />
         <FinalCta onGetStarted={() => go()} />

@@ -17,6 +17,7 @@ import MailAutomation from './pages/MailAutomation';
 import LinkedInAutomation from './pages/LinkedInAutomation';
 import AdminJobs from './pages/AdminJobs';
 import SavedJobs from './pages/SavedJobs';
+import Subscription from './pages/Subscription';
 import VideoLoader from './components/VideoLoader';
 
 // The admin panel is a separate page served by the API server. While running
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="apply/:jobId" element={<Apply />} />
             <Route path="mail" element={<MailAutomation />} />
             <Route path="linkedin" element={<LinkedInAutomation />} />
+            <Route path="subscription" element={<Subscription />} />
             <Route path="post-jobs" element={<AdminJobs />} />
           </Route>
           {/* Old SPA admin URL: hand it to the real admin panel. */}

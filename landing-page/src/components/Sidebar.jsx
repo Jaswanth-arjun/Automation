@@ -13,6 +13,7 @@ import {
   Bell,
   LogOut,
   X,
+  Gem,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { profileStore, getUserName } from '../lib/api';
@@ -46,6 +47,7 @@ const navSections = [
       { to: '/dashboard/applications', icon: FolderOpen, label: 'Job Tracker' },
       { to: '/dashboard/resume', icon: FileText, label: 'Resume' },
       { to: '/dashboard/profile', icon: User, label: 'Profile' },
+      { to: '/dashboard/subscription', icon: Gem, label: 'My Plan' },
     ],
   },
   {
