@@ -14,7 +14,7 @@ import { db } from './lib/db.js';
 import { handleRagChat } from './lib/rag-assistant.js';
 import { askFreeLLM, askNara, askNvidia, askRadox } from './lib/ai-provider.js';
 import { AutoApplyEngine } from './lib/auto-apply-engine.js';
-import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion } from './lib/vault-manager.js';
+import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion, saveVaultCredential, findVaultCredential } from './lib/vault-manager.js';
 import { inferFromProfile } from './lib/apply-intelligence.js';
 
 import nodemailer from 'nodemailer';
@@ -23,7 +23,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
-import { extractJobPostingJsonLd, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
+import { extractJobPostingJsonLd, extractJobPostingDescriptionHtml, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
@@ -1623,6 +1623,48 @@ app.get('/api/emails', async (req, res) => {
   }
 });
 
+// Whole Gmail thread, so the reader can show every message in the exchange
+// instead of only the one the user opened.
+app.get('/api/threads/:threadId', async (req, res) => {
+  try {
+    const threadId = validGmailId(req.params.threadId);
+    const thread = await gmailApi(`threads/${threadId}?format=full`);
+    const messages = (thread.messages || []).map((message) => {
+      const payload = message.payload || {};
+      const from = parseMailboxAddress(gmailHeader(payload, 'From'));
+      const to = parseMailboxAddress(gmailHeader(payload, 'To'));
+      const labels = message.labelIds || [];
+      return {
+        id: message.id,
+        threadId: message.threadId,
+        subject: gmailHeader(payload, 'Subject') || '(No Subject)',
+        bodyText: decodeGmailBody(payload).slice(0, 20000),
+        snippet: message.snippet || '',
+        fromEmail: from.email,
+        fromName: from.name,
+        toEmail: to.email,
+        at: new Date(Number(message.internalDate || Date.now())).toISOString(),
+        isRead: !labels.includes('UNREAD'),
+        isStarred: labels.includes('STARRED'),
+        hasAttachments: findAttachmentPart(payload),
+        messageIdHeader: gmailHeader(payload, 'Message-ID'),
+        referencesHeader: gmailHeader(payload, 'References'),
+      };
+    });
+    // Gmail already returns oldest-first, but sort defensively so the reader
+    // never shows an exchange upside down.
+    messages.sort((a, b) => new Date(a.at) - new Date(b.at));
+    res.json({
+      id: thread.id,
+      messages,
+      count: messages.length,
+      subject: messages[messages.length - 1]?.subject || '',
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: friendlyGmailError(err) });
+  }
+});
+
 // ─── Mail actions (star / read / archive / trash) ───
 // These were previously called by the UI but never implemented, so the page
 // showed a success toast while nothing changed in Gmail.
@@ -1965,7 +2007,15 @@ app.post('/api/linkedin/thread', async (req, res) => {
     fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2), 'utf8');
     res.json({ messages, cached: false, syncedAt: cache[cacheKey].syncedAt });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Could not read the LinkedIn conversation.' });
+    // Puppeteer transport text ("Attempted to use detached Frame …") means the
+    // tab went away mid-read, not that anything is broken for the user.
+    const raw = String(err?.message || '').trim();
+    const transport = /protocol error|detached|target closed|session closed|execution context|browser has disconnected|page has been closed/i.test(raw);
+    res.status(500).json({
+      error: transport
+        ? 'LinkedIn closed the tab while the conversation was loading. Nothing was lost — tap Refresh to load the full thread.'
+        : (raw || 'Could not read the LinkedIn conversation.'),
+    });
   }
 });
 
@@ -2331,11 +2381,42 @@ async function fetchJobText(url) {
     .filter(Boolean)
     .join('\n');
 
+  // JSON-LD descriptions arrive either as markup or as escaped markup; decode
+  // it first so htmlToLines still sees the real <li>/<h2> structure.
+  const decodeEntities = (value) => String(value || '')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&#x27;/gi, "'")
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&');
+
+  // Prose lines a real posting has. SPA shells only send theme/config blobs,
+  // so their page text scores zero here even when the HTML is large.
+  const proseScore = (value) => String(value || '')
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (trimmed.length < 50 || trimmed.length > 600) return false;
+      if (/[{}]/.test(trimmed) || trimmed.split(':').length > 3) return false;
+      return /[.!?]$/.test(trimmed) || trimmed.startsWith('• ');
+    }).length;
+
   const parse = ({ html, text, finalUrl }) => {
     if (isJobErrorPage(finalUrl || url, html)) throw new Error('That link opened an error page instead of the job. Paste the job posting address from the browser address bar.');
     const jsonLd = extractJobPostingJsonLd(html);
-    const plainText = (text ? String(text) : htmlToLines(html))
+    const pageText = (text ? String(text) : htmlToLines(html))
       .slice(0, 30000);
+    // Career sites built as single-page apps (Twilio/Eightfold and other ATS
+    // shells) ship an empty body and render the posting with JavaScript, so the
+    // fetched text is only the site's theme/navigation blob. Their JSON-LD
+    // JobPosting still carries the whole posting, so use that copy whenever it
+    // describes the job better than the page markup does.
+    const jsonLdHtml = extractJobPostingDescriptionHtml(html);
+    const jsonLdText = jsonLdHtml ? htmlToLines(decodeEntities(jsonLdHtml)).slice(0, 30000) : '';
+    const plainText = jsonLdText.length >= 200 && proseScore(jsonLdText) > proseScore(pageText)
+      ? jsonLdText
+      : pageText;
     const meta = extractJobMetadata(html, finalUrl || url, plainText);
     const posting = validateJobDescription({
       title: jsonLd?.title || meta.title,
@@ -2352,7 +2433,80 @@ async function fetchJobText(url) {
     };
   };
 
+  // Workday career sites (company.wdN.myworkdayjobs.com) render the posting in
+  // the browser, and the shell page carries no readable text at all — a plain
+  // fetch and a headless render both come back empty, which used to make every
+  // Workday link look unreadable. Each Workday site publishes the same posting
+  // as JSON at /wday/cxs/<tenant>/<site>/job/<path>, so read that instead.
+  const workdayJob = async () => {
+    let source;
+    try { source = new URL(url); } catch { return null; }
+    const hostMatch = source.hostname.match(/^([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com$/i);
+    if (!hostMatch) return null;
+
+    const parts = source.pathname.split('/').filter(Boolean);
+    const jobIndex = parts.findIndex((part) => /^job$/i.test(part));
+    // Accept both /<site>/job/<path> and locale-prefixed /en-US/<site>/job/<path>.
+    if (jobIndex < 1) return null;
+    const site = parts[jobIndex - 1];
+    const apiUrl = `https://${hostMatch[1].toLowerCase()}.${hostMatch[2]}.myworkdayjobs.com`
+      + `/wday/cxs/${hostMatch[1].toLowerCase()}/${site}/${parts.slice(jobIndex).join('/')}`;
+
+    const response = await fetch(apiUrl, {
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Workday returned ${response.status} for that job link.`);
+    const data = await response.json().catch(() => null);
+    const info = data?.jobPostingInfo;
+    const body = typeof info?.jobDescription === 'string' ? info.jobDescription.trim() : '';
+    if (!body) return null;
+
+    const title = String(info.title || '').trim();
+    const locations = [info.location, ...(Array.isArray(info.additionalLocations) ? info.additionalLocations : [])]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    const location = [...new Set(locations)].join(', ');
+    const company = prettifyCompanySlug(site.replace(/[_\-](?:careers?|jobs?)$/i, ''))
+      || prettifyCompanySlug(hostMatch[1]);
+
+    // A JSON-LD JobPosting carries the real description markup, so the shared
+    // parser keeps the headings and bullets Workday sends.
+    const posting = {
+      '@context': 'https://schema.org/',
+      '@type': 'JobPosting',
+      title,
+      description: body,
+      hiringOrganization: { '@type': 'Organization', name: company },
+      ...(location ? { jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: location } } } : {}),
+      ...(info.jobRequisitionId ? { identifier: { '@type': 'PropertyValue', name: company, value: String(info.jobRequisitionId) } } : {}),
+      ...(info.timeType ? { employmentType: String(info.timeType) } : {}),
+      ...(info.postedOn ? { datePosted: String(info.postedOn) } : {}),
+    };
+    const titleHtml = escapeHtml(title);
+    return {
+      html: `<!doctype html><html><head><title>${titleHtml}</title>`
+        + `<meta property="og:title" content="${titleHtml}">`
+        + `<meta property="og:site_name" content="${escapeHtml(company)}">`
+        + `<script type="application/ld+json">${JSON.stringify(posting).replace(/</g, '\\u003c')}</script>`
+        + `</head><body><h1>${titleHtml}</h1>`
+        + `<p>${escapeHtml(company)} · ${escapeHtml(location)}</p>${body}</body></html>`,
+      text: `${title}\n${company} · ${location}\n${htmlToLines(body)}`,
+      // Drop tracking params (fbclid/utm…) so the stored apply link is the
+      // canonical posting address.
+      finalUrl: `${source.origin}${source.pathname}`,
+    };
+  };
+
   let fetchError;
+  try {
+    const workday = await workdayJob();
+    if (workday) return parse(workday);
+  } catch (error) {
+    fetchError = error;
+  }
+
   try {
     const greenhouse = await greenhouseJob();
     if (greenhouse) return parse(greenhouse);
@@ -4115,7 +4269,7 @@ app.get('/api/campaigns/:id', (req, res) => {
 
 app.post('/api/campaigns', async (req, res) => {
   try {
-    const { userId, company, role, roles, perRole, sendInvites, useAINotes, connectionNote, userProfile } = req.body || {};
+    const { userId, company, role, roles, perRole, referralTarget, sendInvites, useAINotes, connectionNote, userProfile } = req.body || {};
     if (!company || !String(company).trim()) {
       return res.status(400).json({ error: 'A target company is required.' });
     }
@@ -4224,7 +4378,11 @@ app.post('/api/campaigns', async (req, res) => {
       userId: userId || null,
       config: {
         roles: Array.isArray(roles) ? roles.filter(Boolean) : [],
+        // Stage 2 quota: one independent count per job role.
         perRole: parseInt(perRole, 10) || 10,
+        // Stage 1 quota: one company-wide referral-message count. Kept separate
+        // from perRole — neither stage reads or adjusts the other's target.
+        referralTarget: Math.max(1, parseInt(referralTarget, 10) || 5),
         sendInvites: sendInvites !== false,
         useAINotes: useAINotes !== false,
         connectionNote: connectionNote || '',
@@ -4313,6 +4471,31 @@ app.get('/api/vault/answers', (req, res) => {
     res.json({ answers });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not read vault answers.' });
+  }
+});
+
+// Match credentials for a job portal / domain
+app.post('/api/vault/credentials/match', (req, res) => {
+  try {
+    const { domain } = req.body || {};
+    const credential = findVaultCredential(domain);
+    res.json({ credential: credential || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not find vault credential.' });
+  }
+});
+
+// Save credentials for a job portal / domain
+app.post('/api/vault/credentials', (req, res) => {
+  try {
+    const { domain, email, password } = req.body || {};
+    if (!domain || (!email && !password)) {
+      return res.status(400).json({ error: 'domain and email or password are required.' });
+    }
+    const saved = saveVaultCredential(domain, { email, password, updatedAt: new Date().toISOString() });
+    res.json({ success: true, credential: saved });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save vault credential.' });
   }
 });
 

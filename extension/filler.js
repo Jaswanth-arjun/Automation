@@ -71,10 +71,9 @@
 
   async function askOrSkip(question, index, total, options, reason, autoSubmit) {
     if (!autoSubmit) return askHamzoohQuestion(question, index, total, options, reason);
-    if (autoPromptMissed) return null;
-    const result = await withTimeout(askHamzoohQuestion(question, index, total, options, reason), 30000, null);
+    // Allow up to 90 seconds for user to answer questions via the Hamzooh overlay
+    const result = await withTimeout(askHamzoohQuestion(question, index, total, options, reason), 90000, null);
     if (!result) {
-      autoPromptMissed = true;
       removeHamzoohOverlays();
     }
     return result;
@@ -642,7 +641,7 @@
   }
 
   async function fillCustomDropdowns(wantedByQuestion, answers, profile, company) {
-    const widgets = queryAllDeep('[role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="dropdown"]')
+    const widgets = queryAllDeep('[data-automation-id*="select"], [data-automation-id*="dropdown"], [data-automation-id="sourceDropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="dropdown"]')
       .filter((el) => visible(el) && el.tagName !== 'SELECT');
     for (const widget of widgets.slice(0, 20)) {
       const question = questionFor(widget);
@@ -650,9 +649,22 @@
       try {
         widget.click();
         await sleep(250);
-        const options = queryAllDeep('[role="option"], [class*="option"], li').filter((o) => visible(o) && (o.innerText || '').trim());
+        const options = queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [class*="option"], li').filter((o) => visible(o) && (o.innerText || '').trim());
         if (!options.length) continue;
         if (!wanted) wanted = heuristicChoice(question, options.map((o) => o.innerText.trim()), profile);
+        if (!wanted) {
+          const optTexts = options.map((o) => o.innerText.trim()).filter(Boolean);
+          const ai = await inferAnswerWithAI(question, optTexts, profile, '', company, '');
+          if (ai?.answer) {
+            wanted = ai.answer;
+          } else {
+            const promptResult = await askOrSkip(question, 0, 1, optTexts, 'Choose the option for this question (saved to Vault)', true);
+            if (promptResult?.answer) {
+              wanted = promptResult.answer;
+              if (promptResult.remember) await rememberAnswer(answers, question, wanted);
+            }
+          }
+        }
         if (!wanted) {
           document.body.click();
           await sleep(100);
@@ -662,7 +674,7 @@
         const hit = options.find((o) => {
           const t = o.innerText.trim().toLowerCase();
           const w = String(wanted).toLowerCase();
-          return t === w || (w === 'yes' && /^(yes|y)\b/.test(t)) || (w === 'no' && /^(no|n)\b/.test(t)) || (w === 'decline' && /decline|prefer not/.test(t));
+          return t === w || t.includes(w) || w.includes(t) || (w === 'yes' && /^(yes|y)\b/.test(t)) || (w === 'no' && /^(no|n)\b/.test(t)) || (w === 'decline' && /decline|prefer not/.test(t));
         });
         if (hit) {
           hit.click();
@@ -793,7 +805,7 @@
     const clickAttach = () => {
       queryAllDeep('button, a, label, span, [role="button"]').forEach((el) => {
         const text = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
-        if (/^(attach file|upload( file)?|choose file|browse|attach)$/i.test(text) || /attach (a )?file|upload resume|upload cv/i.test(text)) {
+        if (/^(attach file|upload( file)?|choose file|browse|attach|select file)$/i.test(text) || /attach (a )?file|upload resume|upload cv|select file/i.test(text)) {
           try { el.click(); } catch {}
         }
       });
@@ -807,9 +819,9 @@
       attached = allFileInputs().some((input) => attachResume(input, file));
     }
     if (!attached) {
-      const zone = queryAllDeep('div, section, label, form').find((el) => {
+      const zone = queryAllDeep('[data-automation-id="file-upload-drop-zone"], [data-automation-id*="drop"], div, section, label, form').find((el) => {
         const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
-        return /resume\/?cv|attach file|drop file/i.test(text) && text.length < 180;
+        return /resume\/?cv|attach file|drop file|select file/i.test(text) && text.length < 250;
       });
       if (zone) {
         const transfer = new DataTransfer();
@@ -817,11 +829,15 @@
         ['dragenter', 'dragover', 'drop'].forEach((type) => {
           try { zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer })); } catch {}
         });
-        attached = allFileInputs().some((input) => attachResume(input, file));
+        await sleep(500);
+        attached = allFileInputs().some((input) => attachResume(input, file))
+          || Boolean(document.querySelector('[data-automation-id="file-upload-item"], [data-automation-id*="file"]'));
       }
     }
-    if (attached) sendProgress('resume_attached', `📎 Attached ${file.name}`);
-    else {
+    if (attached) {
+      sendProgress('resume_attached', `📎 Attached ${file.name}`);
+      await sleep(1500);
+    } else {
       skipped.push({ field: 'resume', reason: 'Could not find a file input or dropzone for the resume.' });
       sendProgress('resume_failed', '⚠️ Could not attach the tailored resume — no file input found.');
     }
@@ -1053,8 +1069,21 @@
     try { target.click(); } catch {}
   }
 
+  function hasResumeDropzone() {
+    try {
+      if (allFileInputs().length > 0) return true;
+      const zone = queryAllDeep('[data-automation-id="file-upload-drop-zone"], [data-automation-id*="drop"], [data-automation-id*="file"], div, section, label, form').find((el) => {
+        if (!visible(el)) return false;
+        const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+        return /resume\/?cv|attach file|drop file|select file|autofill with resume/i.test(text) && text.length < 250;
+      });
+      return Boolean(zone);
+    } catch { return false; }
+  }
+
   function pageHasForm() {
-    return collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'file' && (i.getAttribute('type') || '') !== 'password').length >= 1;
+    if (hasResumeDropzone()) return true;
+    return collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'password').length >= 1;
   }
 
   function detectLoginWall() {
@@ -1098,29 +1127,139 @@
     } catch { return false; }
   }
 
+  /** Workday / ATS modal choice: automatically select "Autofill with Resume" */
+  async function checkAndHandleApplyChoices() {
+    const candidates = queryAllDeep(ACTION_SELECTOR);
+    const autofillBtn = candidates.find((el) => {
+      if (!visible(el) || el.disabled) return false;
+      const autoId = el.getAttribute('data-automation-id') || '';
+      const text = buttonText(el);
+      return /autofillWithResume/i.test(autoId) || /autofill with resume|apply with resume/i.test(text);
+    });
+    if (autofillBtn) {
+      sendProgress('choice_selected', '⚡ Selected "Autofill with Resume"…');
+      await realClick(autofillBtn);
+      await sleep(1800);
+      return true;
+    }
+    return false;
+  }
+
+  function showLoginHelperBanner(company, emailInput, pwInput) {
+    if (document.getElementById('hamzooh-login-helper')) return;
+    const banner = document.createElement('div');
+    banner.id = 'hamzooh-login-helper';
+    banner.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;background:#ffffff;border:1.5px solid #6366f1;box-shadow:0 10px 25px rgba(0,0,0,0.15);border-radius:12px;padding:14px 18px;max-width:380px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1e293b;';
+    banner.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <div style="font-size:20px;">🔐</div>
+        <div>
+          <div style="font-weight:700;font-size:13.5px;color:#1e1b4b;margin-bottom:3px;">Sign In or Create Account</div>
+          <div style="font-size:12px;color:#64748b;line-height:1.4;">
+            Sign in or create an account for <b>${escapeHtml(company || 'this portal')}</b>. Hamzooh will securely save your login details so you never have to sign in manually again!
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(banner);
+
+    const saveCreds = async () => {
+      const email = emailInput?.value?.trim() || '';
+      const password = pwInput?.value || '';
+      if (password && (email || password.length >= 6)) {
+        await proxyFetch('/api/vault/credentials', {
+          domain: location.hostname.toLowerCase(),
+          email,
+          password,
+        });
+        sendProgress('credentials_saved', '💾 Saved credentials to Vault for future auto-logins!');
+        try { banner.remove(); } catch {}
+      }
+    };
+
+    const forms = document.querySelectorAll('form');
+    forms.forEach((f) => f.addEventListener('submit', saveCreds, { once: true }));
+    const submitBtns = queryAllDeep(ACTION_SELECTOR).filter((el) => {
+      return /sign in|create account|log in|register/i.test(buttonText(el));
+    });
+    submitBtns.forEach((btn) => btn.addEventListener('click', saveCreds, { once: true }));
+  }
+
+  async function handlePortalAuthGate(company) {
+    const pwInput = queryAllDeep('input[type="password"]').find(visible);
+    if (!pwInput) return false;
+
+    const emailInput = queryAllDeep('input[type="email"], [data-automation-id="email"], input[name*="email"], input[id*="email"], input[type="text"]').find((el) => {
+      if (!visible(el)) return false;
+      const idOrName = `${el.id} ${el.name} ${el.placeholder} ${labelFor(el)}`.toLowerCase();
+      return /email|user(name)?/i.test(idOrName);
+    });
+
+    const portalDomain = location.hostname.toLowerCase();
+
+    // 1. Check if we already have saved credentials in Vault
+    try {
+      const res = await proxyFetch('/api/vault/credentials/match', { domain: portalDomain });
+      const cred = res?.data?.credential;
+      if (cred?.password && pwInput) {
+        if (cred.email && emailInput && !emailInput.value) {
+          setNativeValue(emailInput, cred.email);
+        }
+        setNativeValue(pwInput, cred.password);
+        sendProgress('auto_login', `🔑 Auto-filled credentials for ${company || portalDomain}`);
+
+        const submitBtn = queryAllDeep(ACTION_SELECTOR).find((el) => {
+          if (!visible(el) || el.disabled) return false;
+          const autoId = el.getAttribute('data-automation-id') || '';
+          const text = buttonText(el);
+          return /signInSubmitButton/i.test(autoId) || /^(sign in|log in|submit)$/i.test(text);
+        });
+        if (submitBtn) {
+          await sleep(600);
+          await realClick(submitBtn);
+          sendProgress('auto_login_submitted', '🚀 Auto-signed in, waiting for application to load…');
+          await sleep(2500);
+          return true;
+        }
+      }
+    } catch {}
+
+    // 2. If no saved credentials yet, listen to user submission and save to Vault
+    showLoginHelperBanner(company, emailInput, pwInput);
+    return false;
+  }
+
   function buttonText(el) {
     return (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
   }
 
-  function findAdvanceButton() {
-    const nodes = queryAllDeep(ACTION_SELECTOR);
-    return nodes.find((el) => visible(el) && !el.disabled && isAdvanceButtonText(buttonText(el))) || null;
-  }
-
-  function isAdvanceButtonText(text) {
+  function isAdvanceButton(el) {
+    if (!el || !visible(el) || el.disabled) return false;
+    const autoId = el.getAttribute('data-automation-id') || '';
+    if (/bottom-navigation-next-button|page-navigation-next-button|continue-button/i.test(autoId)) return true;
+    const text = buttonText(el);
     if (/sign in with|attach file|paste|google|linkedin|github/i.test(text)) return false;
     return /^(next|continue|save and continue|save & continue|proceed|next step)$/i.test(text)
       || /save.?and.?continue|continue application|next page/i.test(text);
   }
 
-  function isSubmitButtonText(text) {
+  function findAdvanceButton() {
+    const nodes = queryAllDeep(ACTION_SELECTOR);
+    return nodes.find((el) => isAdvanceButton(el)) || null;
+  }
+
+  function isSubmitButton(el) {
+    if (!el || !visible(el) || el.disabled) return false;
+    const autoId = el.getAttribute('data-automation-id') || '';
+    if (/bottom-navigation-submit-button/i.test(autoId)) return true;
+    const text = buttonText(el);
     if (!text || /sign in|log in|contact sales|attach file|paste|next|continue/i.test(text)) return false;
     return /submit application|^submit$|^apply$|apply now|send application|submit my application|finish application/i.test(text);
   }
 
   function findSubmitButton() {
     const nodes = queryAllDeep(ACTION_SELECTOR);
-    return nodes.find((el) => visible(el) && !el.disabled && isSubmitButtonText(buttonText(el))) || null;
+    return nodes.find((el) => isSubmitButton(el)) || null;
   }
 
   const SUCCESS_PATTERNS = [
@@ -1189,7 +1328,8 @@
 
   async function waitForForm() {
     for (let i = 0; i < 45; i += 1) {
-      const inputs = collectInputs().filter((input) => !['file', 'password'].includes((input.getAttribute('type') || '')));
+      if (hasResumeDropzone()) return collectInputs();
+      const inputs = collectInputs().filter((input) => !['password'].includes((input.getAttribute('type') || '')));
       if (inputs.length >= 1) return inputs;
       // A step can open with nothing but a choice group or a single Next
       // button; treat a clickable action as proof the app has rendered.
@@ -1348,12 +1488,12 @@
   function groupIsRequired(input, question) {
     if (input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(question)) return true;
     const wrapper = input.closest(
-      'mat-radio-group, mat-checkbox-group, [role="radiogroup"], [role="group"], fieldset, .field, .form-group',
+      'mat-radio-group, mat-checkbox-group, [role="radiogroup"], [role="group"], [data-automation-id*="formField"], [data-automation-id*="question"], fieldset, .field, .form-group',
     );
     if (!wrapper) return false;
     return wrapper.getAttribute('aria-required') === 'true'
-      || Boolean(wrapper.querySelector('[required], [aria-required="true"]'))
-      || /\*/.test(cleanPrompt(wrapper.querySelector('legend, .q-label, [class*="label"]')?.innerText || ''));
+      || Boolean(wrapper.querySelector('[required], [aria-required="true"], [data-automation-id*="required"], abbr[title*="required"]'))
+      || /\*/.test(cleanPrompt(wrapper.querySelector('legend, .q-label, [class*="label"], [data-automation-id*="label"]')?.innerText || ''));
   }
 
   function requiredGroupsOf() {
@@ -1424,19 +1564,29 @@
       return;
     }
 
-    // Never type profile data into a sign-in screen. Pause and let the user
-    // authenticate; the automation resumes on its own afterwards.
-    if (detectAuthGate()) {
+    // Check if portal needs sign in or account creation.
+    // Auto-fill if credentials exist in Vault, or display a helper banner to save them.
+    if (detectAuthGate() || detectLoginWall()) {
+      const loggedIn = await handlePortalAuthGate(pending.company);
+      if (loggedIn) {
+        return fillPage(profile, answers, pending, depth + 1);
+      }
       if (pending.awaitingManualApply && pending.loginHost === location.hostname) return;
       sendProgress(
         'login_required',
-        `🔐 ${location.hostname} needs you to sign in first. Finish signing in — Hamzooh resumes automatically.`,
+        `🔐 Sign in or create an account for ${pending.company || location.hostname}. Hamzooh will save credentials and resume automatically.`,
       );
       await updatePending({ awaitingManualApply: true, loginHost: location.hostname });
       return;
     }
 
     await waitForContent();
+
+    // Check if Workday or ATS is displaying an "Autofill with Resume" choice dialog
+    if (await checkAndHandleApplyChoices()) {
+      await updatePending({ url: location.href, applyClicked: true });
+      return fillPage(profile, answers, { ...pending, applyClicked: true }, depth + 1);
+    }
 
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
     const applyBtns = !pending.applyClicked && earlyInputs.length < 2 ? findDescriptionApplyButtons() : [];
@@ -1446,9 +1596,10 @@
       await realClick(applyBtns[0]);
       const start = Date.now();
       let changed = false;
-      while (Date.now() - start < 12000) {
+      while (Date.now() - start < 15000) {
         await sleep(500);
-        if (location.href !== beforeUrl || earlyInputs.length < 2 && pageHasForm()) { changed = true; break; }
+        if (await checkAndHandleApplyChoices()) { changed = true; break; }
+        if (location.href !== beforeUrl || pageHasForm()) { changed = true; break; }
       }
       if (!changed) {
         if (detectLoginWall()) {
@@ -1487,14 +1638,16 @@
       await realClick(advance);
       const startedAt = Date.now();
       let progressed = false;
-      while (Date.now() - startedAt < 12000) {
+      while (Date.now() - startedAt < 25000) {
         await sleep(400);
         const newSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
         if (location.href !== beforeUrl || newSnapshot !== snapshot) {
           progressed = true;
           break;
         }
-        if (advance.disabled || /loading|saving|please wait/i.test(buttonText(advance))) continue;
+        if (advance.disabled || /loading|saving|please wait|processing/i.test(buttonText(advance))
+          || document.querySelector('[data-automation-id="loading-spinner"], [aria-busy="true"]')) continue;
+      }
       }
       if (progressed) {
         await updatePending({ url: location.href, applyClicked: true });
