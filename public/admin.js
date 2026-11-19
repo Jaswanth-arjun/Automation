@@ -1053,7 +1053,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function billingFetch(path, options = {}) {
-    const res = await fetch(path, options);
+    const token = localStorage.getItem('hamzooh_token')
+      || localStorage.getItem('hamzo_token')
+      || localStorage.getItem('mailmind_token')
+      || '';
+    let userEmail = '';
+    try {
+      const stored = localStorage.getItem('wayin_user') || localStorage.getItem('hamzooh_user') || '';
+      userEmail = JSON.parse(stored)?.email || '';
+    } catch {}
+    const headers = {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(userEmail ? { 'X-User-Email': userEmail } : {}),
+    };
+    const res = await fetch(path, { ...options, headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = new Error(data.error || `Request failed (${res.status})`);
