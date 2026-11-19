@@ -426,12 +426,16 @@
   }
 
   function collectInputs() {
-    // If a modal dialog is open (like LinkedIn Easy Apply modal), prioritize inputs INSIDE the modal!
+    // On LinkedIn, inputs ONLY exist if the Easy Apply modal is open!
+    const isLinkedIn = /linkedin\.com/i.test(location.hostname);
     const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
+    if (isLinkedIn && !modal) {
+      return [];
+    }
     const root = modal || document;
     return queryAllDeep('input, textarea, select', root).filter((input) => {
       // Ignore header/nav/global search inputs and messaging inputs
-      if (input.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"]')) return false;
+      if (input.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"], [class*="global-nav"]')) return false;
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) return false;
       if (input.disabled) return false;
@@ -650,8 +654,18 @@
   }
 
   async function fillCustomDropdowns(wantedByQuestion, answers, profile, company) {
-    const widgets = queryAllDeep('[data-automation-id*="select"], [data-automation-id*="dropdown"], [data-automation-id="sourceDropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="dropdown"]')
-      .filter((el) => visible(el) && el.tagName !== 'SELECT');
+    // If an apply modal is open, search ONLY inside the modal!
+    const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
+    if (/linkedin\.com/i.test(location.hostname) && !modal) {
+      return; // Never scan dropdowns on LinkedIn outside the Easy Apply modal!
+    }
+    const root = modal || document;
+    const widgets = queryAllDeep('[data-automation-id*="select"], [data-automation-id*="dropdown"], [data-automation-id="sourceDropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="dropdown"]', root)
+      .filter((el) => {
+        if (!visible(el) || el.tagName === 'SELECT') return false;
+        if (el.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"], [class*="global-nav"]')) return false;
+        return true;
+      });
     for (const widget of widgets.slice(0, 20)) {
       const question = questionFor(widget);
       let wanted = findBestAnswer(question, answers) || chooseFromProfile(question, profile, company) || wantedByQuestion.get(question);
@@ -715,8 +729,14 @@
   }
 
   function fillChoices(profile, answers, company) {
-    const controls = queryAllDeep('select, input[type="radio"], input[type="checkbox"]')
-      .filter((el) => (el.tagName === 'SELECT' ? visible(el) : choiceVisible(el)));
+    const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
+    if (/linkedin\.com/i.test(location.hostname) && !modal) return 0;
+    const root = modal || document;
+    const controls = queryAllDeep('select, input[type="radio"], input[type="checkbox"]', root)
+      .filter((el) => {
+        if (el.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"], [class*="global-nav"]')) return false;
+        return el.tagName === 'SELECT' ? visible(el) : choiceVisible(el);
+      });
     const seenGroups = new Set();
     let filledCount = 0;
     controls.forEach((input) => {
@@ -1079,8 +1099,12 @@
     if (findLinkedInModal()) return null;
 
     // 1. Direct LinkedIn apply button classes and data attributes
-    const directCandidates = queryAllDeep('.jobs-apply-button, button.jobs-apply-button, [data-control-name*="apply"], [data-job-id]').filter((el) => {
-      if (!visible(el) || el.disabled) return false;
+    const directCandidates = queryAllDeep('.jobs-apply-button, button.jobs-apply-button, [data-control-name*="apply"], [data-job-id], button[class*="jobs-apply"]').filter((el) => {
+      if (el.disabled) return false;
+      const r = el.getBoundingClientRect?.() || { width: 0, height: 0 };
+      if (r.width === 0 || r.height === 0) return false;
+      const cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
       const text = (el.innerText || el.getAttribute('aria-label') || '').toLowerCase();
       return text.includes('easy apply') || text.includes('apply');
     });
@@ -1088,7 +1112,11 @@
 
     // 2. Any button or role=button with text matching "Easy Apply"
     const allButtons = queryAllDeep(ACTION_SELECTOR).filter((el) => {
-      if (!visible(el) || el.disabled) return false;
+      if (el.disabled) return false;
+      const r = el.getBoundingClientRect?.() || { width: 0, height: 0 };
+      if (r.width === 0 || r.height === 0) return false;
+      const cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return false;
       const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
       return /easy\s*apply/i.test(text);
     });
@@ -1166,6 +1194,16 @@
   }
 
   function pageHasForm() {
+    if (/linkedin\.com/i.test(location.hostname)) {
+      // On LinkedIn, a form ONLY exists when the Easy Apply modal is OPEN and loaded!
+      const modal = findLinkedInModal();
+      if (!modal) return false;
+      const inputs = queryAllDeep('input, select, textarea', modal).filter((el) => {
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        return !['hidden', 'submit', 'button'].includes(type) && visible(el);
+      });
+      return inputs.length > 0 || Boolean(findAdvanceButton()) || Boolean(findSubmitButton());
+    }
     if (hasResumeDropzone()) return true;
     return collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'password').length >= 1;
   }
