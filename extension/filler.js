@@ -426,7 +426,12 @@
   }
 
   function collectInputs() {
-    return queryAllDeep('input, textarea, select').filter((input) => {
+    // If a modal dialog is open (like LinkedIn Easy Apply modal), prioritize inputs INSIDE the modal!
+    const modal = queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
+    const root = modal || document;
+    return queryAllDeep('input, textarea, select', root).filter((input) => {
+      // Ignore header/nav/global search inputs and messaging inputs
+      if (input.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"]')) return false;
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) return false;
       if (input.disabled) return false;
@@ -838,6 +843,19 @@
           || Boolean(document.querySelector('[data-automation-id="file-upload-item"], [data-automation-id*="file"]'));
       }
     }
+    // LinkedIn: if existing resumes are displayed in the Easy Apply modal, ensure one is selected
+    if (!attached) {
+      const linkedInResumeOptions = queryAllDeep('.jobs-document-upload__title, [data-test-document-upload-resume], .jobs-resume-picker__resume-item');
+      if (linkedInResumeOptions.length > 0) {
+        const radio = queryAllDeep('input[type="radio"]', linkedInResumeOptions[0]).find(visible);
+        if (radio && !radio.checked) {
+          try { radio.click(); } catch {}
+        } else {
+          try { linkedInResumeOptions[0].click(); } catch {}
+        }
+        attached = true;
+      }
+    }
     if (attached) {
       sendProgress('resume_attached', `📎 Attached ${file.name}`);
       await sleep(1500);
@@ -1022,14 +1040,39 @@
     '.mdc-button',
   ].join(', ');
 
+  function findLinkedInEasyApplyButton() {
+    // 1. Direct LinkedIn apply button classes and data attributes
+    const directCandidates = queryAllDeep('.jobs-apply-button, button.jobs-apply-button, [data-control-name*="apply"], [data-job-id]').filter((el) => {
+      if (!visible(el) || el.disabled) return false;
+      const text = (el.innerText || el.getAttribute('aria-label') || '').toLowerCase();
+      return text.includes('easy apply') || text.includes('apply');
+    });
+    if (directCandidates.length > 0) return directCandidates[0];
+
+    // 2. Any button or role=button with text matching "Easy Apply"
+    const allButtons = queryAllDeep(ACTION_SELECTOR).filter((el) => {
+      if (!visible(el) || el.disabled) return false;
+      const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
+      return /easy\s*apply/i.test(text);
+    });
+    if (allButtons.length > 0) return allButtons[0];
+
+    return null;
+  }
+
   function findDescriptionApplyButtons() {
+    // Check for LinkedIn Easy Apply first
+    const easyApply = findLinkedInEasyApplyButton();
+    if (easyApply) return [easyApply];
+
     const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const out = [];
     for (const el of queryAllDeep(ACTION_SELECTOR)) {
       try {
         if (el.disabled || !visible(el)) continue;
         const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || '');
-        if (!/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply)$/.test(text)) continue;
+        if (!/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply)$/i.test(text)
+            && !/easy\s*apply/i.test(text)) continue;
         if (/sign in|log in|contact sales|attach file/i.test(text)) continue;
         const form = el.closest('form');
         if (form && form.querySelectorAll('input, textarea, select').length >= 3) continue;
@@ -1241,13 +1284,23 @@
     if (!el || !visible(el) || el.disabled) return false;
     const autoId = el.getAttribute('data-automation-id') || '';
     if (/bottom-navigation-next-button|page-navigation-next-button|continue-button/i.test(autoId)) return true;
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (/continue to next step|review your application/i.test(aria)) return true;
     const text = buttonText(el);
-    if (/sign in with|attach file|paste|google|linkedin|github/i.test(text)) return false;
-    return /^(next|continue|save and continue|save & continue|proceed|next step)$/i.test(text)
-      || /save.?and.?continue|continue application|next page/i.test(text);
+    if (/sign in with|attach file|paste|google|github/i.test(text)) return false;
+    if (/sign in with linkedin/i.test(text)) return false;
+    return /^(next|continue|save and continue|save & continue|proceed|next step|review)$/i.test(text)
+      || /save.?and.?continue|continue application|next page|continue to next step|review your application/i.test(text)
+      || (/review/i.test(text) && Boolean(el.closest?.('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal')));
   }
 
   function findAdvanceButton() {
+    const modal = queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find(visible);
+    if (modal) {
+      const modalBtns = queryAllDeep(ACTION_SELECTOR, modal);
+      const inModal = modalBtns.find((el) => isAdvanceButton(el));
+      if (inModal) return inModal;
+    }
     const nodes = queryAllDeep(ACTION_SELECTOR);
     return nodes.find((el) => isAdvanceButton(el)) || null;
   }
@@ -1256,12 +1309,20 @@
     if (!el || !visible(el) || el.disabled) return false;
     const autoId = el.getAttribute('data-automation-id') || '';
     if (/bottom-navigation-submit-button/i.test(autoId)) return true;
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (/submit application|submit my application/i.test(aria)) return true;
     const text = buttonText(el);
     if (!text || /sign in|log in|contact sales|attach file|paste|next|continue/i.test(text)) return false;
     return /submit application|^submit$|^apply$|apply now|send application|submit my application|finish application/i.test(text);
   }
 
   function findSubmitButton() {
+    const modal = queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find(visible);
+    if (modal) {
+      const modalBtns = queryAllDeep(ACTION_SELECTOR, modal);
+      const inModal = modalBtns.find((el) => isSubmitButton(el));
+      if (inModal) return inModal;
+    }
     const nodes = queryAllDeep(ACTION_SELECTOR);
     return nodes.find((el) => isSubmitButton(el)) || null;
   }
@@ -1285,6 +1346,27 @@
 
   function pageBodyText() {
     try { return (document.body?.innerText || '').slice(0, 200000); } catch { return ''; }
+  }
+
+  function handleLinkedInDoneModal() {
+    try {
+      const modal = queryAllDeep('.artdeco-modal, [role="dialog"]').find((m) => {
+        if (!visible(m)) return false;
+        const text = (m.innerText || '').toLowerCase();
+        return text.includes('application was sent') || text.includes('application submitted') || text.includes('your application has been sent');
+      });
+      if (modal) {
+        const doneBtn = queryAllDeep('button, [role="button"]', modal).find((b) => {
+          const txt = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
+          return txt === 'done' || txt.includes('dismiss');
+        });
+        if (doneBtn) {
+          try { doneBtn.click(); } catch {}
+        }
+        return true;
+      }
+    } catch {}
+    return false;
   }
 
   // Submission is only reported once a success state is actually observed.
@@ -1592,16 +1674,25 @@
       return fillPage(profile, answers, { ...pending, applyClicked: true }, depth + 1);
     }
 
+    const isLinkedIn = /linkedin\.com/i.test(location.hostname);
+    const linkedInModalOpen = isLinkedIn && Boolean(queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m)));
+
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
-    const applyBtns = !pending.applyClicked && earlyInputs.length < 2 ? findDescriptionApplyButtons() : [];
+    const applyBtns = (!pending.applyClicked && earlyInputs.length < 2) || (isLinkedIn && !linkedInModalOpen)
+      ? findDescriptionApplyButtons()
+      : [];
     if (applyBtns.length) {
-      sendProgress('apply_opening', '📄 Job page detected — clicking Apply…');
+      sendProgress('apply_opening', isLinkedIn ? '💼 LinkedIn Easy Apply detected — clicking Easy Apply…' : '📄 Job page detected — clicking Apply…');
       const beforeUrl = location.href;
       await realClick(applyBtns[0]);
       const start = Date.now();
       let changed = false;
       while (Date.now() - start < 15000) {
         await sleep(500);
+        if (isLinkedIn && Boolean(queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find(visible))) {
+          changed = true;
+          break;
+        }
         if (await checkAndHandleApplyChoices()) { changed = true; break; }
         if (location.href !== beforeUrl || pageHasForm()) { changed = true; break; }
       }
@@ -1688,6 +1779,7 @@
     if (decision === 'submit' && submitBtn && stillEmpty.length === 0) {
       const verified = await submitAndVerify(submitBtn);
       if (verified.ok) {
+        handleLinkedInDoneModal();
         await finish(`✅ Application submitted — ${verified.reason}. ${filledCount} fields filled.`, { status: 'submitted', filledCount, emptyCount: 0 });
       } else {
         await finish(`⚠️ Submission was clicked but not confirmed (${verified.reason}). Check the job tab before assuming it went through.`, { status: 'needs_attention', filledCount, emptyCount: 0 });

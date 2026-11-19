@@ -219,6 +219,17 @@ chrome.tabs.onCreated.addListener((tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'HAMZOOH_AUTO_TRIGGER') {
+    log('Auto-trigger received from tab', sender.tab?.id);
+    if (sender.tab?.id && isJobTab(sender.tab.id)) {
+      beginFill(sender.tab.id);
+      sendResponse({ ok: true });
+    } else {
+      sendResponse({ ok: false, reason: 'not a job tab' });
+    }
+    return;
+  }
+
   if (message?.type === 'HAMZOOH_IS_JOB_TAB') {
     sendResponse({ ok: isJobTab(sender.tab?.id) });
     return;
