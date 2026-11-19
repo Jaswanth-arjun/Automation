@@ -112,6 +112,8 @@ export default function CampaignStatus({
   const boundRef = useRef(campaignId);
   const logTouchedRef = useRef(false);
   const autoOpenedRef = useRef(false);
+  const loadTimestampRef = useRef(0); // Rate limiting
+  const errorCountRef = useRef(0); // Error tracking
 
   campaignRef.current = campaign;
   onChangeRef.current = onChange;
@@ -132,6 +134,21 @@ export default function CampaignStatus({
   }, [campaign, showLog]);
 
   const load = useCallback(async () => {
+    // Rate limiting: prevent rapid successive loads
+    const now = Date.now();
+    if (now - loadTimestampRef.current < 1000) {
+      console.log('[CampaignStatus] Rate limited - skipping load');
+      return;
+    }
+    loadTimestampRef.current = now;
+
+    // Error circuit breaker: stop loading if too many consecutive errors
+    if (errorCountRef.current >= 5) {
+      console.error('[CampaignStatus] Too many errors - stopped auto-refresh');
+      setError('Campaign status unavailable. Please refresh the page.');
+      return;
+    }
+
     try {
       // A bound card (opened from a job) must show that job's campaign, not
       // whichever campaign happens to be newest.
@@ -139,6 +156,7 @@ export default function CampaignStatus({
         const res = await api.getCampaign(boundRef.current);
         setCampaign(res?.campaign || null);
         setError('');
+        errorCountRef.current = 0; // Reset error count on success
         return;
       }
 
@@ -150,6 +168,7 @@ export default function CampaignStatus({
       if (active && sameCompany(active)) {
         setCampaign(active);
         setError('');
+        errorCountRef.current = 0; // Reset error count on success
         return;
       }
 
@@ -157,8 +176,12 @@ export default function CampaignStatus({
       const campaigns = (list?.campaigns || []).filter(sameCompany);
       setCampaign(campaigns[0] || null);
       setError('');
+      errorCountRef.current = 0; // Reset error count on success
     } catch (err) {
+      console.error('[CampaignStatus] Load error:', err);
+      errorCountRef.current += 1;
       setError(err.message || 'Campaign status unavailable.');
+      setCampaign(null); // Clear campaign on error to prevent crash loop
     } finally {
       setLoading(false);
     }
@@ -206,6 +229,11 @@ export default function CampaignStatus({
 
     const poll = setInterval(() => {
       const status = campaignRef.current?.status;
+      // Stop polling if there's a fatal error to prevent crash loops
+      if (status === 'needs_attention' || status === 'failed') {
+        console.log('[CampaignStatus] Stopped polling due to error status:', status);
+        return;
+      }
       if (!status || ACTIVE_STATUSES.includes(status)) load();
     }, 7000);
 

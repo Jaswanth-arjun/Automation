@@ -18,7 +18,7 @@ import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion, s
 import { inferFromProfile } from './lib/apply-intelligence.js';
 
 import nodemailer from 'nodemailer';
-import { chromium } from 'playwright-core';
+import puppeteer from 'puppeteer-core';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
@@ -109,7 +109,7 @@ function writeCandidates(records) {
         { email: c.email.toLowerCase().trim() },
         { $set: c },
         { upsert: true, returnDocument: 'after' }
-      ).catch(() => {});
+      ).catch(() => { });
     }
   }
 }
@@ -359,7 +359,7 @@ app.post('/api/resume/render-edited-pdf', async (req, res) => {
     const executablePath = getSystemChromePath();
     if (!executablePath) return res.status(503).json({ error: 'Chrome browser is required to create the edited PDF.' });
 
-    browser = await chromium.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page = await browser.newPage();
     await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>
       @page { size: A4; margin: 0; }
@@ -381,7 +381,7 @@ app.post('/api/resume/render-edited-pdf', async (req, res) => {
       .resume-page .skill-row { display: grid; grid-template-columns: 140pt 1fr; gap: 0; margin: 0; line-height: 1.12; }
       .resume-page a { color: #1649d8; text-decoration: none; }
       .resume-page i { font-weight: normal; }
-    </style></head><body>${html}</body></html>`, { waitUntil: 'load' });
+    </style></head><body>${html}</body></html>`, { waitUntil: 'networkidle0' });
     await page.evaluate(() => document.fonts?.ready);
     const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
     res.json({ pdfBase64: Buffer.from(pdf).toString('base64') });
@@ -586,7 +586,7 @@ app.delete('/api/jobs/:id', (req, res) => {
   if (job.logo && job.logo.startsWith('/uploads/')) {
     const logoFilePath = path.join(__dirname, job.logo);
     if (fs.existsSync(logoFilePath)) {
-      try { fs.unlinkSync(logoFilePath); } catch {}
+      try { fs.unlinkSync(logoFilePath); } catch { }
     }
   }
 
@@ -2107,7 +2107,7 @@ function extractApplyUrl(html, baseUrl) {
     try {
       const next = new URL(href, baseUrl).toString();
       if (hosts.test(next) && !/\/error(\/|$)|\/500(\/|$)/i.test(next)) return next;
-    } catch {}
+    } catch { }
   }
   return '';
 }
@@ -2225,7 +2225,7 @@ function extractJobMetadata(html, rawUrl, plainText = '') {
           const hiringOrg = item?.hiringOrganization?.name;
           if (hiringOrg && !company) company = String(hiringOrg).trim();
         }
-      } catch {}
+      } catch { }
     }
     // __NEXT_DATA__ / embedded state (mynexthire, Next.js boards)
     const nextData = html.match(/<script[^>]*id=["']__NEXT_DATA__["'[^>]*>([\s\S]*?)<\/script>/i);
@@ -2327,13 +2327,11 @@ async function fetchJobText(url) {
     const executablePath = getSystemChromePath();
     if (!executablePath) throw new Error('A browser is required to read this job page. Paste the complete job description instead.');
 
-    const browser = await chromium.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     try {
-      const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      });
-      const page = await context.newPage();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
       // Some career sites (notably IBM) first return an AWS WAF shell and
       // populate the actual posting asynchronously after the challenge is
       // solved. Do not treat that short shell as a usable job description.
@@ -2566,8 +2564,8 @@ function preserveExistingAtsKeywords(resume, jobKeywords, sourceText) {
   const missing = [...new Set((jobKeywords || [])
     .map((keyword) => String(keyword || '').trim())
     .filter((keyword) => keyword.length > 2)
-     .filter((keyword) => keywordMatches(source, keyword))
-     .filter((keyword) => !keywordMatches(output, keyword))
+    .filter((keyword) => keywordMatches(source, keyword))
+    .filter((keyword) => !keywordMatches(output, keyword))
   )];
   if (!missing.length) return mergeKeywordsIntoSkillGroups(resume, []);
 
@@ -2583,7 +2581,7 @@ function addTargetedJobKeywords(resume, jobKeywords, sourceText) {
   const missing = [...new Set((jobKeywords || [])
     .map((keyword) => String(keyword || '').trim())
     .filter(Boolean)
-     .filter((keyword) => !keywordMatches(output, keyword))
+    .filter((keyword) => !keywordMatches(output, keyword))
   )];
   if (!missing.length) return { resume: mergeKeywordsIntoSkillGroups(resume, []), added: [] };
 
@@ -3025,15 +3023,15 @@ Job description: ${jobText.slice(0, 16000)}`;
 
     res.json({
       job: {
-        url: openUrl, 
+        url: openUrl,
         sourceUrl: jobUrl ? jobUrl.toString() : '',
-        applyUrl: fetched.applyUrl || openUrl, 
-        title: finalTitle, 
-        company: finalCompany, 
+        applyUrl: fetched.applyUrl || openUrl,
+        title: finalTitle,
+        company: finalCompany,
         logo: finalLogo,
         location: finalLocation,
         description: fetched.posting.description,
-         keywords: sourceKeywords,
+        keywords: sourceKeywords,
       },
       removedKeywords,
       addedKeywords,
@@ -3589,7 +3587,7 @@ app.post('/api/admin/broadcast-batch-mail', async (req, res) => {
 
 app.post('/api/send-email', async (req, res) => {
   const { recipients, subject, bodyText, senderEmail, jobTitle, company, appPassword, resumeBase64, resumeFileName } = req.body || {};
-  
+
   if (appPassword) {
     process.env.GMAIL_APP_PASS = appPassword.replace(/\s+/g, '');
   }
@@ -3899,7 +3897,7 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const existingBrowser = (activeTrackerInstance && activeTrackerInstance.browser) ? activeTrackerInstance.browser :
-                            (activeBotInstance && activeBotInstance.browser) ? activeBotInstance.browser : null;
+      (activeBotInstance && activeBotInstance.browser) ? activeBotInstance.browser : null;
     const reply = await handleRagChat(message, geminiApiKey, existingBrowser);
     res.json({ reply });
   } catch (err) {
@@ -4095,12 +4093,12 @@ app.post('/api/sync-status', async (req, res) => {
 const AUTO_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 setInterval(() => {
   console.log('⏰ Triggering 24/7 periodic background status check...');
-  triggerStatusSync(true).catch(() => {});
+  triggerStatusSync(true).catch(() => { });
 }, AUTO_SYNC_INTERVAL_MS);
 // Trigger initial background sync 15s after boot
 setTimeout(() => {
   console.log('🚀 Triggering initial startup background status check...');
-  triggerStatusSync(true).catch(() => {});
+  triggerStatusSync(true).catch(() => { });
 }, 15000);
 
 app.get('/api/logs', (req, res) => {
@@ -4221,7 +4219,8 @@ function sameCampaignTarget(a, b) {
   return Boolean(left && right && left === right);
 }
 
-function attachCampaignEngine(engine) {  engine.on('log', (entry) => pushLog(entry));
+function attachCampaignEngine(engine) {
+  engine.on('log', (entry) => pushLog(entry));
   engine.on('update', (campaign) => broadcastCampaign(campaign));
   engine.on('status_change', ({ status }) => {
     if (status === 'requires_login' && engine.campaignId) {
@@ -4522,6 +4521,43 @@ app.post('/api/vault/answers/match', (req, res) => {
 });
 
 // AI-powered intelligent question inference from candidate profile, resume, and options
+// Enhanced AI inference endpoint using advanced AI engine
+app.post('/api/vault/infer-answer-v2', async (req, res) => {
+  try {
+    const { question, options, profile, resumeText, jobTitle, company, previousAnswers } = req.body || {};
+
+    // Use advanced AI engine
+    const { aiEngine } = await import('./lib/advanced-ai-engine.js');
+
+    const decision = await aiEngine.makeDecision({
+      question,
+      options: options || [],
+      profile: profile || {},
+      resumeText: resumeText || '',
+      jobTitle: jobTitle || '',
+      company: company || '',
+      previousAnswers: previousAnswers || getAllAnswers(),
+    });
+
+    res.json({
+      canInfer: decision.confidence >= 0.5,
+      answer: decision.answer,
+      confidence: decision.confidence,
+      source: decision.source,
+      reasoning: decision.reasoning,
+      alternatives: decision.alternatives || []
+    });
+  } catch (err) {
+    console.error('Enhanced AI inference error:', err);
+    res.status(500).json({
+      canInfer: false,
+      error: err.message || 'AI inference failed',
+      reason: 'AI processing error'
+    });
+  }
+});
+
+// Original endpoint (keep for backward compatibility)
 app.post('/api/vault/infer-answer', async (req, res) => {
   try {
     const { question, options, profile, resumeText, jobTitle, company } = req.body || {};

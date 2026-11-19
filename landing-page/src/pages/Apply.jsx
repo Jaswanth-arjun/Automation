@@ -159,6 +159,22 @@ export default function Apply() {
   const [extensionReady, setExtensionReady] = useState(false);
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
+  
+  // Full Auto Mode state - NEW
+  const [fullAutoMode, setFullAutoMode] = useState(() => {
+    try {
+      return localStorage.getItem('hamzooh_full_auto_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Save full auto mode preference
+  useEffect(() => {
+    try {
+      localStorage.setItem('hamzooh_full_auto_mode', fullAutoMode ? 'true' : 'false');
+    } catch {}
+  }, [fullAutoMode]);
 
   // A tailored resume only belongs to the job it was generated for. If this job
   // was already tailored, restore that report instead of asking for it again.
@@ -1046,7 +1062,7 @@ ${firstName}`;
       type: 'HAMZOOH_START_APPLY',
       requestId,
       url: link,
-      autoSubmit: true,
+      autoSubmit: fullAutoMode, // Use full auto mode setting
       profile: {
         ...(profile || {}),
         jobLocation: job?.location || job?.filters?.location || '',
@@ -2505,6 +2521,53 @@ ${firstName}`;
               </div>
             </>
           )}
+
+          {/* Full Auto Mode Toggle - NEW */}
+          <div style={{ marginTop: '16px', padding: '14px 16px', background: '#fffbeb', border: '1px solid #fbbf24', borderRadius: '12px' }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={fullAutoMode}
+                onChange={(e) => setFullAutoMode(e.target.checked)}
+                style={{ 
+                  width: '20px', 
+                  height: '20px', 
+                  marginTop: '2px',
+                  cursor: 'pointer',
+                  accentColor: '#f59e0b'
+                }}
+              />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <strong style={{ fontSize: '14px', color: '#92400e', fontWeight: '700' }}>
+                    ⚡ Full Auto-Submit Mode (100% Automation)
+                  </strong>
+                  <span style={{ 
+                    fontSize: '10px', 
+                    fontWeight: '800', 
+                    background: '#fbbf24', 
+                    color: '#78350f', 
+                    padding: '3px 8px', 
+                    borderRadius: '12px',
+                    letterSpacing: '0.5px'
+                  }}>
+                    BETA
+                  </span>
+                </div>
+                <p style={{ fontSize: '12px', color: '#78350f', margin: '0', lineHeight: '1.5' }}>
+                  {fullAutoMode ? (
+                    <>
+                      <strong>🤖 ACTIVE:</strong> AI makes all decisions and auto-submits without confirmation.
+                    </>
+                  ) : (
+                    <>
+                      AI fills form but you review before submission. Enable for mass applications.
+                    </>
+                  )}
+                </p>
+              </div>
+            </label>
+          </div>
 
           {/* Stage navigation */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #e8e8e3' }}>
