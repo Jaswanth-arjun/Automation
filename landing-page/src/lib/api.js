@@ -127,6 +127,7 @@ export const api = {
   deleteEmployee: (id) => apiFetch('', `/api/employees/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getSentEmails: () => apiFetch('', '/api/sent-emails'),
   tailorExternalJob: (payload) => apiFetch('', '/api/external-job/tailor', { method: 'POST', body: JSON.stringify(payload) }),
+  generateCoverLetter: (payload) => apiFetch('', '/api/cover-letter/generate', { method: 'POST', body: JSON.stringify(payload) }),
   renderEditedResumePdf: (html) => apiFetch('', '/api/resume/render-edited-pdf', { method: 'POST', body: JSON.stringify({ html }) }),
 
   // Auto-Apply (Puppeteer engine)
@@ -477,6 +478,32 @@ export const tailorReportStore = {
     delete all[String(jobId)];
     localStorage.setItem(TAILOR_REPORT_KEY, JSON.stringify(all));
     window.dispatchEvent(new Event('tailor_report_updated'));
+  },
+};
+
+export const coverLetterStore = {
+  get(jobId) {
+    if (!jobId) return null;
+    try {
+      const data = localStorage.getItem(`hamzooh_cover_letter_${jobId}`);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
+  },
+  save(jobId, coverLetter) {
+    if (!jobId || !coverLetter) return;
+    try {
+      localStorage.setItem(`hamzooh_cover_letter_${jobId}`, JSON.stringify(coverLetter));
+      window.dispatchEvent(new Event('cover_letter_updated'));
+    } catch {}
+  },
+  clear(jobId) {
+    if (!jobId) return;
+    try {
+      localStorage.removeItem(`hamzooh_cover_letter_${jobId}`);
+      window.dispatchEvent(new Event('cover_letter_updated'));
+    } catch {}
   },
 };
 

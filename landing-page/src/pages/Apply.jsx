@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore } from '../lib/api';
+import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore, coverLetterStore } from '../lib/api';
+import CoverLetterModal from '../components/CoverLetterModal';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
@@ -164,6 +165,12 @@ export default function Apply() {
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
   const [trainNotice, setTrainNotice] = useState('');
+
+  // Cover Letter state
+  const [coverLetter, setCoverLetter] = useState(() => coverLetterStore.get(jobId));
+  const [isGeneratingCoverLetter, setIsGeneratingCoverLetter] = useState(false);
+  const [showCoverLetterModal, setShowCoverLetterModal] = useState(false);
+  const [coverLetterModalMode, setCoverLetterModalMode] = useState('view');
   
   // Full Auto Mode state - NEW
   const [fullAutoMode, setFullAutoMode] = useState(() => {
@@ -186,6 +193,7 @@ export default function Apply() {
   useEffect(() => {
     setTailorError('');
     setEditorState(null);
+    setCoverLetter(coverLetterStore.get(jobId));
     setSubmitted(Boolean(applyProgressStore.get(jobId)?.apply));
     // Referral sending is a one-time action per job: once every selected contact
     // has been emailed, reopening this page must not offer "Confirm & Send" again.
@@ -866,6 +874,35 @@ ${firstName}`;
       }
     }
     downloadPdf(chosen.pdfBase64 || tailoredPdfBase64, name);
+  };
+
+  // Generate 1-Page Tailored Cover Letter matching the Shine Reference Template
+  const handleGenerateCoverLetter = async () => {
+    if (isGeneratingCoverLetter) return;
+    setIsGeneratingCoverLetter(true);
+    try {
+      const active = activeResume || resumes[0];
+      const resumeContent = String(active?.text || '').trim() || String(profile?.resume?.text || '').trim();
+      const res = await api.generateCoverLetter({
+        jobTitle: job?.title || '',
+        company: job?.company || '',
+        jobLocation: job?.location || '',
+        jobDescription: job?.description || '',
+        profile: mapProfileForBackend(profile || {}),
+        resumeText: resumeContent,
+      });
+      if (res?.coverLetter) {
+        setCoverLetter(res.coverLetter);
+        coverLetterStore.save(jobId, res.coverLetter);
+        setCoverLetterModalMode('view');
+        setShowCoverLetterModal(true);
+      }
+    } catch (err) {
+      console.warn('Cover letter generation error:', err);
+      alert('Could not generate cover letter. Please try again.');
+    } finally {
+      setIsGeneratingCoverLetter(false);
+    }
   };
 
   // Check extension availability and sync answers on mount
@@ -2506,9 +2543,67 @@ ${firstName}`;
                   >
                     <Download size={16} /> Download PDF
                   </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={handleGenerateCoverLetter}
+                    disabled={isGeneratingCoverLetter}
+                    title={coverLetter ? "Re-generate cover letter" : "Generate a 1-page tailored cover letter for this role"}
+                    style={{
+                      padding: '11px 18px',
+                      fontSize: '13.5px',
+                      gap: '8px',
+                      background: coverLetter ? '#f5f3ff' : '#f0fdf4',
+                      borderColor: coverLetter ? '#c7d2fe' : '#86efac',
+                      color: coverLetter ? '#4f46e5' : '#15803d',
+                      fontWeight: '700'
+                    }}
+                  >
+                    {isGeneratingCoverLetter ? <RefreshCw size={16} className="spin" /> : <FileText size={16} />}
+                    {isGeneratingCoverLetter ? 'Generating Cover Letter...' : coverLetter ? 'Re-Generate Cover Letter' : 'Generate Cover Letter'}
+                  </button>
+                  {coverLetter && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => { setCoverLetterModalMode('view'); setShowCoverLetterModal(true); }}
+                        style={{ padding: '11px 16px', fontSize: '13.5px', gap: '6px', color: '#047857', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: '700' }}
+                      >
+                        <Eye size={16} /> View Cover Letter
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => { setCoverLetterModalMode('edit'); setShowCoverLetterModal(true); }}
+                        style={{ padding: '11px 16px', fontSize: '13.5px', gap: '6px', color: '#4338ca', borderColor: '#c7d2fe', background: '#eef2ff', fontWeight: '700' }}
+                      >
+                        <Pencil size={16} /> Edit Cover Letter
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>
+
+            {coverLetter && (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: '#fefce8',
+                border: '1px solid #fde047',
+                borderRadius: '20px',
+                padding: '6px 16px',
+                fontSize: '12px',
+                fontWeight: '700',
+                color: '#854d0e',
+                marginTop: '12px'
+              }}>
+                <Sparkles size={14} style={{ color: '#ca8a04' }} />
+                <span>1-Page Cover Letter tailored for {job?.title} at {job?.company} ready!</span>
+              </div>
+            )}
 
             {tailorError && (
               <div role="alert" style={{ marginTop: '14px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', color: '#991b1b', fontSize: '12.5px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
@@ -2781,6 +2876,22 @@ ${firstName}`;
           }}
         />
       )}
+
+      {/* 1-Page Tailored Cover Letter Modal (View & Edit matching reference template) */}
+      <CoverLetterModal
+        isOpen={showCoverLetterModal}
+        mode={coverLetterModalMode}
+        coverLetter={coverLetter}
+        jobTitle={job?.title}
+        company={job?.company}
+        onClose={() => setShowCoverLetterModal(false)}
+        onSave={(updated) => {
+          setCoverLetter(updated);
+          coverLetterStore.save(jobId, updated);
+        }}
+        onRegenerate={handleGenerateCoverLetter}
+        isRegenerating={isGeneratingCoverLetter}
+      />
 
       {/* STAGE 4: Direct Apply */}
       {activeTab === 'apply' && (

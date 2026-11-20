@@ -2832,6 +2832,118 @@ function editableResumeHtml(profile, resume) {
   return `<div class="resume-page"><header><h1>${esc(resume.name || profile.fullName || 'Candidate')}</h1><div>${esc(resume.location || profile.location)}</div><div>${esc(resume.phone || profile.phone)} · ${esc(resume.email || profile.email)}${link('LinkedIn', resume.linkedin || profile.linkedin || profile.links?.linkedin)}${link('GitHub', resume.github || profile.github || profile.links?.github)}</div></header>${section('PROFESSIONAL SUMMARY', `<p>${esc(resume.summary)}</p>`)}${section('TECHNICAL SKILLS', skills)}${section('INTERNSHIPS', internships)}${section('PROJECTS', projects)}${section('EDUCATION', education)}${section('ACHIEVEMENTS & ADDITIONAL INFORMATION', extras)}</div>`;
 }
 
+// ── Tailored 1-Page Cover Letter Generator ─────────────────────────────────
+app.post('/api/cover-letter/generate', async (req, res) => {
+  try {
+    const { jobTitle = '', company = '', jobLocation = '', jobDescription = '', profile = {}, resumeText = '' } = req.body || {};
+    const candidateName = profile.fullName || 'Nelluru Jaswanth';
+    const email = profile.email || 'tejanelluru14@gmail.com';
+    const phone = profile.phone || '+91 9876543210';
+    const location = profile.location || profile.city || 'Bengaluru, Karnataka, India';
+    const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const skillsList = Array.isArray(profile.skills) ? profile.skills.slice(0, 6).join(', ') : 'Java, Full Stack Development, API Integration, Android Development';
+    const currentExp = profile.experience?.[0] || {};
+    const previousExp = profile.experience?.[1] || currentExp;
+
+    const fallbackCoverLetter = {
+      applicantName: candidateName,
+      applicantAddress: location,
+      applicantEmail: email,
+      applicantPhone: phone,
+      date: today,
+      hiringManager: "Hiring Manager",
+      companyName: company || 'Company Name',
+      companyAddress: jobLocation || 'Bengaluru, Karnataka, India',
+      salutation: 'Dear Hiring Manager,',
+      paragraphs: [
+        `I am writing to express my interest in the ${jobTitle || 'position'} role at ${company || 'your company'}. With a strong background in ${skillsList}, I am eager to bring my skills and passion to your team. The opportunity to contribute to ${company || 'your company'}'s specific mission and engineering initiatives excites me, as I believe my expertise in software development and system architecture aligns well with your goals.`,
+        `Throughout my career and academic journey, I have developed strong problem-solving capabilities and built production-ready applications. At ${currentExp.company || 'Model Career Centre - APSSDC'}, I successfully contributed as a ${currentExp.title || 'Java Full Stack Developer Intern'}, demonstrating my ability to build modular APIs, integrate scalable backends, and optimize workflow efficiency. My experience in cloud platforms and application development has equipped me with the necessary skills to make a meaningful impact at ${company || 'your organization'}.`,
+        `Beyond my technical skills, I am a strong collaborator and proactive problem-solver. I thrive in fast-paced environments and am always eager to learn and adapt to modern development workflows. I am confident that my experience, technical curiosity, and enthusiasm would make me a valuable addition to your team.`,
+        `I would welcome the opportunity to discuss how my qualifications align with the needs of ${company || 'your company'}. Thank you for your time and consideration. I look forward to hearing from you.`,
+      ],
+      signOff: 'Best Regards,',
+      fullText: ''
+    };
+    fallbackCoverLetter.fullText = [
+      'Cover Letter\n',
+      fallbackCoverLetter.applicantName,
+      fallbackCoverLetter.applicantAddress,
+      `${fallbackCoverLetter.applicantEmail}${fallbackCoverLetter.applicantPhone ? ` | ${fallbackCoverLetter.applicantPhone}` : ''}`,
+      fallbackCoverLetter.date,
+      '\n' + fallbackCoverLetter.hiringManager,
+      fallbackCoverLetter.companyName,
+      fallbackCoverLetter.companyAddress,
+      '\n' + fallbackCoverLetter.salutation + '\n',
+      ...fallbackCoverLetter.paragraphs.map(p => p + '\n'),
+      fallbackCoverLetter.signOff,
+      fallbackCoverLetter.applicantName
+    ].join('\n');
+
+    // Try high-fidelity AI generation via askGemini (GPT-6 Luna / Gemini)
+    try {
+      const prompt = `You are an expert career consultant. Generate a tailored 1-page professional cover letter strictly following this 4-paragraph structure matching the standard Shine cover letter template:
+Applicant: ${candidateName}, Location: ${location}, Email: ${email}, Phone: ${phone}
+Job: ${jobTitle} at ${company} (${jobLocation})
+Candidate Skills: ${skillsList}
+Candidate Experience: ${currentExp.title || ''} at ${currentExp.company || ''}
+Resume Summary: ${String(resumeText || '').slice(0, 1000)}
+
+Structure requirements:
+- Paragraph 1: Express interest in ${jobTitle} at ${company}, mention relevant skills (${skillsList}), and alignment with company goals.
+- Paragraph 2: Highlight achievements and specific experience from ${currentExp.company || 'recent projects'}, demonstrating competencies for ${jobTitle}.
+- Paragraph 3: Highlight collaboration, problem-solving, rapid learning, and fast-paced adaptability.
+- Paragraph 4: Enthusiastic closing welcoming an interview and thanking the hiring manager.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "applicantName": "${candidateName}",
+  "applicantAddress": "${location}",
+  "applicantEmail": "${email}",
+  "applicantPhone": "${phone}",
+  "date": "${today}",
+  "hiringManager": "Hiring Manager",
+  "companyName": "${company}",
+  "companyAddress": "${jobLocation || 'Corporate Office'}",
+  "salutation": "Dear Hiring Manager,",
+  "paragraphs": [
+    "paragraph 1 text",
+    "paragraph 2 text",
+    "paragraph 3 text",
+    "paragraph 4 text"
+  ],
+  "signOff": "Best Regards,"
+}`;
+
+      const aiRaw = await askGemini(prompt);
+      const jsonStr = String(aiRaw || '').replace(/```json|```/gi, '').trim();
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && Array.isArray(parsed.paragraphs) && parsed.paragraphs.length >= 3) {
+        parsed.fullText = [
+          'Cover Letter\n',
+          parsed.applicantName || candidateName,
+          parsed.applicantAddress || location,
+          `${parsed.applicantEmail || email}${parsed.applicantPhone ? ` | ${parsed.applicantPhone}` : ''}`,
+          parsed.date || today,
+          '\n' + (parsed.hiringManager || 'Hiring Manager'),
+          parsed.companyName || company,
+          parsed.companyAddress || jobLocation,
+          '\n' + (parsed.salutation || 'Dear Hiring Manager,') + '\n',
+          ...parsed.paragraphs.map(p => p + '\n'),
+          parsed.signOff || 'Best Regards,',
+          parsed.applicantName || candidateName
+        ].join('\n');
+        return res.json({ ok: true, coverLetter: parsed });
+      }
+    } catch (aiErr) {
+      console.warn('AI cover letter generation fell back to deterministic template:', aiErr?.message);
+    }
+
+    return res.json({ ok: true, coverLetter: fallbackCoverLetter });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Resume templates the app can tailor into. `classic` is the template the
 // system has always used, so it stays the default when nothing is selected.
 const RESUME_TEMPLATE_FORMATS = { classic: 'recommended', modern: 'modern', compact: 'compact' };
