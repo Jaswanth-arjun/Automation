@@ -66,62 +66,64 @@ export default function CoverLetterModal({
           <style>
             @page {
               size: A4 portrait;
-              margin: 15mm;
+              margin: 12mm;
             }
             body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
               color: #111827;
-              line-height: 1.55;
-              font-size: 13.5px;
+              line-height: 1.5;
+              font-size: 13px;
               margin: 0;
-              padding: 20px;
+              padding: 0;
               background: #ffffff;
             }
             .cover-card {
-              max-width: 680px;
+              max-width: 100%;
               margin: 0 auto;
-              border: 10px solid #facc15;
-              padding: 40px 48px;
+              border: 1.5px solid #1e293b;
+              border-radius: 4px;
+              padding: 32px 40px;
               box-sizing: border-box;
-              min-height: 940px;
               display: flex;
               flex-direction: column;
               justify-content: space-between;
             }
             .title {
               text-align: center;
-              font-size: 24px;
+              font-size: 20px;
               font-weight: 800;
-              margin-bottom: 28px;
+              margin-bottom: 20px;
               color: #000000;
-              letter-spacing: -0.02em;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
             }
             .meta-block {
-              margin-bottom: 18px;
-              font-size: 13.5px;
+              margin-bottom: 14px;
+              font-size: 13px;
               line-height: 1.45;
               color: #1f2937;
             }
             .salutation {
-              margin-bottom: 16px;
+              margin-bottom: 14px;
               font-weight: 600;
             }
             .paragraph {
-              margin-bottom: 14px;
+              margin-bottom: 12px;
               text-align: justify;
               color: #374151;
+              line-height: 1.5;
             }
             .sign-off {
-              margin-top: 24px;
+              margin-top: 20px;
               font-weight: 500;
             }
             .signature-name {
               font-weight: 700;
-              margin-top: 6px;
+              margin-top: 4px;
             }
             @media print {
               body { padding: 0; }
-              .cover-card { border: 10px solid #facc15 !important; }
+              .cover-card { border: 1.5px solid #1e293b !important; }
             }
           </style>
         </head>
@@ -320,64 +322,66 @@ export default function CoverLetterModal({
           justifyContent: 'center',
         }}>
           {currentMode === 'view' ? (
-            /* EXACT TEMPLATE LAYOUT MATCHING IMAGE 2 (Yellow border accent card) */
+            /* CLEAN A4 FORMATTED COVER LETTER (NO YELLOW SQUARE, CLEAN BORDER) */
             <div style={{
               background: '#ffffff',
-              border: '10px solid #facc15',
-              borderRadius: '6px',
-              padding: '40px 48px',
-              maxWidth: '680px',
+              border: '1.5px solid #1e293b',
+              borderRadius: '2px',
+              padding: '36px 44px',
+              maxWidth: '720px',
               width: '100%',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.06)',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.08)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
               color: '#1f2937',
-              fontSize: '13.5px',
-              lineHeight: '1.6',
+              fontSize: '13px',
+              lineHeight: '1.52',
+              boxSizing: 'border-box',
             }}>
               <h2 style={{
                 textAlign: 'center',
-                fontSize: '24px',
+                fontSize: '20px',
                 fontWeight: '800',
-                margin: '0 0 28px',
+                margin: '0 0 20px',
                 color: '#000000',
-                letterSpacing: '-0.02em',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
               }}>
                 Cover Letter
               </h2>
 
               {/* Applicant Header */}
-              <div style={{ marginBottom: '18px', lineHeight: '1.45' }}>
+              <div style={{ marginBottom: '16px', lineHeight: '1.45' }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827' }}>{editedLetter.applicantName}</div>
                 <div>{editedLetter.applicantAddress}</div>
                 <div>{editedLetter.applicantEmail} {editedLetter.applicantPhone ? ` | ${editedLetter.applicantPhone}` : ''}</div>
-                <div style={{ marginTop: '8px', color: '#6b7280' }}>{editedLetter.date}</div>
+                <div style={{ marginTop: '6px', color: '#4b5563' }}>{editedLetter.date}</div>
               </div>
 
               {/* Recipient */}
-              <div style={{ marginBottom: '20px', lineHeight: '1.45' }}>
-                <div>{editedLetter.hiringManager || "Hiring Manager's Name"}</div>
+              <div style={{ marginBottom: '16px', lineHeight: '1.45' }}>
+                <div>{editedLetter.hiringManager || "Hiring Manager"}</div>
                 <div style={{ fontWeight: '700' }}>{editedLetter.companyName || company}</div>
                 <div>{editedLetter.companyAddress}</div>
               </div>
 
               {/* Salutation */}
-              <div style={{ marginBottom: '16px', fontWeight: '600', color: '#111827' }}>
+              <div style={{ marginBottom: '14px', fontWeight: '600', color: '#111827' }}>
                 {editedLetter.salutation || 'Dear Hiring Manager,'}
               </div>
 
               {/* 4 Body Paragraphs */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', color: '#374151' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '11px', color: '#374151' }}>
                 {(editedLetter.paragraphs || []).map((para, idx) => (
-                  <p key={idx} style={{ margin: 0, textAlign: 'justify', lineHeight: '1.6' }}>
+                  <p key={idx} style={{ margin: 0, textAlign: 'justify', lineHeight: '1.52' }}>
                     {para}
                   </p>
                 ))}
               </div>
 
               {/* Sign-off */}
-              <div style={{ marginTop: '28px', lineHeight: '1.5' }}>
+              <div style={{ marginTop: '22px', lineHeight: '1.45' }}>
                 <div>{editedLetter.signOff || 'Best Regards,'}</div>
-                <div style={{ fontWeight: '700', fontSize: '14px', marginTop: '6px', color: '#111827' }}>
+                <div style={{ fontWeight: '700', fontSize: '14px', marginTop: '4px', color: '#111827' }}>
                   {editedLetter.applicantName}
                 </div>
               </div>
@@ -424,7 +428,7 @@ export default function CoverLetterModal({
           justifyContent: 'space-between',
         }}>
           <span style={{ fontSize: '12px', color: '#64748b' }}>
-            Template: <strong>Standard 1-Page Career Template</strong> (with gold border accent)
+            Template: <strong>Standard 1-Page A4 Format (Clean Page Border)</strong>
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {onRegenerate && (
@@ -459,3 +463,4 @@ export default function CoverLetterModal({
     </div>
   );
 }
+
