@@ -163,6 +163,7 @@ export default function Apply() {
   const [extensionReady, setExtensionReady] = useState(false);
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
+  const [trainNotice, setTrainNotice] = useState('');
   
   // Full Auto Mode state - NEW
   const [fullAutoMode, setFullAutoMode] = useState(() => {
@@ -1020,13 +1021,25 @@ ${firstName}`;
       return;
     }
 
-    setAutoApplying(true);
-    setAutoApplyProgress([]);
-    setAutoApplyResult(null);
-    setShowAutoApplyModal(true);
-    setAutoRunId('');
-    setRunLogState('idle');
-    setNeedsUser(null);
+    if (isTrainMode) {
+      setTrainNotice(`🎓 Training Mode Active for ${job?.company || 'this role'}! The job page opened in a new tab. Please fill and submit the application manually — Hamzooh is quietly observing and recording your actions without any automated interference.`);
+      setAutoApplying(false);
+      setShowAutoApplyModal(false);
+      setAutoApplyProgress([]);
+      setAutoApplyResult(null);
+      setAutoRunId('');
+      setRunLogState('idle');
+      setNeedsUser(null);
+    } else {
+      setTrainNotice('');
+      setAutoApplying(true);
+      setAutoApplyProgress([]);
+      setAutoApplyResult(null);
+      setShowAutoApplyModal(true);
+      setAutoRunId('');
+      setRunLogState('idle');
+      setNeedsUser(null);
+    }
 
     // Push profile to extension and trigger job open in new tab
     const ANSWERS_KEY = 'hamzooh_apply_answers';
@@ -1128,12 +1141,14 @@ ${firstName}`;
     }
     if (ready.runId) setAutoRunId(ready.runId);
 
-    // Add initial progress step
-    setAutoApplyProgress([{
-      step: 'opened',
-      message: `🌐 Job page opened in a new tab. Hamzooh is analyzing the form...`,
-      timestamp: Date.now(),
-    }]);
+    if (!isTrainMode) {
+      // Add initial progress step
+      setAutoApplyProgress([{
+        step: 'opened',
+        message: `🌐 Job page opened in a new tab. Hamzooh is analyzing the form...`,
+        timestamp: Date.now(),
+      }]);
+    }
 
     // Fallback timeout — if nothing comes back in 5 minutes
     setTimeout(() => {
@@ -2848,6 +2863,36 @@ ${firstName}`;
                   : `Opens the job in a new tab, fills the form, and asks you before submitting.`}
               </p>
             </div>
+
+            {trainNotice && (
+              <div style={{
+                width: '100%',
+                background: '#f0fdf4',
+                border: '1.5px solid #22c55e',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                margin: '12px 0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                color: '#15803d',
+                fontSize: '13px',
+                fontWeight: '600'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '20px' }}>🎓</span>
+                  <span>{trainNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTrainNotice('')}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#15803d', fontSize: '18px', fontWeight: 'bold' }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <button

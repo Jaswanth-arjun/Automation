@@ -155,7 +155,13 @@
     }
 
     if (data.type === 'HAMZOOH_START_APPLY') {
-      try { chrome.storage.local.set({ hamzoohTrainMode: data.trainMode === true }); } catch {}
+      try {
+        if (data.trainMode === true) {
+          chrome.storage.local.set({ hamzoohTrainMode: true, pendingApply: { trainMode: true, done: false, url: data.url } });
+        } else {
+          chrome.storage.local.set({ hamzoohTrainMode: false });
+        }
+      } catch {}
       chrome.runtime.sendMessage({
         type: 'HAMZOOH_OPEN_JOB',
         requestId: data.requestId || '',

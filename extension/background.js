@@ -20,6 +20,7 @@ const API_BASE = 'http://localhost:3000';
 let dashboardTabId = null;
 let jobTabId = null;
 const extraJobTabIds = new Set();
+const trainTabIds = new Set();
 
 function log(...args) {
   try { console.log('[Hamzooh Apply]', ...args); } catch {}
@@ -553,9 +554,13 @@ async function injectFiller(tabId) {
 
 async function beginFill(tabId) {
   if (!tabId || !isJobTab(tabId)) return;
+  const { pendingApply, hamzoohTrainMode } = await chrome.storage.local.get(['pendingApply', 'hamzoohTrainMode']);
+  if (pendingApply?.trainMode === true || hamzoohTrainMode === true || trainTabIds.has(tabId)) {
+    log('beginFill suppressed: tab', tabId, 'is in training mode');
+    return;
+  }
   const injected = await injectFiller(tabId);
   try {
-    const { pendingApply } = await chrome.storage.local.get('pendingApply');
     if (pendingApply?.runId) {
       appendRunEvent(pendingApply.runId, {
         step: injected ? 'filler_injected' : 'filler_injection_failed',
@@ -577,10 +582,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
   if (changeInfo.status !== 'complete' || !tab.url || isDashboardUrl(tab.url)) return;
-  chrome.storage.local.get('pendingApply', ({ pendingApply }) => {
+  chrome.storage.local.get(['pendingApply', 'hamzoohTrainMode'], ({ pendingApply, hamzoohTrainMode }) => {
     if (!pendingApply?.url || pendingApply.done) return;
     if (!isJobTab(tabId) && pendingApply.tabId !== tabId) return;
     jobTabId = tabId;
+    if (pendingApply.trainMode === true || hamzoohTrainMode === true || trainTabIds.has(tabId)) {
+      log('Training mode active on tab', tabId, '- injecting passive recorder ONLY');
+      injectFiller(tabId).then(() => {
+        chrome.tabs.sendMessage(tabId, { type: 'HAMZOOH_INIT_TRAIN', domain: hostname(tab.url) }).catch(() => {});
+      });
+      return;
+    }
     if (pendingApply.runId) {
       appendRunEvent(pendingApply.runId, {
         step: 'tab_loaded',
@@ -621,13 +633,20 @@ chrome.tabs.onCreated.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'HAMZOOH_AUTO_TRIGGER') {
     log('Auto-trigger received from tab', sender.tab?.id);
-    if (sender.tab?.id && isJobTab(sender.tab.id)) {
-      beginFill(sender.tab.id);
-      sendResponse({ ok: true });
-    } else {
-      sendResponse({ ok: false, reason: 'not a job tab' });
-    }
-    return;
+    chrome.storage.local.get(['pendingApply', 'hamzoohTrainMode'], ({ pendingApply, hamzoohTrainMode }) => {
+      if (pendingApply?.trainMode === true || hamzoohTrainMode === true || trainTabIds.has(sender.tab?.id)) {
+        log('Auto-trigger ignored: tab is in training mode');
+        sendResponse({ ok: false, reason: 'train mode active' });
+        return;
+      }
+      if (sender.tab?.id && isJobTab(sender.tab.id)) {
+        beginFill(sender.tab.id);
+        sendResponse({ ok: true });
+      } else {
+        sendResponse({ ok: false, reason: 'not a job tab' });
+      }
+    });
+    return true;
   }
 
   if (message?.type === 'HAMZOOH_IS_JOB_TAB') {
@@ -1000,6 +1019,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.tabs.create({ url, active: true }, (newTab) => {
       jobTabId = newTab?.id;
       extraJobTabIds.add(jobTabId);
+      if (message.trainMode === true) {
+        trainTabIds.add(jobTabId);
+      } else {
+        trainTabIds.delete(jobTabId);
+      }
       pendingApply.tabId = jobTabId;
       storageSet({ pendingApply }).catch(() => {});
       appendRunEvent(runId, {

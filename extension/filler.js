@@ -164,6 +164,7 @@
   }
 
   async function requestVisionDecision(profile, answers, pending) {
+    if (window.__HAMZOOH_TRAIN_MODE__ || pending?.trainMode) return null;
     try {
       const snap = await runtimeSend({ type: 'HAMZOOH_CAPTURE_SCREENSHOT' });
       if (!snap?.ok || !snap.dataUrl) return null;
@@ -2177,8 +2178,9 @@
     if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
 
     // 🎓 Train Mode: purely passive recording without ANY automation interfering!
-    if (pending.trainMode) {
-      initTrainModeRecorder(location.hostname, pending);
+    if (window.__HAMZOOH_TRAIN_MODE__ || pending?.trainMode) {
+      window.__HAMZOOH_TRAIN_MODE__ = true;
+      if (window.top === window) initTrainModeRecorder(location.hostname, pending || {});
       return;
     }
 
@@ -2622,14 +2624,19 @@
   }
 
   async function runPending(stored) {
-    const pending = stored.pendingApply;
-    if (!pending) return;
-
-    // 🎓 Train Mode: 100% passive recording on top window, NO automated actions whatsoever!
-    const isTrain = pending.trainMode === true || stored.hamzoohTrainMode === true;
+    const pending = stored?.pendingApply;
+    const { hamzoohTrainMode } = await chrome.storage.local.get('hamzoohTrainMode').catch(() => ({}));
+    const isTrain = Boolean(
+      pending?.trainMode === true ||
+      stored?.hamzoohTrainMode === true ||
+      hamzoohTrainMode === true ||
+      window.__HAMZOOH_TRAIN_MODE__ === true ||
+      location.hash.includes('hamzooh_train')
+    );
     if (isTrain) {
+      window.__HAMZOOH_TRAIN_MODE__ = true;
       if (window.top === window) {
-        initTrainModeRecorder(location.hostname, pending);
+        initTrainModeRecorder(location.hostname, pending || {});
       }
       return;
     }
@@ -2694,14 +2701,14 @@
   }
 
   function bootApply() {
-    if (!extensionAlive()) return;
-    chrome.storage.local.get(['pendingApply', 'profile', 'answers'], runPending);
+    if (!extensionAlive() || window.__HAMZOOH_TRAIN_MODE__) return;
+    chrome.storage.local.get(['pendingApply', 'profile', 'answers', 'hamzoohTrainMode'], runPending);
   }
   window.__HAMZOOH_BOOT__ = bootApply;
 
   // Watchdog: guarantees a terminal state instead of a silent hang.
   window.__HAMZOOH_FORCE_TERMINAL__ = (reason) => {
-    if (TERMINAL_REPORTED || !CURRENT_RUN_ID) return;
+    if (window.__HAMZOOH_TRAIN_MODE__ || TERMINAL_REPORTED || !CURRENT_RUN_ID) return;
     runEvent('watchdog_force_terminal', { reason: reason || '', url: location.href, top: window.top === window }, 'Watchdog forced a terminal state');
     finish('⏱️ Automation timed out without reaching a form. The job tab is still open for manual review.', {
       status: 'needs_attention', reasonCode: 'TIMEOUT_NO_TERMINAL', filledCount: 0, emptyCount: 0,
@@ -2711,17 +2718,26 @@
   bootApply();
   if (extensionAlive()) {
     chrome.runtime.onMessage.addListener((message) => {
-      if (message?.type === 'HAMZOOH_BEGIN_FILL') bootApply();
+      if (message?.type === 'HAMZOOH_INIT_TRAIN') {
+        window.__HAMZOOH_TRAIN_MODE__ = true;
+        if (window.top === window) initTrainModeRecorder(location.hostname, {});
+        return;
+      }
+      if (message?.type === 'HAMZOOH_BEGIN_FILL') {
+        if (window.__HAMZOOH_TRAIN_MODE__) return;
+        bootApply();
+      }
       if (message?.type === 'HAMZOOH_FORCE_TERMINAL') {
         try { window.__HAMZOOH_FORCE_TERMINAL__(message.reason || ''); } catch {}
       }
     });
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== 'local' || !changes.pendingApply?.newValue) return;
-      chrome.storage.local.get(['pendingApply', 'profile', 'answers'], runPending);
+      if (window.__HAMZOOH_TRAIN_MODE__ || area !== 'local' || !changes.pendingApply?.newValue) return;
+      chrome.storage.local.get(['pendingApply', 'profile', 'answers', 'hamzoohTrainMode'], runPending);
     });
     let lastHref = location.href;
     setInterval(() => {
+      if (window.__HAMZOOH_TRAIN_MODE__) return;
       if (location.href !== lastHref) {
         const prevPath = lastHref.split('?')[0];
         const newPath = location.href.split('?')[0];
@@ -2733,10 +2749,10 @@
       }
     }, 1500);
     setInterval(() => {
-      if (filling || !extensionAlive()) return;
+      if (window.__HAMZOOH_TRAIN_MODE__ || filling || !extensionAlive()) return;
       chrome.storage.local.get(['pendingApply'], (stored) => {
         const p = stored?.pendingApply;
-        if (!p?.url || p.done || !p.awaitingManualApply) return;
+        if (!p?.url || p.done || !p.awaitingManualApply || p.trainMode) return;
         // Stay parked while a sign-in screen is showing; resume after it closes.
         if (detectAuthGate()) return;
         if (pageHasForm()) {
