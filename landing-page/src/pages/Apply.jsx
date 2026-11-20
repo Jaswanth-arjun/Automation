@@ -1207,9 +1207,13 @@ ${firstName}`;
       setAutoApplyProgress([{ step: 'vision_started', message: '👁️ Vision AI is opening the job in its own browser window…', timestamp: Date.now() }]);
 
       let lastStepCount = 0;
+      let consecutiveErrors = 0;
       const poll = setInterval(async () => {
         try {
-          const status = await fetch(`http://localhost:3000/api/auto-apply-vision/${response.runId}`).then((r) => r.json());
+          const res = await fetch(`http://localhost:3000/api/auto-apply-vision/${response.runId}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const status = await res.json();
+          consecutiveErrors = 0;
           const run = status.run;
           if (!run) return;
           const newSteps = (run.steps || []).slice(lastStepCount);
@@ -1238,9 +1242,13 @@ ${firstName}`;
             }
           }
         } catch (err) {
-          clearInterval(poll);
-          setAutoApplying(false);
-          setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+          consecutiveErrors++;
+          // Only abort if it fails 4 consecutive times (10+ seconds of disconnection)
+          if (consecutiveErrors >= 4) {
+            clearInterval(poll);
+            setAutoApplying(false);
+            setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+          }
         }
       }, 2500);
     } catch (err) {
@@ -3080,21 +3088,6 @@ ${firstName}`;
                   <RefreshCw size={14} /> Resume after fixing
                 </button>
               )}
-              <button
-                onClick={handleDownloadRunLog}
-                className="btn-ghost"
-                disabled={runLogState === 'loading'}
-                title="Download the structured run log (every step, reason code, evidence)"
-                style={{ fontSize: '13px', padding: '10px 18px', gap: '6px' }}
-              >
-                {runLogState === 'loading'
-                  ? <><Loader size={14} className="spin" /> Preparing log…</>
-                  : runLogState === 'done'
-                    ? <><Check size={14} /> Log downloaded</>
-                    : runLogState === 'error'
-                      ? <><AlertCircle size={14} /> Retry log</>
-                      : <><Download size={14} /> Download run log</>}
-              </button>
               {!autoApplying && (
                 <button
                   onClick={handleCloseAutoApplyModal}
