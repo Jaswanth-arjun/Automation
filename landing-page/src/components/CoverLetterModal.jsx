@@ -314,63 +314,65 @@ export default function CoverLetterModal({
 
         {/* Modal Scrollable Body */}
         <div style={{
-          padding: '28px',
+          padding: '24px 20px',
           overflowY: 'auto',
           flex: 1,
-          background: '#f8fafc',
-          display: 'flex',
-          justifyContent: 'center',
+          background: '#f1f5f9',
+          display: 'block',
         }}>
           {currentMode === 'view' ? (
-            /* CLEAN A4 FORMATTED COVER LETTER (NO YELLOW SQUARE, CLEAN BORDER) */
+            /* CLEAN A4 FORMATTED COVER LETTER (FULL-HEIGHT BORDER FRAMING ENTIRE CONTENT) */
             <div style={{
               background: '#ffffff',
-              border: '1.5px solid #1e293b',
+              border: '1.5px solid #334155',
               borderRadius: '2px',
-              padding: '36px 44px',
-              maxWidth: '720px',
+              padding: '36px 44px 44px',
+              maxWidth: '680px',
               width: '100%',
-              boxShadow: '0 8px 30px rgba(0,0,0,0.08)',
+              margin: '0 auto 20px',
+              boxShadow: '0 8px 25px rgba(0,0,0,0.08)',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
               color: '#1f2937',
-              fontSize: '13px',
-              lineHeight: '1.52',
+              fontSize: '12.5px',
+              lineHeight: '1.5',
               boxSizing: 'border-box',
+              height: 'auto',
+              minHeight: 'auto',
             }}>
               <h2 style={{
                 textAlign: 'center',
-                fontSize: '20px',
+                fontSize: '19px',
                 fontWeight: '800',
-                margin: '0 0 20px',
-                color: '#000000',
+                margin: '0 0 18px',
+                color: '#0f172a',
                 textTransform: 'uppercase',
-                letterSpacing: '0.05em',
+                letterSpacing: '0.06em',
               }}>
                 Cover Letter
               </h2>
 
               {/* Applicant Header */}
-              <div style={{ marginBottom: '16px', lineHeight: '1.45' }}>
-                <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827' }}>{editedLetter.applicantName}</div>
+              <div style={{ marginBottom: '14px', lineHeight: '1.45' }}>
+                <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#0f172a' }}>{editedLetter.applicantName}</div>
                 <div>{editedLetter.applicantAddress}</div>
                 <div>{editedLetter.applicantEmail} {editedLetter.applicantPhone ? ` | ${editedLetter.applicantPhone}` : ''}</div>
-                <div style={{ marginTop: '6px', color: '#4b5563' }}>{editedLetter.date}</div>
+                <div style={{ marginTop: '5px', color: '#64748b' }}>{editedLetter.date}</div>
               </div>
 
               {/* Recipient */}
-              <div style={{ marginBottom: '16px', lineHeight: '1.45' }}>
+              <div style={{ marginBottom: '14px', lineHeight: '1.45' }}>
                 <div>{editedLetter.hiringManager || "Hiring Manager"}</div>
-                <div style={{ fontWeight: '700' }}>{editedLetter.companyName || company}</div>
+                <div style={{ fontWeight: '700', color: '#0f172a' }}>{editedLetter.companyName || company}</div>
                 <div>{editedLetter.companyAddress}</div>
               </div>
 
               {/* Salutation */}
-              <div style={{ marginBottom: '14px', fontWeight: '600', color: '#111827' }}>
+              <div style={{ marginBottom: '12px', fontWeight: '600', color: '#0f172a' }}>
                 {editedLetter.salutation || 'Dear Hiring Manager,'}
               </div>
 
               {/* 4 Body Paragraphs */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '11px', color: '#374151' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', color: '#334155' }}>
                 {(editedLetter.paragraphs || []).map((para, idx) => (
                   <p key={idx} style={{ margin: 0, textAlign: 'justify', lineHeight: '1.52' }}>
                     {para}
@@ -379,16 +381,16 @@ export default function CoverLetterModal({
               </div>
 
               {/* Sign-off */}
-              <div style={{ marginTop: '22px', lineHeight: '1.45' }}>
+              <div style={{ marginTop: '20px', lineHeight: '1.45' }}>
                 <div>{editedLetter.signOff || 'Best Regards,'}</div>
-                <div style={{ fontWeight: '700', fontSize: '14px', marginTop: '4px', color: '#111827' }}>
+                <div style={{ fontWeight: '700', fontSize: '13.5px', marginTop: '4px', color: '#0f172a' }}>
                   {editedLetter.applicantName}
                 </div>
               </div>
             </div>
           ) : (
             /* EDIT MODE */
-            <div style={{ width: '100%', maxWidth: '720px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ width: '100%', maxWidth: '680px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{
                 background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px',
                 padding: '12px 16px', fontSize: '13px', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '8px'
