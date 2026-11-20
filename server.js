@@ -14,6 +14,7 @@ import { db } from './lib/db.js';
 import { handleRagChat } from './lib/rag-assistant.js';
 import { askFreeLLM, askNara, askNvidia, askRadox } from './lib/ai-provider.js';
 import { AutoApplyEngine } from './lib/auto-apply-engine.js';
+import { VisionAgent } from './lib/vision-agent.js';
 import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion, saveVaultCredential, findVaultCredential } from './lib/vault-manager.js';
 import { inferFromProfile } from './lib/apply-intelligence.js';
 
@@ -4741,6 +4742,148 @@ app.post('/api/auto-apply/provide-input', (req, res) => {
   }
 
   res.status(404).json({ error: 'No active auto-apply process.' });
+});
+
+// ── Phase 2/3: AI fallback agent + submission classifier ──────────────────
+const AGENT_ACTIONS = new Set([
+  'click', 'fill', 'select', 'check', 'upload_resume', 'press_key',
+  'scroll', 'wait', 'ask_user', 'need_user', 'done',
+]);
+
+function parseAgentAction(raw, snapshot) {
+  let text = String(raw || '').trim();
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  let action;
+  try { action = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+  if (!action || typeof action !== 'object' || !AGENT_ACTIONS.has(action.action)) return null;
+  const ids = new Set((snapshot?.elements || []).map((el) => Number(el.id)).filter(Number.isFinite));
+  if (action.id != null && ids.size > 0 && !ids.has(Number(action.id))) {
+    return { action: 'need_user', reason: `Model picked an element id (${action.id}) that is not in the current snapshot.` };
+  }
+  if (['click', 'fill', 'select', 'check', 'upload_resume'].includes(action.action) && action.id == null) {
+    return { action: 'need_user', reason: `Model returned ${action.action} without an element id.` };
+  }
+  if (action.action === 'fill' && (action.value == null || String(action.value).length > 2000)) {
+    return { action: 'need_user', reason: 'Model returned an empty or oversized fill value.' };
+  }
+  return action;
+}
+
+app.post('/api/agent/next-action', async (req, res) => {
+  const { snapshot = {}, profile = {}, answers = {}, job = {}, history = [], reason = '' } = req.body || {};
+  const compact = {
+    url: snapshot.url,
+    title: snapshot.title,
+    headings: (snapshot.headings || []).slice(0, 12),
+    errors: (snapshot.errors || []).slice(0, 10),
+    elements: (snapshot.elements || []).slice(0, 90),
+  };
+  const prompt = `You are the Hamzooh auto-apply agent inside the user's Chrome browser.
+Pick EXACTLY ONE next action to advance the job application. Never invent facts.
+Use only facts from PROFILE and VAULT ANSWERS. For legal, visa, salary, disability,
+gender, criminal or EEO questions: use a stored answer if present, otherwise emit
+{"action":"ask_user","question":"...","field_id":N} (EEO "decline to answer" is
+acceptable when the vault says so). Never bypass CAPTCHA, OTP, MFA or login walls;
+emit {"action":"need_user","reason":"..."} for those. Click Next/Continue/Review or
+Submit only when all required fields are filled. On an Easy Apply "Resume"
+step, click an existing resume row (a file name ending in PDF/DOC/DOCX) BEFORE
+clicking Next. If the next control is off-screen, emit scroll. Do not delete,
+withdraw, sign out, or change site settings.
+
+Return ONLY a JSON object, no prose, using one of these shapes:
+{"action":"click","id":N}
+{"action":"fill","id":N,"value":"..."}
+{"action":"select","id":N,"option":"..."}
+{"action":"check","id":N,"value":true}
+{"action":"upload_resume","id":N}
+{"action":"press_key","key":"Enter"}
+{"action":"scroll","direction":"down"}
+{"action":"wait","ms":800}
+{"action":"ask_user","question":"...","field_id":N}
+{"action":"need_user","reason":"..."}
+{"action":"done","status":"needs_user|failed|submitted"}
+
+LAST ACTIONS: ${JSON.stringify(history.slice(-5)).slice(0, 3000)}
+CONTEXT: ${String(reason || '').slice(0, 500)}
+JOB: ${JSON.stringify(job).slice(0, 800)}
+PROFILE: ${JSON.stringify(profile).slice(0, 4000)}
+VAULT ANSWERS: ${JSON.stringify(answers).slice(0, 4000)}
+PAGE SNAPSHOT: ${JSON.stringify(compact).slice(0, 24000)}`;
+  try {
+    const raw = await askGemini(prompt);
+    const action = parseAgentAction(raw, compact);
+    if (!action) return res.status(502).json({ ok: false, error: 'Model did not return a valid action.', raw: String(raw || '').slice(0, 600) });
+    res.json({ ok: true, action });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message || 'Agent decision failed.' });
+  }
+});
+
+app.post('/api/agent/classify-submission', async (req, res) => {
+  const { text = '', url = '', errors = [] } = req.body || {};
+  const prompt = `Classify whether a job application was submitted.
+Reply with exactly one word: submitted, not_submitted, or unclear.
+URL: ${String(url).slice(0, 500)}
+VISIBLE TEXT: ${String(text).slice(0, 6000)}
+ERRORS: ${JSON.stringify(errors).slice(0, 1500)}`;
+  try {
+    const raw = await askGemini(prompt);
+    const normalized = String(raw || '').toLowerCase();
+    const verdict = /submitted/.test(normalized) && !/not_submitted|not submitted/.test(normalized)
+      ? 'submitted'
+      : /not_submitted|not submitted/.test(normalized) ? 'not_submitted' : 'unclear';
+    res.json({ ok: true, verdict, raw: String(raw || '').slice(0, 200) });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message || 'Classification failed.' });
+  }
+});
+
+// ── Vision-based auto apply (GPT-6-Luna / Gemini) ─────────────────────────
+const visionRuns = new Map();
+
+app.post('/api/auto-apply-vision', async (req, res) => {
+  const { url, profile = {}, answers = {}, runId = `vision_${Date.now()}` } = req.body || {};
+  if (!/^https?:\/\//i.test(String(url || ''))) {
+    return res.status(400).json({ ok: false, error: 'A valid job URL is required.' });
+  }
+  if (visionRuns.has(runId)) {
+    return res.status(409).json({ ok: false, error: 'That runId is already in use.' });
+  }
+  const run = { runId, url, status: 'RUNNING', steps: [], startedAt: Date.now(), result: null };
+  visionRuns.set(runId, run);
+  res.json({ ok: true, runId });
+
+  const agent = new VisionAgent({
+    puppeteer,
+    profile,
+    answers,
+    maxSteps: 40,
+    headless: String(process.env.VISION_HEADLESS || 'false') === 'true',
+    onEvent: ({ step, message, data, t }) => {
+      run.steps.push({ step, message, data, t });
+      if (run.steps.length > 400) run.steps.shift();
+    },
+  });
+  try {
+    run.result = await agent.run(url);
+    run.status = run.result.status === 'submitted' ? 'SUBMITTED'
+      : run.result.status === 'needs_user' ? 'NEEDS_USER' : 'FAILED';
+  } catch (err) {
+    run.result = { status: 'failed', reasonCode: 'CRASH', message: err.message };
+    run.status = 'FAILED';
+  } finally {
+    await agent.close();
+    run.endedAt = Date.now();
+  }
+});
+
+app.get('/api/auto-apply-vision/:runId', (req, res) => {
+  const run = visionRuns.get(req.params.runId);
+  if (!run) return res.status(404).json({ ok: false, error: 'Unknown vision run.' });
+  res.json({ ok: true, run });
 });
 
 // API 404 Fallback - Always Return JSON

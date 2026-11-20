@@ -156,6 +156,10 @@ export default function Apply() {
   const [autoApplyProgress, setAutoApplyProgress] = useState([]);
   const [autoApplyResult, setAutoApplyResult] = useState(null);
   const [showAutoApplyModal, setShowAutoApplyModal] = useState(false);
+  const [autoRunId, setAutoRunId] = useState('');
+  const [autoVisionRunId, setAutoVisionRunId] = useState('');
+  const [runLogState, setRunLogState] = useState('idle');
+  const [needsUser, setNeedsUser] = useState(null);
   const [extensionReady, setExtensionReady] = useState(false);
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
@@ -926,6 +930,7 @@ ${firstName}`;
       }
 
       if (event.data.type === 'HAMZOOH_APPLY_COMPLETE') {
+        if (event.data.runId) setAutoRunId(event.data.runId);
         setAutoApplyResult({
           status: event.data.status || 'needs_attention',
           message: event.data.message || 'Application process completed.',
@@ -952,6 +957,37 @@ ${firstName}`;
             title: job?.title || '',
           });
           setSubmitted(true);
+        }
+      }
+
+      if (event.data.type === 'HAMZOOH_NEEDS_USER') {
+        setNeedsUser({
+          reasonCode: event.data.reasonCode || 'NEEDS_USER_GENERIC',
+          message: event.data.message || 'The application needs your attention.',
+          question: event.data.question || '',
+          runId: event.data.runId || '',
+        });
+      }
+
+      // Structured Phase-0 run log, relayed by bridge.js on demand.
+      if (event.data.type === 'HAMZOOH_RUN_LOG') {
+        const run = event.data.run;
+        if (!run) {
+          setRunLogState('error');
+          return;
+        }
+        try {
+          const blob = new Blob([JSON.stringify(run, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          const safeName = `${run.company || 'job'}-${run.runId || 'run'}`.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 80);
+          link.href = url;
+          link.download = `hamzooh-run-${safeName}.json`;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 4000);
+          setRunLogState('done');
+        } catch {
+          setRunLogState('error');
         }
       }
     };
@@ -988,6 +1024,9 @@ ${firstName}`;
     setAutoApplyProgress([]);
     setAutoApplyResult(null);
     setShowAutoApplyModal(true);
+    setAutoRunId('');
+    setRunLogState('idle');
+    setNeedsUser(null);
 
     // Push profile to extension and trigger job open in new tab
     const ANSWERS_KEY = 'hamzooh_apply_answers';
@@ -1086,6 +1125,7 @@ ${firstName}`;
       setAutoApplying(false);
       return;
     }
+    if (ready.runId) setAutoRunId(ready.runId);
 
     // Add initial progress step
     setAutoApplyProgress([{
@@ -1108,6 +1148,119 @@ ${firstName}`;
         return prev;
       });
     }, 300000);
+  };
+
+  const handleResumeRun = () => {
+    setNeedsUser(null);
+    setAutoApplying(true);
+    setAutoApplyResult(null);
+    const onResume = (event) => {
+      if (event.data?.source !== 'hamzooh-extension' || event.data.type !== 'HAMZOOH_RESUME_RESULT') return;
+      window.removeEventListener('message', onResume);
+      if (!event.data.ok) {
+        setAutoApplyResult({ status: 'failed', message: event.data.error || 'Could not resume the paused run.' });
+        setAutoApplying(false);
+      } else {
+        setAutoApplyProgress([{ step: 'resumed', message: '▶️ Resuming from the paused step in the job tab…', timestamp: Date.now() }]);
+      }
+    };
+    window.addEventListener('message', onResume);
+    window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_RESUME_RUN' }, '*');
+    setTimeout(() => {
+      window.removeEventListener('message', onResume);
+      setAutoApplying((value) => {
+        if (!value) return value;
+        setAutoApplyResult((r) => r || { status: 'needs_attention', message: 'Resume did not respond. Check the job tab.' });
+        return false;
+      });
+    }, 20000);
+  };
+
+  // Vision AI auto-apply: the backend opens its own Chrome window, looks at the
+  // screen with GPT-6-Luna and performs trusted mouse/keyboard actions.
+  const handleVisionApply = async () => {
+    const link = [job?.applyLink, job?.url, job?.sourceUrl].map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
+    if (!link) {
+      alert('This job has no application URL.');
+      return;
+    }
+    setAutoApplying(true);
+    setAutoApplyProgress([]);
+    setAutoApplyResult(null);
+    setShowAutoApplyModal(true);
+    setAutoVisionRunId('');
+    setNeedsUser(null);
+    try {
+      let savedAnswers = {};
+      try { savedAnswers = JSON.parse(localStorage.getItem('hamzooh_apply_answers') || '{}'); } catch {}
+      const response = await fetch('http://localhost:3000/api/auto-apply-vision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          url: link,
+          profile: { ...(profile || {}), jobTitle: job?.title || '', company: job?.company || '' },
+          answers: savedAnswers,
+        }),
+      }).then((r) => r.json());
+      if (!response.ok) throw new Error(response.error || 'Vision agent could not start.');
+      setAutoVisionRunId(response.runId);
+      setAutoApplyProgress([{ step: 'vision_started', message: '👁️ Vision AI is opening the job in its own browser window…', timestamp: Date.now() }]);
+
+      let lastStepCount = 0;
+      const poll = setInterval(async () => {
+        try {
+          const status = await fetch(`http://localhost:3000/api/auto-apply-vision/${response.runId}`).then((r) => r.json());
+          const run = status.run;
+          if (!run) return;
+          const newSteps = (run.steps || []).slice(lastStepCount);
+          lastStepCount = (run.steps || []).length;
+          if (newSteps.length) {
+            setAutoApplyProgress((prev) => [...prev, ...newSteps.map((s) => ({
+              step: s.step, message: s.message, timestamp: s.t || Date.now(),
+            }))].slice(-80));
+          }
+          if (run.status !== 'RUNNING') {
+            clearInterval(poll);
+            setAutoApplying(false);
+            setAutoApplyResult({
+              status: run.status === 'SUBMITTED' ? 'submitted'
+                : run.status === 'NEEDS_USER' ? 'needs_attention' : 'failed',
+              message: run.result?.message || `Vision agent finished: ${run.status}`,
+              filledFields: [],
+            });
+            if (run.result?.message) {
+              setNeedsUser({
+                reasonCode: run.result.reasonCode || run.status,
+                message: run.result.message,
+                question: '',
+                runId: response.runId,
+              });
+            }
+          }
+        } catch (err) {
+          clearInterval(poll);
+          setAutoApplying(false);
+          setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+        }
+      }, 2500);
+    } catch (err) {
+      setAutoApplying(false);
+      setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+    }
+  };
+
+  // Request the structured Phase-0 log for this run and download it.
+  const handleDownloadRunLog = () => {
+    setRunLogState('loading');
+    window.postMessage({
+      source: 'hamzooh-app',
+      type: 'HAMZOOH_GET_RUN',
+      runId: autoRunId || '',
+    }, '*');
+    // If the extension never answers, don't leave the button spinning.
+    setTimeout(() => {
+      setRunLogState((state) => (state === 'loading' ? 'error' : state));
+    }, 8000);
   };
 
   // Close auto-apply modal and cleanup
@@ -2673,14 +2826,14 @@ ${firstName}`;
 
             <button
               className="btn-accent"
-              onClick={handleProceedDirectApply}
-              disabled={autoApplying || submitted || !extensionReady}
+              onClick={handleVisionApply}
+              disabled={autoApplying || submitted}
               style={{ 
-                background: submitted ? '#059669' : autoApplying ? '#6b7280' : !extensionReady ? '#94a3b8' : '#22a65b', 
-                borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : !extensionReady ? '#94a3b8' : '#22a65b', 
+                background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
+                borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
                 fontSize: '14px', padding: '12px 24px', gap: '8px',
-                opacity: (autoApplying || !extensionReady) ? 0.7 : 1,
-                cursor: (autoApplying || submitted || !extensionReady) ? 'not-allowed' : 'pointer'
+                opacity: autoApplying ? 0.7 : 1,
+                cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
               }}
             >
               {autoApplying ? (
@@ -2845,6 +2998,29 @@ ${firstName}`;
                 </div>
               )}
 
+              {/* NEEDS_USER pause banner */}
+              {needsUser && (
+                <div style={{
+                  marginTop: '16px', padding: '14px 18px', borderRadius: '12px',
+                  background: '#fffbeb', border: '1px solid #fde68a'
+                }}>
+                  <p style={{ margin: 0, fontWeight: '700', fontSize: '13px', color: '#92400e' }}>
+                    ⏸ Paused — {needsUser.reasonCode.replace(/_/g, ' ').toLowerCase()}
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#78350f' }}>
+                    {needsUser.message}
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#92400e' }}>
+                    Fix it in the job tab, then click <strong>Resume after fixing</strong>. Hamzooh never solves CAPTCHA, OTP, MFA or login walls for you.
+                  </p>
+                  {needsUser.question && (
+                    <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#1a202c' }}>
+                      Question: {needsUser.question}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Result Message */}
               {autoApplyResult && (
                 <div style={{
@@ -2894,6 +3070,31 @@ ${firstName}`;
                   <Monitor size={14} /> Complete Manually
                 </button>
               )}
+              {needsUser && (
+                <button
+                  onClick={handleResumeRun}
+                  className="btn-accent"
+                  style={{ fontSize: '13px', padding: '10px 18px', gap: '6px' }}
+                  title={`${needsUser.reasonCode}: ${needsUser.message}`}
+                >
+                  <RefreshCw size={14} /> Resume after fixing
+                </button>
+              )}
+              <button
+                onClick={handleDownloadRunLog}
+                className="btn-ghost"
+                disabled={runLogState === 'loading'}
+                title="Download the structured run log (every step, reason code, evidence)"
+                style={{ fontSize: '13px', padding: '10px 18px', gap: '6px' }}
+              >
+                {runLogState === 'loading'
+                  ? <><Loader size={14} className="spin" /> Preparing log…</>
+                  : runLogState === 'done'
+                    ? <><Check size={14} /> Log downloaded</>
+                    : runLogState === 'error'
+                      ? <><AlertCircle size={14} /> Retry log</>
+                      : <><Download size={14} /> Download run log</>}
+              </button>
               {!autoApplying && (
                 <button
                   onClick={handleCloseAutoApplyModal}
