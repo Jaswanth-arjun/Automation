@@ -315,6 +315,8 @@ wss.on('error', () => {
 
 const PORT = process.env.PORT || 3000;
 
+app.disable('x-powered-by');
+
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -332,6 +334,7 @@ app.use(express.json({
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   next();
@@ -365,7 +368,9 @@ registerBillingRoutes(app);
 app.post('/api/resume/render-edited-pdf', async (req, res) => {
   let browser;
   try {
-    const html = String(req.body?.html || '').replace(/<script[\s\S]*?<\/script>/gi, '');
+    const html = String(req.body?.html || '')
+      .replace(/<(?:script|iframe|object|embed|applet)[\s\S]*?<\/(?:script|iframe|object|embed|applet)>/gi, '')
+      .replace(/<(?:script|iframe|object|embed|applet|meta)[^>]*\/?>/gi, '');
     if (!html.trim()) return res.status(400).json({ error: 'Edited resume content is empty.' });
     const executablePath = getSystemChromePath();
     if (!executablePath) return res.status(503).json({ error: 'Chrome browser is required to create the edited PDF.' });
@@ -5379,6 +5384,13 @@ server.on('listening', () => {
   console.log(`║  URL: http://localhost:${currentPort}                                 ║`);
   console.log('╚═══════════════════════════════════════════════════════════════╝');
   console.log('');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ [Process] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('❌ [Process] Uncaught Exception:', err);
 });
 
 startServer(currentPort);
