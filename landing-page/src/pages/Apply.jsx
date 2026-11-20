@@ -2799,14 +2799,30 @@ ${firstName}`;
                 </span>
               </div>
             </div>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => setActiveTab('tailor')}
-              style={{ padding: '9px 16px', fontSize: '12.5px', gap: '6px', whiteSpace: 'nowrap' }}
-            >
-              <Sparkles size={14} /> {resumeReady ? 'View report / re-tailor' : 'Tailor resume'}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {resumeReady && (
+                <button
+                  type="button"
+                  className="btn-accent"
+                  onClick={() => {
+                    const b64 = tailoredPdfBase64 || jobResume?.pdfBase64 || activeResume?.pdfBase64;
+                    downloadPdf(b64, resumeReadyName);
+                  }}
+                  style={{ padding: '9px 16px', fontSize: '12.5px', gap: '6px', whiteSpace: 'nowrap' }}
+                  title="Download this tailored PDF to your computer's Downloads folder"
+                >
+                  <Download size={14} /> Download PDF
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setActiveTab('tailor')}
+                style={{ padding: '9px 16px', fontSize: '12.5px', gap: '6px', whiteSpace: 'nowrap' }}
+              >
+                <Sparkles size={14} /> {resumeReady ? 'View report / re-tailor' : 'Tailor resume'}
+              </button>
+            </div>
           </div>
 
           {/* Extension Status & Auto-Submit Settings */}
