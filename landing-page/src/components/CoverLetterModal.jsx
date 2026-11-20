@@ -87,130 +87,13 @@ export default function CoverLetterModal({
         setTimeout(() => URL.revokeObjectURL(url), 4000);
         return;
       }
-      throw new Error(res?.error || 'Failed to generate PDF.');
+      alert('Could not download PDF: ' + (res?.error || 'Server error'));
     } catch (err) {
-      console.warn('PDF render error, falling back to print preview:', err);
-      handlePrintPdf();
+      console.error('PDF download error:', err);
+      alert('PDF generation failed: ' + err.message);
     } finally {
       setIsDownloadingPdf(false);
     }
-  };
-
-  const handlePrintPdf = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-    const name = editedLetter.applicantName || 'Applicant';
-    const comp = editedLetter.companyName || company || 'Company';
-    const paras = editedLetter.paragraphs || [];
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Cover Letter - ${name} - ${comp}</title>
-          <style>
-            @page {
-              size: A4 portrait;
-              margin: 12mm;
-            }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-              color: #111827;
-              line-height: 1.5;
-              font-size: 13px;
-              margin: 0;
-              padding: 0;
-              background: #ffffff;
-            }
-            .cover-card {
-              max-width: 100%;
-              margin: 0 auto;
-              border: 1.5px solid #1e293b;
-              border-radius: 4px;
-              padding: 32px 40px;
-              box-sizing: border-box;
-              display: flex;
-              flex-direction: column;
-              justify-content: space-between;
-            }
-            .title {
-              text-align: center;
-              font-size: 20px;
-              font-weight: 800;
-              margin-bottom: 20px;
-              color: #000000;
-              text-transform: uppercase;
-              letter-spacing: 0.05em;
-            }
-            .meta-block {
-              margin-bottom: 14px;
-              font-size: 13px;
-              line-height: 1.45;
-              color: #1f2937;
-            }
-            .salutation {
-              margin-bottom: 14px;
-              font-weight: 600;
-            }
-            .paragraph {
-              margin-bottom: 12px;
-              text-align: justify;
-              color: #374151;
-              line-height: 1.5;
-            }
-            .sign-off {
-              margin-top: 20px;
-              font-weight: 500;
-            }
-            .signature-name {
-              font-weight: 700;
-              margin-top: 4px;
-            }
-            @media print {
-              body { padding: 0; }
-              .cover-card { border: 1.5px solid #1e293b !important; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="cover-card">
-            <div>
-              <div class="title">Cover Letter</div>
-              
-              <div class="meta-block">
-                <div><strong>${name}</strong></div>
-                <div>${editedLetter.applicantAddress || ''}</div>
-                <div>${editedLetter.applicantEmail || ''} ${editedLetter.applicantPhone ? ` | ${editedLetter.applicantPhone}` : ''}</div>
-                <div style="margin-top: 8px; color: #4b5563;">${editedLetter.date || ''}</div>
-              </div>
-
-              <div class="meta-block">
-                <div>${editedLetter.hiringManager || "Hiring Manager's Name"}</div>
-                <div><strong>${comp}</strong></div>
-                <div>${editedLetter.companyAddress || ''}</div>
-              </div>
-
-              <div class="salutation">
-                ${editedLetter.salutation || 'Dear Hiring Manager,'}
-              </div>
-
-              ${paras.map((p) => `<div class="paragraph">${p}</div>`).join('')}
-
-              <div class="sign-off">
-                <div>${editedLetter.signOff || 'Best Regards,'}</div>
-                <div class="signature-name">${name}</div>
-              </div>
-            </div>
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
   };
 
   const handleSaveEdit = () => {

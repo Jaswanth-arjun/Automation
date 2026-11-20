@@ -24,6 +24,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
+import { renderCoverLetterPdf } from './lib/cover-letter-pdf.js';
 import { extractJobPostingJsonLd, extractJobPostingDescriptionHtml, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
@@ -2945,113 +2946,15 @@ Return ONLY a valid JSON object matching this schema:
 });
 
 app.post('/api/cover-letter/render-pdf', async (req, res) => {
-  let browser;
   try {
-    const { coverLetter, company, jobTitle } = req.body || {};
+    const { coverLetter, company = '' } = req.body || {};
     if (!coverLetter) return res.status(400).json({ error: 'Cover letter content is required.' });
 
-    const executablePath = getSystemChromePath();
-    if (!executablePath) return res.status(503).json({ error: 'Chrome is required to generate PDF.' });
-
-    const name = coverLetter.applicantName || 'Applicant';
-    const comp = coverLetter.companyName || company || 'Company';
-    const paras = coverLetter.paragraphs || [];
-
-    const fullHtml = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <style>
-      @page {
-        size: A4 portrait;
-        margin: 15mm;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        padding: 0;
-        background: #ffffff;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        color: #1f2937;
-        font-size: 13px;
-        line-height: 1.55;
-      }
-      .cover-card {
-        border: 1.5px solid #334155;
-        border-radius: 2px;
-        padding: 38px 46px;
-        width: 100%;
-        min-height: 98%;
-        box-sizing: border-box;
-      }
-      .title {
-        text-align: center;
-        font-size: 20px;
-        font-weight: 800;
-        margin-bottom: 22px;
-        color: #0f172a;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-      .meta-block {
-        margin-bottom: 16px;
-        font-size: 13px;
-        line-height: 1.45;
-        color: #1f2937;
-      }
-      .salutation {
-        margin-bottom: 14px;
-        font-weight: 600;
-        color: #0f172a;
-      }
-      .paragraph {
-        margin-bottom: 12px;
-        text-align: justify;
-        color: #334155;
-        line-height: 1.55;
-      }
-      .sign-off {
-        margin-top: 22px;
-        line-height: 1.45;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="cover-card">
-      <div class="title">Cover Letter</div>
-      <div class="meta-block">
-        <div style="font-weight: 700; font-size: 14px; color: #0f172a;">${name}</div>
-        <div>${coverLetter.applicantAddress || ''}</div>
-        <div>${coverLetter.applicantEmail || ''} ${coverLetter.applicantPhone ? ` | ${coverLetter.applicantPhone}` : ''}</div>
-        <div style="margin-top: 5px; color: #64748b;">${coverLetter.date || ''}</div>
-      </div>
-      <div class="meta-block">
-        <div>${coverLetter.hiringManager || "Hiring Manager"}</div>
-        <div style="font-weight: 700; color: #0f172a;">${comp}</div>
-        <div>${coverLetter.companyAddress || ''}</div>
-      </div>
-      <div class="salutation">
-        ${coverLetter.salutation || 'Dear Hiring Manager,'}
-      </div>
-      ${paras.map(p => `<p class="paragraph">${p}</p>`).join('')}
-      <div class="sign-off">
-        <div>${coverLetter.signOff || 'Best Regards,'}</div>
-        <div style="font-weight: 700; font-size: 14px; margin-top: 4px; color: #0f172a;">${name}</div>
-      </div>
-    </div>
-  </body>
-</html>`;
-
-    browser = await puppeteer.launch({ headless: true, executablePath, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    const page = await browser.newPage();
-    await page.setContent(fullHtml, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
-    res.json({ pdfBase64: Buffer.from(pdf).toString('base64') });
+    const pdfBase64 = await renderCoverLetterPdf(coverLetter, company);
+    res.json({ ok: true, pdfBase64 });
   } catch (err) {
     console.error('Cover letter PDF render failed:', err);
     res.status(500).json({ error: err.message || 'Could not create PDF.' });
-  } finally {
-    if (browser) await browser.close().catch(() => {});
   }
 });
 
