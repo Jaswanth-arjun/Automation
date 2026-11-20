@@ -128,6 +128,7 @@ export const api = {
   getSentEmails: () => apiFetch('', '/api/sent-emails'),
   tailorExternalJob: (payload) => apiFetch('', '/api/external-job/tailor', { method: 'POST', body: JSON.stringify(payload) }),
   generateCoverLetter: (payload) => apiFetch('', '/api/cover-letter/generate', { method: 'POST', body: JSON.stringify(payload) }),
+  renderCoverLetterPdf: (payload) => apiFetch('', '/api/cover-letter/render-pdf', { method: 'POST', body: JSON.stringify(payload) }),
   renderEditedResumePdf: (html) => apiFetch('', '/api/resume/render-edited-pdf', { method: 'POST', body: JSON.stringify({ html }) }),
 
   // Auto-Apply (Puppeteer engine)

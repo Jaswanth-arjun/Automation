@@ -14,6 +14,7 @@ export default function CoverLetterModal({
 }) {
   const [currentMode, setCurrentMode] = useState(mode);
   const [copied, setCopied] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [editedLetter, setEditedLetter] = useState(coverLetter || {});
   const [editedText, setEditedText] = useState('');
 
@@ -49,6 +50,50 @@ export default function CoverLetterModal({
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     });
+  };
+
+  const handleDownloadPdf = async () => {
+    if (isDownloadingPdf) return;
+    setIsDownloadingPdf(true);
+    const name = (editedLetter.applicantName || 'Applicant').trim();
+    const comp = (editedLetter.companyName || company || 'Company').trim();
+    const safeName = name.replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const safeComp = comp.replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const filename = `${safeName}-${safeComp}-Cover-Letter.pdf`;
+
+    try {
+      const res = await fetch('/api/cover-letter/render-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coverLetter: editedLetter,
+          company,
+          jobTitle,
+        }),
+      }).then((r) => r.json());
+
+      if (res?.pdfBase64) {
+        const binary = atob(res.pdfBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        return;
+      }
+      throw new Error(res?.error || 'Failed to generate PDF.');
+    } catch (err) {
+      console.warn('PDF render error, falling back to print preview:', err);
+      handlePrintPdf();
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   };
 
   const handlePrintPdf = () => {
@@ -262,15 +307,18 @@ export default function CoverLetterModal({
                 </button>
                 <button
                   type="button"
-                  onClick={handlePrintPdf}
+                  onClick={handleDownloadPdf}
+                  disabled={isDownloadingPdf}
                   style={{
                     background: '#2563eb', color: '#ffffff', border: 'none',
                     borderRadius: '8px', padding: '7px 16px', fontSize: '12.5px', fontWeight: '700',
-                    display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(37,99,235,0.3)'
+                    display: 'flex', alignItems: 'center', gap: '6px', cursor: isDownloadingPdf ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
+                    opacity: isDownloadingPdf ? 0.75 : 1,
                   }}
                 >
-                  <Download size={14} /> Download / Print PDF
+                  {isDownloadingPdf ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
+                  {isDownloadingPdf ? 'Downloading PDF...' : 'Download PDF'}
                 </button>
               </>
             ) : (
