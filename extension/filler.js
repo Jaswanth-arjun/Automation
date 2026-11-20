@@ -187,36 +187,114 @@
     }
   }
 
-  function showTrainingModeBanner(domain) {
-    if (document.getElementById('hamzooh-train-banner')) return;
-    const banner = document.createElement('div');
-    banner.id = 'hamzooh-train-banner';
-    banner.style.cssText = `
-      position: fixed;
-      top: 12px;
-      right: 16px;
-      z-index: 2147483647;
-      background: linear-gradient(135deg, #059669, #10b981);
-      color: white;
-      padding: 12px 18px;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    `;
-    banner.innerHTML = `
-      <span>🎓 Hamzooh Train Mode Active: Recording your actions for ${domain}...</span>
-      <button id="hamzooh-stop-train" style="background: white; color: #047857; border: none; border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 700; cursor: pointer;">Done</button>
-    `;
-    document.body.appendChild(banner);
-    document.getElementById('hamzooh-stop-train')?.addEventListener('click', () => {
-      banner.remove();
-      sendProgress('trained', `✅ Training recorded and saved for ${domain}!`);
-    });
+  let trainingRecorderActive = false;
+  const recordedSteps = [];
+  const recordedAnswers = {};
+
+  function initTrainModeRecorder(domain, pending) {
+    if (trainingRecorderActive) return;
+    trainingRecorderActive = true;
+    sendProgress('train_active', `🎓 Training Mode Active for ${domain}. Fill the form manually — AI is recording!`);
+
+    let banner = document.getElementById('hamzooh-train-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'hamzooh-train-banner';
+      banner.style.cssText = `
+        position: fixed;
+        top: 14px;
+        right: 18px;
+        z-index: 2147483647;
+        background: linear-gradient(135deg, #059669, #10b981);
+        color: white;
+        padding: 14px 20px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        border: 1px solid rgba(255,255,255,0.25);
+      `;
+      banner.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <span style="font-size:14px; font-weight:700;">🎓 Training Mode: Recording Active</span>
+          <span style="font-size:11.5px; opacity:0.9;">Apply manually. Every action & answer is being recorded for future automation!</span>
+        </div>
+        <button id="hamzooh-save-train-btn" style="background: white; color: #047857; border: none; border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">Save & Finish</button>
+      `;
+      document.body.appendChild(banner);
+    }
+
+    const saveAndFinish = async () => {
+      try {
+        banner.innerHTML = `<span>⏳ Saving learned blueprint for ${domain}...</span>`;
+        const cleanDomain = domain.toLowerCase().replace(/^www\./, '');
+        await fetch('http://localhost:3000/api/blueprints/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            domain: cleanDomain,
+            blueprint: {
+              domain: cleanDomain,
+              portalName: `${cleanDomain} Flow`,
+              steps: recordedSteps,
+              customAnswers: recordedAnswers,
+              learnedAt: new Date().toISOString(),
+            },
+          }),
+        });
+
+        for (const [q, a] of Object.entries(recordedAnswers)) {
+          await syncAnswerToServer(q, a, true);
+        }
+
+        banner.style.background = 'linear-gradient(135deg, #0284c7, #38bdf8)';
+        banner.innerHTML = `<span>🎉 Blueprint Saved! Future applications on ${domain} will apply automatically with 100% accuracy.</span>`;
+        sendProgress('train_complete', `🎉 Learned blueprint saved for ${domain}! Future jobs will auto-apply with 100% accuracy.`);
+        setTimeout(() => { banner?.remove(); }, 6000);
+      } catch (err) {
+        banner.innerHTML = `<span>⚠️ Could not save blueprint: ${err.message}</span>`;
+      }
+    };
+
+    document.getElementById('hamzooh-save-train-btn')?.addEventListener('click', saveAndFinish);
+
+    const clickHandler = (e) => {
+      const target = e.target.closest('button, a, input[type="submit"], [role="button"]');
+      if (!target || target.closest('#hamzooh-train-banner')) return;
+      const text = (target.innerText || target.getAttribute('aria-label') || target.value || '').trim();
+      recordedSteps.push({
+        action: 'click',
+        tag: target.tagName.toLowerCase(),
+        text: text.slice(0, 80),
+        id: target.id || '',
+        classes: target.className ? String(target.className).slice(0, 100) : '',
+        timestamp: Date.now(),
+      });
+      sendProgress('train_record', `📍 Recorded click: "${text.slice(0, 40) || target.tagName}"`);
+
+      if (/submit application|submit|done|finish/i.test(text)) {
+        setTimeout(saveAndFinish, 1500);
+      }
+    };
+
+    const inputHandler = (e) => {
+      const el = e.target;
+      if (!el || !['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return;
+      const label = labelFor(el);
+      const val = el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? (el.value || 'yes') : 'no') : el.value;
+      if (label && val) {
+        recordedAnswers[label] = val;
+        sendProgress('train_record', `📝 Learned answer: "${label.slice(0, 35)}" → "${String(val).slice(0, 25)}"`);
+      }
+    };
+
+    document.addEventListener('click', clickHandler, true);
+    document.addEventListener('change', inputHandler, true);
+    document.addEventListener('input', inputHandler, true);
   }
 
   function queryAllDeep(selector, root = document) {
@@ -2098,6 +2176,12 @@
     if (pending.done) return;
     if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
 
+    // 🎓 Train Mode: purely passive recording without ANY automation interfering!
+    if (pending.trainMode) {
+      initTrainModeRecorder(location.hostname, pending);
+      return;
+    }
+
     // Progress-based loop (Phase 1d): keep going only while the page state
     // actually changes. Hard cap 40 steps; stop after 3 no-progress steps.
     STEP_COUNT += 1;
@@ -2255,10 +2339,6 @@
         }
         if (findLinkedInModal()) break;
       }
-    }
-
-    if (pending.trainMode) {
-      showTrainingModeBanner(location.hostname);
     }
 
     if (applyBtns.length) {

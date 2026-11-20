@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hamzooh Apply",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Stores your Hamzooh profile and fills external job applications with your tailored resume.",
   "permissions": ["storage", "scripting", "tabs", "webNavigation", "alarms", "debugger", "unlimitedStorage", "activeTab"],
   "background": { "service_worker": "background.js" },
