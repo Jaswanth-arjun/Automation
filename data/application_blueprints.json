@@ -1,62 +1,636 @@
 {
   "linkedin.com": {
     "domain": "linkedin.com",
-    "portalName": "LinkedIn Easy Apply",
+    "portalName": "linkedin.com Flow",
     "steps": [
       {
-        "id": "open_easy_apply",
         "action": "click",
-        "description": "Click the Easy Apply button on the job top card",
-        "selectors": [
-          "button.jobs-apply-button",
-          "button[aria-label*='Easy Apply']",
-          ".jobs-apply-button--top-card",
-          "[data-control-name*='apply']",
-          "button[data-job-id]"
-        ],
-        "waitForModal": true
+        "tag": "button",
+        "text": "Easy Apply",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxp bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjia7",
+        "timestamp": 1795161610931
       },
       {
-        "id": "wait_modal_ready",
-        "action": "wait_ready",
-        "description": "Wait for Easy Apply modal and spinner to disappear",
-        "modalSelector": ".jobs-easy-apply-modal, [role='dialog'].artdeco-modal, .artdeco-modal",
-        "spinnerSelector": ".artdeco-loader, .artdeco-spinner, svg.artdeco-loader__bars"
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161615669
       },
       {
-        "id": "fill_step",
-        "action": "fill_current_step",
-        "description": "Fill form questions and advance through Next / Review",
-        "advanceButtonSelectors": [
-          "button[aria-label*='Continue to next step']",
-          "button[aria-label*='Review your application']",
-          "footer button.artdeco-button--primary",
-          "button.artdeco-button--primary"
-        ]
+        "action": "click",
+        "tag": "button",
+        "text": "Upload resume",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjiaf bsj",
+        "timestamp": 1795161618021
       },
       {
-        "id": "submit_step",
-        "action": "submit",
-        "description": "Submit application on final step",
-        "submitButtonSelectors": [
-          "button[aria-label*='Submit application']",
-          "footer button.artdeco-button--primary",
-          "button.artdeco-button--primary"
-        ]
+        "action": "click",
+        "tag": "button",
+        "text": "Upload cover letter",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjiaf",
+        "timestamp": 1795161634527
       },
       {
-        "id": "dismiss_done",
-        "action": "dismiss",
-        "description": "Close 'Application sent' confirmation dialog",
-        "dismissSelectors": [
-          "button[aria-label*='Dismiss']",
-          ".artdeco-modal button[aria-label*='Dismiss']",
-          "button.artdeco-modal__dismiss"
-        ]
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161651182
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161667338
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161670298
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161671389
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161731801
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Next",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161741274
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Review",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161746512
+      },
+      {
+        "action": "click",
+        "tag": "button",
+        "text": "Submit application",
+        "id": "",
+        "classes": "bsjlxl bsjlxk bsjt0 bsja26 bsjhn4 bsjlho bsjli7 bsjlxq bsjlxn bsjlxm bsjazu bsjj03 bsjj2d bsjhwr",
+        "timestamp": 1795161751567
       }
     ],
-    "learnedAt": "2026-11-20T11:45:00.000Z",
-    "customAnswers": {}
+    "customAnswers": {
+      "Mark job as a top choice _r_35_": "no",
+      "What is your expected salary? (Please state the currency) _r_37_": "3LPA",
+      "Which semester are you currently in?*": "afae150f-5fcb-4e9d-9a1c-a0afeac4803d",
+      "How long will you be able to commit to this internship?*": "bca36fb2-e485-40a9-804c-2844d945a2d8",
+      "Voluntary Survey At Carousell Group, we believe everyone deserves to feel welcome and valued. To make sure our workplace reflects that, we collect some voluntary demographic information. Sharing this information helps us build a more inclusive environment for everyone – including you! Our company unequivocally provides equal employment opportunities, irrespective of gender, ethnicity, age, religio": "9d487e0e-3b0a-47b5-856e-5a4e0772afcd",
+      "Gender*": "b4d98044-265c-42f1-9089-492730fe82f9",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 0/1,440 0 of 1,440 characters": "j",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 1/1,440 0 of 1,440 characters": "jlk",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 2/1,440 0 of 1,440 characters": "jlkm",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 3/1,440 0 of 1,440 characters": "jlkmw",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 4/1,440 0 of 1,440 characters": "jlkmwq",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 5/1,440 0 of 1,440 characters": "jlkmwqd",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 7/1,440 0 of 1,440 characters": "jlkmwqdk",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 8/1,440 0 of 1,440 characters": "jlkmwqdkm",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 9/1,440 0 of 1,440 characters": "jlkmwqdkmkm",
+      "Can you describe a project you worked on during your previous/current internship, including your contributions and impact? _r_3i_ This field is required 11/1,440 11 of 1,440 characters": "jlkmwqdkmkm",
+      "Please provide details of your most recent internship : Company Role Duration (Months) _r_3h_": "sksmklw"
+    },
+    "learnedAt": "2026-11-20T08:02:33.353Z",
+    "updatedAt": "2026-11-20T08:02:42.777Z"
+  },
+  "job-boards.greenhouse.io": {
+    "domain": "job-boards.greenhouse.io",
+    "ats": "greenhouse",
+    "portalName": "job-boards.greenhouse.io Flow",
+    "learnUrl": "https://job-boards.greenhouse.io/gitlab/jobs/8638232002",
+    "steps": [
+      {
+        "index": 1,
+        "fields": [
+          {
+            "label": "First Name*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "firstName",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Last Name*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "lastName",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Email*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "email",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Country",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "country",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Phone",
+            "type": "tel",
+            "tag": "input",
+            "dataKey": "phone",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "LinkedIn Profile",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "linkedin",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "What's the name you'd prefer us to use throughout the interview process?",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "fullName",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Please choose the country in which you are located.",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "country",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Are you subject to any employment agreements and/or post-employment restrictions with your current employer or a past employer?*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "workAuthorization",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Are you subject to any employment agreements and/or post-employment restrictions with your current employer or a past employer?*",
+            "type": "input",
+            "tag": "input",
+            "dataKey": "workAuthorization",
+            "skip": false,
+            "required": true,
+            "options": [],
+            "altLabel": "Select...",
+            "inherited": true
+          },
+          {
+            "label": "It is important to us to create an accessible and inclusive interview experience. Please let us know if there are any adjustments we can make to assist you during the hiring and interview process.",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": true,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Will you now or in the future require sponsorship for a visa to remain in your current location?*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "workAuthorization",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Will you now or in the future require sponsorship for a visa to remain in your current location?*",
+            "type": "input",
+            "tag": "input",
+            "dataKey": "workAuthorization",
+            "skip": false,
+            "required": true,
+            "options": [],
+            "altLabel": "Select...",
+            "inherited": true
+          },
+          {
+            "label": "Have you previously worked at or consulted for GitLab?*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Have you previously worked at or consulted for GitLab?*",
+            "type": "input",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": [],
+            "altLabel": "Select...",
+            "inherited": true
+          },
+          {
+            "label": "What is your current country of residence?*",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "country",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "What is your current country of residence?*",
+            "type": "input",
+            "tag": "input",
+            "dataKey": "country",
+            "skip": false,
+            "required": true,
+            "options": [],
+            "altLabel": "Select...",
+            "inherited": true
+          },
+          {
+            "label": "Gender",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": true,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Are you Hispanic/Latino?",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": true,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Veteran Status",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": true,
+            "required": false,
+            "options": []
+          }
+        ],
+        "buttons": [
+          "Apply",
+          "Toggle flyout",
+          "Attach",
+          "Enter manually",
+          "Submit application"
+        ],
+        "isFinal": true
+      }
+    ],
+    "fieldCount": 20,
+    "learnedAt": "2026-11-20T08:24:57.016Z",
+    "updatedAt": "2026-11-20T08:24:57.018Z"
+  },
+  "jobs.lever.co": {
+    "domain": "jobs.lever.co",
+    "ats": "lever",
+    "portalName": "jobs.lever.co Flow",
+    "learnUrl": "https://jobs.lever.co/spotify/2a55d6c9-c564-443a-be3e-a3851db5a93b/apply",
+    "steps": [
+      {
+        "index": 1,
+        "fields": [
+          {
+            "label": "Full name\n✱",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "fullName",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "He/him",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "She/her",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "They/them",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Xe/xem",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Ze/hir",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Ey/em",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Hir/hir",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Fae/faer",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Hu/hu",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Use name only",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Custom",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Email\n✱",
+            "type": "email",
+            "tag": "input",
+            "dataKey": "email",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Phone\n✱",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "phone",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Current location\n✱",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Current company\n✱",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "LinkedIn URL",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "linkedin",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "GitHub URL",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "github",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Portfolio URL",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "github",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "Other website",
+            "type": "text",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          },
+          {
+            "label": "No",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Yes - Intern",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Yes - Full Time Employment",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "Yes",
+            "type": "radio",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "No",
+            "type": "radio",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "cards[c19667d4-9d0f-4f5a-8872-c66c6910973c][field1]",
+            "type": "textarea",
+            "tag": "textarea",
+            "dataKey": "",
+            "skip": false,
+            "required": true,
+            "options": []
+          },
+          {
+            "label": "What is your location?\nSelect...\nAfghanistan\nAlbania\nAlgeria\nAmerican Samoa\nAndorra\nAngola\nAnguilla\nAntarctica\nAntigua and Barbuda\nArgentina\nArmenia\nAruba\nAustralia\nAustria\nAzerbaijan\nBahamas\nBahrain\nBangladesh\nBarbados\nBelarus\nBelgium\nBelize\nBenin\nBermuda\nBhutan\nBolivia\nBonaire, Sint Eustatius and Saba\nBosnia and Herzegovina\nBotswana\nBouvet Island\nBrazil\nBritish Indian Ocean Territory\nBrunei\nBulgaria\nBurkina Faso\nBurundi\nCambodia\nCameroon\nCanada\nCape Verde\nCayman Islands\nCentral African Republic\nChad\nChile\nChina\nChristmas Island\nCocos (Keeling) Islands\nColombia\nComoros\nCongo\nCongo, the Democratic Republic of the\nCook Islands\nCosta Rica\nCroatia\nCuba\nCuraçao\nCyprus\nCzech Republic\nDenmark\nDjibouti\nDominica\nDominican Republic\nEcuador\nEgypt\nEl Salvador\nEquatorial Guinea\nEritrea\nEstonia\nEswatini\nEthiopia\nFalkland Islands\nFaroe Islands\nFiji\nFinland\nFrance\nFrench Guiana\nFrench Polynesia\nFrench Southern Territories\nGabon\nGambia\nGeorgia\nGermany\nGhana\nGibraltar\nGreece\nGreenland\nGrenada\nGuadeloupe\nGuam\nGuatemala\nGuernsey\nGuinea\nGuinea-Bissau\nGuyana\nHaiti\nHeard Island and McDonald Islands\nHoly See (Vatican City State)\nHonduras\nHong Kong\nHungary\nIceland\nIndia\nIndonesia\nIran\nIraq\nIreland\nIsle of Man\nIsrael\nItaly\nIvory Coast\nJamaica\nJapan\nJersey\nJordan\nKazakhstan\nKenya\nKiribati\nKosovo\nKuwait\nKyrgyzstan\nLaos\nLatvia\nLebanon\nLesotho\nLiberia\nLibya\nLiechtenstein\nLithuania\nLuxembourg\nMacao\nMacedonia, the Former Yugoslav Republic of\nMadagascar\nMalawi\nMalaysia\nMaldives\nMali\nMalta\nMarshall Islands\nMartinique\nMauritania\nMauritius\nMayotte\nMexico\nMicronesia, Federated States of\nMoldova\nMonaco\nMongolia\nMontenegro\nMontserrat\nMorocco\nMozambique\nMyanmar\nNamibia\nNauru\nNepal\nNetherlands\nNew Caledonia\nNew Zealand\nNicaragua\nNiger\nNigeria\nNiue\nNorfolk Island\nNorth Korea\nNorthern Mariana Islands\nNorway\nOman\nPakistan\nPalau\nPalestine, State of\nPanama\nPapua New Guinea\nParaguay\nPeru\nPhilippines\nPitcairn\nPoland\nPortugal\nPuerto Rico\nQatar\nRomania\nRussia\nRwanda\nRéunion\nSaint Barthélemy\nSaint Helena, Ascension and Tristan da Cunha\nSaint Kitts and Nevis\nSaint Lucia\nSaint Martin (French part)\nSaint Pierre and Miquelon\nSaint Vincent and the Grenadines\nSamoa\nSan Marino\nSao Tome and Principe\nSaudi Arabia\nSenegal\nSerbia\nSeychelles\nSierra Leone\nSingapore\nSint Maarten (Dutch part)\nSlovakia\nSlovenia\nSolomon Islands\nSomalia\nSouth Africa\nSouth Georgia and the South Sandwich Islands\nSouth Korea\nSouth Sudan\nSpain\nSri Lanka\nSudan\nSuriname\nSvalbard and Jan Mayen\nSweden\nSwitzerland\nSyria\nTaiwan\nTajikistan\nTanzania\nThailand\nTimor-Leste\nTogo\nTokelau\nTonga\nTrinidad and Tobago\nTunisia\nTurkey\nTurkmenistan\nTurks and Caicos Islands\nTuvalu\nUganda\nUkraine\nUnited Arab Emirates\nUnited Kingdom\nUnited States\nUnited States Minor Outlying Islands\nUruguay\nUzbekistan\nVanuatu\nVenezuela\nVietnam\nVirgin Islands, British\nVirgin Islands, U.S.\nWallis and Futuna\nWestern Sahara\nYemen\nZambia\nZimbabwe\nÅland Islands",
+            "type": "select",
+            "tag": "select",
+            "dataKey": "city",
+            "skip": false,
+            "required": false,
+            "options": [
+              "Select...",
+              "Afghanistan",
+              "Albania",
+              "Algeria",
+              "American Samoa",
+              "Andorra",
+              "Angola",
+              "Anguilla",
+              "Antarctica",
+              "Antigua and Barbuda",
+              "Argentina",
+              "Armenia",
+              "Aruba",
+              "Australia",
+              "Austria",
+              "Azerbaijan",
+              "Bahamas",
+              "Bahrain",
+              "Bangladesh",
+              "Barbados"
+            ]
+          },
+          {
+            "label": "Spotify has my consent to contact me about future job opportunities.",
+            "type": "checkbox",
+            "tag": "input",
+            "dataKey": "",
+            "skip": false,
+            "required": false,
+            "options": []
+          }
+        ],
+        "buttons": [
+          "deny",
+          "accept",
+          "SUBMIT APPLICATION",
+          "Verify",
+          "EN",
+          "About hCaptcha & Accessibility Options",
+          "Refresh Challenge."
+        ],
+        "isFinal": true
+      }
+    ],
+    "fieldCount": 28,
+    "learnedAt": "2026-11-20T08:27:36.756Z",
+    "updatedAt": "2026-11-20T08:27:36.758Z"
   }
 }
-

@@ -1,0 +1,393 @@
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                     HAMZOOH AUTO APPLY - MESSAGE FLOW                          │
+│                          100% Automated Easy Apply                             │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 1: Campaign Start                                                         │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    Dashboard (localhost:5173)
+    │
+    │ [User clicks "Start Campaign"]
+    │
+    ▼
+    Backend API (localhost:3000)
+    │
+    │ POST /campaign/start
+    │ { jobUrl, profile, resume }
+    │
+    ▼
+    Extension Background.js
+    │
+    │ chrome.runtime.onMessage
+    │ { type: 'HAMZOOH_OPEN_JOB' }
+    │
+    ▼
+    chrome.tabs.create({ url: jobUrl })
+    │
+    ▼
+    LinkedIn Job Page Opens (New Tab)
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 2: Page Load & Auto-Trigger Initialization                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    LinkedIn Job Page
+    │
+    │ [Page DOM loads]
+    │
+    ▼
+    manifest.json (content_scripts)
+    │
+    │ Automatically injects:
+    │   1. auto-trigger.js (FIRST)
+    │   2. filler-enhancements.js
+    │   3. filler.js (LAST)
+    │
+    ▼
+    auto-trigger.js Executes
+    │
+    ├─► MutationObserver.observe(document.body)
+    │   │
+    │   ├─► childList: true
+    │   ├─► subtree: true
+    │   └─► Watches for modal appearance
+    │
+    └─► setInterval(checkForEasyApply, 2000)
+        └─► Fallback polling
+
+    Console: "[HAMZOOH Auto-Trigger] Loaded and watching for Easy Apply modal"
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 3: User Interaction                                                       │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    LinkedIn Job Page
+    │
+    │ [User clicks "Easy Apply" button on job card]
+    │
+    ▼
+    LinkedIn JavaScript
+    │
+    │ Opens Easy Apply Modal
+    │
+    ▼
+    DOM Mutation Event
+    │
+    │ <div data-test-modal-id="easy-apply-modal">
+    │   <form class="jobs-easy-apply-form">
+    │     ...form fields...
+    │   </form>
+    │ </div>
+    │
+    ▼
+    MutationObserver Callback Triggered
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 4: Auto-Trigger Detection                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    MutationObserver (auto-trigger.js)
+    │
+    │ checkForEasyApply()
+    │
+    ├─► isLinkedInJobPage() ✓
+    │   └─► url.includes('linkedin.com/jobs/view/')
+    │
+    ├─► isEasyApplyModalOpen() ✓
+    │   │
+    │   ├─► querySelector('[data-test-modal-id="easy-apply-modal"]')
+    │   ├─► querySelector('.jobs-easy-apply-modal')
+    │   ├─► querySelector('[aria-label*="Easy Apply"]')
+    │   └─► querySelector('.artdeco-modal[aria-label*="Apply"]')
+    │
+    └─► isFormReady() ✓
+        └─► querySelector('form[data-test-form-element="true"]')
+
+    Console: "[HAMZOOH Auto-Trigger] Easy Apply modal detected!"
+
+    ▼
+
+    triggerAutoFill() called
+    │
+    │ setTimeout(1000ms) → Let form fully render
+    │
+    ▼
+    chrome.runtime.sendMessage({
+      type: 'HAMZOOH_AUTO_TRIGGER',
+      url: window.location.href
+    })
+
+    Console: "[HAMZOOH Auto-Trigger] Sending auto-trigger message..."
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 5: Background Message Routing                                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    Extension Background.js (Service Worker)
+    │
+    │ chrome.runtime.onMessage.addListener()
+    │
+    ▼
+    Message Received:
+    {
+      type: 'HAMZOOH_AUTO_TRIGGER',
+      url: 'https://linkedin.com/jobs/view/4492143199/'
+    }
+    │
+    ▼
+    if (message?.type === 'HAMZOOH_AUTO_TRIGGER') {
+      │
+      ├─► Check: sender.tab?.id exists? ✓
+      │
+      ├─► Check: isJobTab(sender.tab.id)? ✓
+      │   │
+      │   ├─► tabId === jobTabId? ✓
+      │   └─► OR extraJobTabIds.has(tabId)? ✓
+      │
+      └─► beginFill(sender.tab.id)
+    }
+
+    Console: "[Hamzooh Apply] Auto-trigger received from tab 1234567"
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 6: Filler Injection & Initialization                                      │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    background.js → beginFill(tabId)
+    │
+    ├─► Step 1: Inject filler.js
+    │   │
+    │   └─► chrome.scripting.executeScript({
+    │         target: { tabId, allFrames: true },
+    │         files: ['filler.js']
+    │       })
+    │
+    └─► Step 2: Send fill message
+        │
+        └─► chrome.tabs.sendMessage(tabId, {
+              type: 'HAMZOOH_BEGIN_FILL'
+            })
+
+    ▼
+
+    filler.js Loaded in Job Tab
+    │
+    │ window.addEventListener('message', (event) => {
+    │   if (event.data?.type === 'HAMZOOH_BEGIN_FILL') {
+    │     bootApply()
+    │   }
+    │ })
+    │
+    ▼
+    bootApply() Called
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 7: Form Filling Process                                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    filler.js → bootApply()
+    │
+    ├─► Step 1: Load Profile Data
+    │   │
+    │   └─► chrome.storage.local.get(['profile', 'pendingApply'])
+    │       Console: "[Hamzooh Filler] Profile data loaded"
+    │
+    ├─► Step 2: Load Resume
+    │   │
+    │   └─► chrome.runtime.sendMessage({ type: 'HAMZOOH_GET_RESUME' })
+    │       Console: "[Hamzooh Filler] Resume loaded from IndexedDB"
+    │
+    ├─► Step 3: Detect Form Fields
+    │   │
+    │   └─► document.querySelectorAll('input, select, textarea')
+    │       Console: "[Hamzooh Filler] Found 8 form fields"
+    │
+    ├─► Step 4: Fill Each Field
+    │   │
+    │   ├─► input[name="firstName"] = profile.firstName
+    │   │   Console: "[Hamzooh Filler] Filled: First Name = John"
+    │   │
+    │   ├─► input[name="lastName"] = profile.lastName
+    │   │   Console: "[Hamzooh Filler] Filled: Last Name = Doe"
+    │   │
+    │   ├─► input[name="email"] = profile.email
+    │   │   Console: "[Hamzooh Filler] Filled: Email = john@example.com"
+    │   │
+    │   └─► input[name="phone"] = profile.phone
+    │       Console: "[Hamzooh Filler] Filled: Phone = +1234567890"
+    │
+    ├─► Step 5: Attach Resume
+    │   │
+    │   └─► input[type="file"].files = [resumeFile]
+    │       Console: "[Hamzooh Filler] Attached resume: hamzooh-resume.pdf"
+    │
+    └─► Step 6: Report Progress
+        │
+        └─► chrome.runtime.sendMessage({
+              type: 'HAMZOOH_FILLER_PROGRESS',
+              step: 'complete',
+              filledCount: 4,
+              emptyCount: 0
+            })
+
+    Console: "[Hamzooh Filler] Form filling complete!"
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  STEP 8: Dashboard Updates                                                      │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    background.js receives HAMZOOH_FILLER_PROGRESS
+    │
+    │ relayToDashboard('HAMZOOH_APPLY_PROGRESS', {
+    │   step: 'complete',
+    │   filledCount: 4,
+    │   emptyCount: 0,
+    │   status: 'success'
+    │ })
+    │
+    ▼
+    chrome.tabs.sendMessage(dashboardTabId, message)
+    │
+    ▼
+    Dashboard (localhost:5173)
+    │
+    ├─► Updates progress bar
+    ├─► Shows "Application Complete" status
+    ├─► Displays filled fields count
+    └─► Shows next job in queue
+
+    User sees: "✅ Application submitted successfully!"
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  TIMELINE SUMMARY                                                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    T+0.0s   Campaign starts, job URL sent to extension
+    T+0.5s   Job page opens in new tab
+    T+1.0s   Page loads, auto-trigger.js initializes
+    T+1.5s   MutationObserver starts watching DOM
+    T+2.0s   User clicks "Easy Apply" button
+    T+2.1s   LinkedIn opens Easy Apply modal
+    T+2.2s   MutationObserver detects modal
+    T+2.3s   checkForEasyApply() returns true
+    T+3.3s   triggerAutoFill() called (1s delay)
+    T+3.4s   HAMZOOH_AUTO_TRIGGER message sent
+    T+3.5s   background.js receives message
+    T+3.6s   beginFill(tabId) called
+    T+3.7s   filler.js injected into tab
+    T+3.8s   HAMZOOH_BEGIN_FILL message sent
+    T+3.9s   bootApply() starts
+    T+4.0s   Profile data loaded
+    T+4.1s   Resume loaded from IndexedDB
+    T+4.2s   Form fields detected
+    T+5.0s   All fields filled (sequential)
+    T+5.5s   Resume file attached
+    T+6.0s   Progress reported to dashboard
+    T+6.1s   Form filling complete! ✅
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  MESSAGE TYPES REFERENCE                                                        │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ HAMZOOH_OPEN_JOB                                                       │
+    ├────────────────────────────────────────────────────────────────────────┤
+    │ From: Dashboard → Background                                           │
+    │ Purpose: Open job in new tab and store session                        │
+    │ Payload: { url, profile, resume, jobTitle, company, autoSubmit }     │
+    └────────────────────────────────────────────────────────────────────────┘
+
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ HAMZOOH_AUTO_TRIGGER (NEW!)                                            │
+    ├────────────────────────────────────────────────────────────────────────┤
+    │ From: auto-trigger.js → Background                                    │
+    │ Purpose: Notify that Easy Apply modal opened                          │
+    │ Payload: { url }                                                      │
+    └────────────────────────────────────────────────────────────────────────┘
+
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ HAMZOOH_BEGIN_FILL                                                     │
+    ├────────────────────────────────────────────────────────────────────────┤
+    │ From: Background → filler.js                                          │
+    │ Purpose: Start form filling process                                   │
+    │ Payload: { type: 'HAMZOOH_BEGIN_FILL' }                              │
+    └────────────────────────────────────────────────────────────────────────┘
+
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ HAMZOOH_GET_RESUME                                                     │
+    ├────────────────────────────────────────────────────────────────────────┤
+    │ From: filler.js → Background                                          │
+    │ Purpose: Fetch resume blob from IndexedDB                             │
+    │ Response: { ok, resumeBase64, resumeName }                           │
+    └────────────────────────────────────────────────────────────────────────┘
+
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │ HAMZOOH_FILLER_PROGRESS                                                │
+    ├────────────────────────────────────────────────────────────────────────┤
+    │ From: filler.js → Background → Dashboard                              │
+    │ Purpose: Report form filling progress                                 │
+    │ Payload: { step, message, status, filledCount, emptyCount }         │
+    └────────────────────────────────────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  SUCCESS INDICATORS                                                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    ✅ User Action Required: 2 clicks only
+       1. Click "Start Campaign" on dashboard
+       2. Click "Easy Apply" button on job page
+
+    ✅ Automatic Actions: 10+ steps
+       1. Job opens in new tab
+       2. auto-trigger.js loads
+       3. MutationObserver starts
+       4. Modal detected
+       5. Auto-trigger message sent
+       6. Background routes message
+       7. Filler injected
+       8. Profile loaded
+       9. Resume loaded
+       10. Form filled
+       11. Resume attached
+       12. Progress reported
+
+    ✅ Zero Manual Interventions:
+       ❌ No extension popup clicking
+       ❌ No "Fill with AI" button clicking
+       ❌ No manual field entry
+       ❌ No manual resume upload
+
+    ✅ 100% Automation Achieved! 🎯
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  NEXT STEPS                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+    1. Reload Extension
+       chrome://extensions → Hamzooh Apply → Reload icon ↻
+
+    2. Verify Version
+       Should show: v1.4.0 (not 1.3.0)
+
+    3. Test with Live Job
+       http://localhost:5173 → Start Campaign → Watch magic happen!
+
+    4. Monitor Console
+       Look for all messages in this flow diagram
+
+    5. Report Success! 🎉
+
+═══════════════════════════════════════════════════════════════════════════════════

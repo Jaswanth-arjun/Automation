@@ -105,5 +105,161 @@
       "name": "Nelluru Jaswanth"
     },
     "postedAt": "2026-11-18T07:34:56.400Z"
+  },
+  {
+    "id": "bf619ab9-9d57-4fe7-8c83-0369596c6ed7",
+    "logo": "https://logo.clearbit.com/jobs.twilio.com",
+    "role": "Software Engineer - Platform Engineering",
+    "company": "Twilio",
+    "filters": {
+      "experience": "Remote",
+      "visibility": "Confidential",
+      "workMode": "Remote",
+      "type": "Full Time",
+      "category": "Remote",
+      "location": "Remote",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "AI",
+      "C",
+      "Go",
+      "AWS",
+      "Docker",
+      "Kubernetes"
+    ],
+    "goodToHaveSkills": [
+      "Git",
+      "Operating Systems",
+      "Software Development",
+      "Debugging",
+      "Version Control",
+      "Problem-Solving"
+    ],
+    "applyLink": "https://jobs.twilio.com/careers/job/1099557142560",
+    "description": "At Twilio, we're shaping the future of communications, all from the comfort of our homes. We deliver innovative solutions to hundreds of thousands of businesses and empower millions of developers worldwide to craft personalized customer experiences.\nOur dedication to remote-first work, and strong culture of connection and global inclusion means that no matter your location, you're part of a vibrant team with diverse experiences making a global impact each day. As we continue to revolutionize how the world interacts, we're acquiring new skills and experiences that make work feel truly rewarding. Your career at Twilio is in your hands.\n.\nHiring and how we work\nWe use Artificial Intelligence (AI) to help make our hiring process efficient. That said, every hiring decision is made by real Twilions!\nAlso, while we are a remote-first company, you may be asked to report in person on an ad-hoc basis for team gatherings, functional off-sites or customer meetings.\n.\nSee yourself at Twilio\nJoin the team as Twilio's next Software Development Engineer 1 - Platform Engineering.\n\n## About the job\n\nThis position is needed to help operate, secure, and modernize Twilio's shared Kubernetes platform substrate (OTK, Segment, and ZipWhip EKS fleets) at scale.\nJoin our Cloud Native Container Operations team as an entry-level platform engineer. You will help manage over 1,000 Kubernetes clusters, tackling real-world multi-cloud complexity. This high-impact role offers structured mentorship from senior engineers, hands-on experience with modern automation tools, and a direct path to improving platform reliability. It is the perfect environment to launch your career in infrastructure engineering at a massive scale.\n\n## Responsibilities\n\nIn this role, you'll:\n• Assist in lifecycle management of cloud hosted Kubernetes platforms serving all of Twilio.\n• Remediate container and kernel-level CVE vulnerabilities to keep the shared substrate secure.\n• Write automation scripts in Go and Shell to streamline day-to-day cluster operations.\n• Collaborate with senior engineers to deploy infrastructure changes safely using Terraform and GitOps.\n• Troubleshoot basic platform issues, applying lessons learned to continuously improve system reliability.\n\n## Qualifications\n\n• Twilio values diverse experiences from all kinds of industries, and we encourage everyone who meets the required qualifications to apply.\n• If your career is just starting or hasn't followed a traditional path, don't let that stop you from considering Twilio.\n• We are always looking for people who will bring something new to the table!\n\n## Required\n\n• Bachelor’s degree in Computer Science, Engineering, or equivalent practical training.\n• Foundational programming skills in Go (Golang) and scripting with Shell.\n• Basic exposure to cloud environments, specifically AWS.\n• Familiarity with Infrastructure-as-Code concepts using Terraform and YAML.\n• Academic or internship exposure to containerization technologies like Docker or Kubernetes.\n• Practical understanding of version control (Git) and core software development life cycle (SDLC) concepts.\nDesired:\n• Familiarity with GitOps workflows and tools like ArgoCD.\n• Basic understanding of networking, operating systems, and distributed systems.\n• Experience using AI-assisted development tools (e.g., Claude Code) for coding or debugging.\n• Strong problem-solving skills and an eagerness to learn complex infrastructure concepts.\n\n## Location\n\nThis role will be remote, but is not eligible to be hired in CA, CT, NJ, NY, PA, WA.\nTravel\nWe prioritize connection and opportunities to build relationships with our customers and each other. For this role, you may be required to travel occasionally to participate in project or team in-person meetings.\n\n## What We Offer\n\n• Working at Twilio offers many benefits, including competitive pay, generous time off, ample parental and wellness leave, healthcare, a retirement savings program, and much more.\n• Offerings vary by location.\n\n## Compensation\n\n*Please note the salary range information provided applies only to candidates residing in California, Colorado, Hawaii, Illinois, Maryland, Massachusetts, Minnesota, New Jersey, New York, Vermont, Washington D.C., and Washington State due to local requirements. Compensation for candidates in other locations will be discussed during the hiring process. Please note that hiring for this role is not restricted to the locations listed above.\nThe estimated pay ranges for this role are as follows:\n• Based in Colorado, Hawaii, Illinois, Maryland (outside of the DC area), Massachusetts, Minnesota, or Vermont: $108,720.00 - $135,900.00.\n• Based in New York (outside of the New York City area), New Jersey (outside of the New York City area), Washington State (outside of the Seattle area), Washington D.C., Washington D.C. area, Maryland, or California (outside of the San Francisco Bay area): $115,120.00 - $143,900.00.\n• Based in California (within the San Francisco Bay area), New York (within the New York City area), New Jersey (within the New York City area), or Washington State (within the Seattle area): $127,920.00 - $159,900.00.\n• This role may be eligible to participate in Twilio’s equity plan and corporate bonus plan. All roles are generally eligible for the following benefits: health care insurance, 401(k) retirement account, paid sick time, paid personal time off, paid parental leave.\nThe successful candidate’s starting salary will be determined based on permissible, non-discriminatory factors such as skills, experience, and geographic location.\nApplications for this role are intended to be accepted until 11/25/2026, but may change based on business needs.\n.\nTwilio thinks big. Do you?\nWe like to solve problems, take initiative, pitch in when needed, and are always up for trying new things. That's why we seek out colleagues who embody our values -- something we call Twilio Magic. Additionally, we empower employees to build positive change in their communities by supporting their volunteering and donation efforts.\nSo, if you're ready to unleash your full potential, do your best work, and be the best version of yourself, apply now! If this role isn't what you're looking for, please consider other open positions.\n.\nWe care about your safety. Scammers sometimes impersonate Twilio recruiters through fake job postings, emails, websites, or messages. Please ensure you are engaging with an official @twilio.com email address. We will never ask for payment, gift cards, cryptocurrency, or banking information during the recruiting process. We do not make job offers without a formal interview process or conduct interviews exclusively through text-based messaging apps.\n.",
+    "sourceUrl": "https://jobs.twilio.com/careers/job/1099557142560",
+    "postedBy": {
+      "id": "usr_0747de3d0fb30f2d",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "nlr.jaswanth2004"
+    },
+    "postedAt": "2026-11-19T08:32:01.943Z"
+  },
+  {
+    "id": "d4b49213-9b29-456e-9ca7-ea6c5dd75f87",
+    "logo": "https://logo.clearbit.com/zebra.wd501.myworkdayjobs.com",
+    "role": "2027 (6 Month) Internship - (Bengaluru) Software Engineering",
+    "company": "Zebra",
+    "filters": {
+      "experience": "Freshers",
+      "visibility": "Confidential",
+      "workMode": "Bengaluru (Hybrid)",
+      "type": "Internship",
+      "category": "Freshers",
+      "location": "Bengaluru (Hybrid)",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "AI",
+      "Communication / Teamwork",
+      "Written and Verbal Communication",
+      "Verbal and Written Communication",
+      "Interpersonal Skills",
+      "Confidentiality"
+    ],
+    "goodToHaveSkills": [
+      "Integrity",
+      "Adaptability"
+    ],
+    "applyLink": "https://zebra.wd501.myworkdayjobs.com/Zebra_careers/job/Bengaluru-India/XMLNAME-2027--6-Month--Internship----Bengaluru--Software-Engineering_JR103862-1",
+    "description": "## Overview\n\nAt Zebra, we are a community of innovators who come together to create new ways of working. United by curiosity and a culture of caring, we develop smart solutions that anticipate our customer’s and partner’s needs and solve their challenges.\nBeing part of Zebra Nation means you are seen, heard, valued, and respected. Drawing from our unique perspectives, we collaborate to deliver on our purpose. Here you are part of a team pushing boundaries today to redefine the work of tomorrow for organizations, their employees, and those they serve.\nYou’ll have opportunities to learn and lead in a forward-thinking environment, defining your path to a fulfilling career while channeling your skills toward causes you care about—locally and globally.\nCome make an impact every day at Zebra.\nWhat We're Looking For:\nThe purpose of this internship is to prepare students for entry into the business world by providing a thorough understanding of the various functions of the Zebra Technologies organization. The program is designed to provide students with experiences that provide insights into a career with Zebra. Students will be positioned for success with training and hands-on experiences, invited to social and development activities, and provided a professional mentor relationship. Essential Duties and Responsibilities:\n• Develop planning, organizational and leadership skills\n• Increase technology knowledge and skills, especially as it relates to Zebra's product portfolio\n• Manage team-based work assignments\n• Practice interpersonal skills to connect with day-to-day business contacts through follow-up activities\nKey Skills and Competencies:\n• Communication Skills – Clear and effective verbal and written communication\n• Adaptability and Learning Agility – Willingness to learn quickly, embrace new tools or methods, and thrive in a dynamic, fast-paced environment\n• Technical Skills – Basic proficiency in Microsoft Office tools (e.g., Excel, Word, PowerPoint) and basic familiarity with technology solutions)\n• Integrity – Commitment to ethical behavior and confidentiality\nMinimum Education or Equivalent:\n• Concurrent enrollment in a degree-seeking post-secondary educational institution\nMinimum Work Experience:\n• 0 years of work experience\n\n## Benefits\n\n• We understand the importance of work-life balance and wellbeing, which is why we offer flexibility for our teams including: hybrid work, adaptable hours, Summer Flex Fridays, Focus Fridays, and an annual companywide well-being day to promote revitalization and success.\nJob Posting Statement:\n• To protect candidates from falling victim to online fraudulent activity involving fake job postings and employment offers, please be aware our recruiters will always connect with you via zebra.com email accounts.\n• Applications are only accepted through our applicant tracking system and only accept personal identifying information through that system.\n• Our Talent Acquisition team will not ask for you to provide personal identifying information via e-mail or outside of the system.\n• If you are a victim of identity theft contact your local police department.\nAI Technology Statement:",
+    "sourceUrl": "https://zebra.wd501.myworkdayjobs.com/Zebra_careers/job/Bengaluru-India/XMLNAME-2027--6-Month--Internship----Bengaluru--Software-Engineering_JR103862-1?fbclid=PAT01DUAVrmuNleHRuA2FlbQIxMABwZG9mAnNydGMGYXBwX2lkDzU2NzA2NzM0MzM1MjQyNwABp3ki7Olr71rKqR_GQ6pruJ9norJj1Bddtw9JW31noiJ6xuAlkIh_qfPP4DQ5_aem_YRz4HnRD5P4rdQyzG7i58Q",
+    "postedBy": {
+      "id": "usr_0747de3d0fb30f2d",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "nlr.jaswanth2004"
+    },
+    "postedAt": "2026-11-19T09:16:44.946Z"
+  },
+  {
+    "id": "a0fd8df8-99aa-44c2-bd32-e24915ce6e6f",
+    "logo": "https://static.licdn.com/aero-v1/sc/h/xlk678jv0tjp79pv10kglzkf",
+    "role": "Android Engineer Intern",
+    "company": "Carousell Group",
+    "filters": {
+      "experience": "Freshers",
+      "visibility": "Confidential",
+      "workMode": "Bengaluru, India",
+      "type": "Internship",
+      "category": "Freshers",
+      "location": "Bengaluru, India",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "AI",
+      ".NET",
+      "Java",
+      "JavaScript",
+      "Software Development",
+      "Communication / Teamwork"
+    ],
+    "goodToHaveSkills": [
+      "Android Platform Development",
+      "Integrity"
+    ],
+    "applyLink": "https://www.linkedin.com/jobs/view/4492143199/",
+    "description": "Expand search\nThis button displays the currently selected search type. When expanded it provides a list of search options that will switch the search inputs to match the current selection.\nPeople\nLearning\nClear text\nClear text\nClear text\nClear text\nClear text\nJoin now\nAndroid Engineer Intern - 6 months\nCarousell Group\nBengaluru, Karnataka, India\nAndroid Engineer Intern - 6 months\nCarousell Group\nBengaluru, Karnataka, India\n6 hours ago\nOver 200 applicants\nSee who Carousell Group has hired for this role\nJoin or sign in to save this job\nJoin to save Android Engineer Intern - 6 months at Carousell Group\nEmail or phone\nPassword\nShow\nForgot password?\nSign in with Email or\nNew to LinkedIn? Join now\nUse AI to assess how you fit\nGet AI-powered advice on this job and more exclusive features.\nAm I a good fit for this job?\nTailor my resume\nSign in to access AI-powered advices\nEmail or phone\nPassword\nShow\nForgot password?\nSign in with Email or\nNew to LinkedIn? Join now\nSign in to evaluate your skills\nEmail or phone\nPassword\nShow\nForgot password?\nSign in with Email or\nNew to LinkedIn? Join now\nSign in to tailor your resume\nEmail or phone\nPassword\nShow\nForgot password?\nSign in with Email or\nNew to LinkedIn? Join now\nCarousell Group is the leading multi-category platform for secondhand in Greater Southeast Asia on a mission to make secondhand the first choice. Founded in August 2012 in Singapore, the Group has a leading presence in seven markets under the brands Carousell, Carousell Media Group, Cho Tot, Laku6, LuxLexicon, Mudah.my, OneShift, REFASH and Revo Financial, serving tens of millions of monthly active users. Carousell is backed by leading investors including Telenor Group, Rakuten Ventures, Naver, STIC Investments, 500 Global and Peak XV Partners (formerly known as Sequoia Capital India).\nAs a team of passionate individuals working together to solve meaningful problems, there is so much more for you to discover in a career with Carousell. Our culture is made up of hiring, developing, and promoting people who embody our values of HEART, which is an acronym for Humility, Empathy, Accountability, Relentlessly resourceful and Teamwork. Together as an organisation, we make magic happen.\nPlease note that this is a 6-month internship role.\n\n## Job Description\n\nYou will{{{{:}}}}\n• Work closely with the product manager and designers to build new and key features for Carousell on Android that power the growth and success of buyers and sellers.\n• Analyze and optimize performance and reliability of the Android app by working closely with your Android teammates.\n• Focus on Android design principles and making the app works intuitively.\n• Take full ownership of projects from design discussion through to implementation and deployment.\n• Write clean, modular and functionally correct code with unit tests.\n• Analyze and optimize performance and reliability of the Android app.\n• Participate in code reviews to maintain a high-quality code culture.\n• Use AI-assisted development tools to boost your productivity and the quality of your code.\n\n## Qualifications\n\nYou have{{{{:}}}}\n• User obsession and empathy.\n• Drive and resourcefulness to persevere and overcome obstacles achieving challenging goals.\n• Focus on impact and results. You work on the right things and get them done.\n• High integrity and ability to positively collaborate with others\n• Experience developing Android applications (Kotlin)\n• Proven ability to ship beautiful, stable and high-performance Android applications from start to finish\n• Strong Computer Science background with good understanding of Android framework, best practices and design patterns.\n• Ability to deal with complexity and manage stakeholders like other client engineers, backend engineers, design and product team. Have a knack for good UX and design.\nAdditional Information\nPlease note that this is a 6-month internship role.\nShow less\nSeniority level\nInternship\nEmployment type\nInternship\nIndustries\nTechnology, Information and Internet\nReferrals increase your chances of interviewing at Carousell Group by 2x\nSee who you know\nGet notified when a new job is posted.\nSet alert\nSign in to set job alerts for “Android Developer” roles.\nEmail or phone\nPassword\nShow\nForgot password?\nSign in with Email or\nNew to LinkedIn? Join now\nMobile Application Developer jobs\nAndroid Engineer Intern - 6 months\nSoftware Engineer - Android\nSoftware Engineer - Android\nMotive\n• Bengaluru East\n• Karnataka\n• India\n1 day ago\nAndroid Developer\nAndroid Developer\nPhonePe\n• Bengaluru\n2 weeks ago\nSoftware Engineer II - Mobile Engineering - Android\nSoftware Engineer II - Mobile Engineering - Android\nSurveyMonkey\n5 days ago\nSoftware Engineer, App-Android\nSoftware Engineer, App-Android\nPhonePe\n2 weeks ago\nAndroid Developer\nAndroid Developer\nYulu\n3 weeks ago\nSoftware Engineer\nSoftware Engineer\nDocusign\n1 week ago\nAndroid Developer\nAndroid Developer\nAsymmetric Labs\nGreater Bengaluru Area\n6 days ago\nAndroid Developer\nAndroid Developer\nMathonGo\n• ₹1\n• 500\n• 000.00\n• ₹2\n• 000\n3 months ago\nSDE I – Android HMI App\nSDE I – Android HMI App\nSimple Energy\n3 weeks ago\nSoftware Development Engineer II - Android\nSoftware Development Engineer II - Android\nSafe Security\n2 weeks ago\nAndroid Developer\nAndroid Developer\nRecro\n3 weeks ago\nCustom Software Engineer\nCustom Software Engineer\nAccenture in India\n1 month ago\nSoftware Engineer II - Mobile Developer\nSoftware Engineer II - Mobile Developer\nTalkdesk\n1 week ago\nSW Development Engineer 2\nSW Development Engineer 2\nDexcom\n2 weeks ago\nSoftware Engineer (Java, Android/Kotlin/IOS/Javascript)\nSoftware Engineer (Java, Android/Kotlin/IOS/Javascript)\nMotorola Solutions\n21 hours ago\nSoftware Engineer - Android\nSoftware Engineer - Android\nDocusign\n2 weeks ago\nJunior Android Developer\nJunior Android Developer\nAsymmetric Labs\n1 week ago\nSoftware Engineering Intern - Client (Mobile)\nSoftware Engineering Intern - Client (Mobile)\nNudge\n1 week ago\nAndroid Developer\nAndroid Developer\nAppsForBharat\n1 week ago\n• Software Engineer III\n• Mobile\n• Android\nGoogle\n2 weeks ago\nAndroid Developer\nAndroid Developer\nQloron Pvt Ltd\n8 months ago\nAndroid Engineer (SDE 2)\nAndroid Engineer (SDE 2)\nKredivo Group\n1 day ago\nSoftware Engineer - Android Framework\nSoftware Engineer - Android Framework\nHARMAN India\n2 weeks ago\nSoftware Development Engineer II\nSoftware Development Engineer II\nJioStar\nGreater Bengaluru Area\n1 week ago\nAndroid Developer\nAndroid Developer\nCybernetyx\n1 year ago\nSoftware Engineering SMTS (Mobile Android iOS)\nSoftware Engineering SMTS (Mobile Android iOS)\nSalesforce\n3 weeks ago\nAndroid Developer\nAndroid Developer\n7-Eleven Global Solution Center – India\n1 week ago\nShow more jobs like this\nShow fewer jobs like this\nPeople also viewed\nAndroid Engineer\nAndroid Engineer\nStockGro\n4 weeks ago\nMobile Application Developer\nMobile Application Developer\nAvathon\n2 days ago\nAndroid Application Developer\nAndroid Application Developer\nSun Programs\n3 months ago\nSoftware Engineer II (Java, Android/Kotlin/IOS/Javascript)\nSoftware Engineer II (Java, Android/Kotlin/IOS/Javascript)\nMotorola Solutions\n2 weeks ago\nAndroid Developer\nAndroid Developer\nThompsons HR Consulting Pvt Ltd\n₹4.00\n₹6.00\n3 months ago\nSoftware Engineer-Android Framework\nSoftware Engineer-Android Framework\nHARMAN India\n1 week ago\nSoftware Engineer- Automotive Android SW Development\nSoftware Engineer- Automotive Android SW Development\nAptiv\n1 week ago\nAndroid SDK Developer\nAndroid SDK Developer\nVistas Ad Media Communications Pvt. Ltd.\n7 months ago\nAndroid Developer\nAndroid Developer\nSirixo Software Technologies Pvt Ltd\n6 months ago\nAndroid Engineer (Java / Kotlin) - Bengaluru\nAndroid Engineer (Java / Kotlin) - Bengaluru\nOmnissa\n2 weeks ago\nSimilar Searches\nMobile Application Developer jobs\n4,179 open jobs\nMobile Engineer jobs\n861 open jobs\niOS Developer jobs\n9,779 open jobs\nApplication Developer jobs\n21,665 open jobs\nDeveloper jobs\n73,513 open jobs\nJunior Application Developer jobs\n336 open jobs\nJ2Ee Developer jobs\n5,412 open jobs\nTelevision News Reporter jobs\n44 open jobs\nAssociate Software Quality Assurance Engineer jobs\n1,130 open jobs\nUnity Developer jobs\n851 open jobs\nFlex Developer jobs\n7,031 open jobs\nSenior Software Engineer jobs\n18,207 open jobs\nJoomla Developer jobs\n2,395 open jobs\nJava Software Engineer jobs\n11,988 open jobs\nJunior Java Developer jobs\n6,929 open jobs\nJava Application Developer jobs\n7,582 open jobs\nSoftware Engineer jobs\n59,663 open jobs\nAssociate Application Developer jobs\n23 open jobs\nGame Developer jobs\n507 open jobs\nOnline Marketing Executive jobs\n1,045 open jobs\nJunior Developer jobs\n5,889 open jobs\nDotnet Developer jobs\n8,372 open jobs\nLead Application Developer jobs\n7,956 open jobs\nJunior Dotnet Developer jobs\n3,317 open jobs\nMagento Developer jobs\n4,113 open jobs\nShow less\nExplore top content on LinkedIn\nFind curated pos",
+    "sourceUrl": "https://www.linkedin.com/jobs/view/4492143199/",
+    "postedBy": {
+      "id": "usr_0747de3d0fb30f2d",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "nlr.jaswanth2004"
+    },
+    "postedAt": "2026-11-19T15:52:33.752Z"
+  },
+  {
+    "id": "fb6cb082-21bb-408e-ac59-012a3941e54f",
+    "logo": "https://static.licdn.com/aero-v1/sc/h/xlk678jv0tjp79pv10kglzkf",
+    "role": "Intern- Mobile Application Development at PARQIS — India",
+    "company": "PARQIS",
+    "filters": {
+      "experience": "Remote",
+      "visibility": "Confidential",
+      "workMode": "Remote",
+      "type": "Internship",
+      "category": "Remote",
+      "location": "Remote",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "JavaScript",
+      "TypeScript",
+      "Debugging"
+    ],
+    "goodToHaveSkills": [
+      "Java",
+      "Android Platform Development",
+      "Application Development",
+      "React",
+      "Linux/UNIX"
+    ],
+    "applyLink": "https://www.linkedin.com/jobs/view/4491696492/",
+    "description": "Intern- Mobile Application Development in Hyderabad\nExpand search\nJoin now\nIntern- Mobile Application Development\nPARQIS India\n1 hour ago Be among the first 25 applicants\n\nSee who PARQIS has hired for this role\n\nDirect message the job poster from PARQIS\n\nAradhya Choubey\nAradhya Choubey\n\nMobile app development Intern\n\nInternship | Remote | 2 months | No Stipend\n\n## About PARQIS\n\nPARQIS is India’s only video-first curated marketplace connecting Gen Z and millennial consumers with verified Indian brands. The platform enables a seamless journey from content discovery to purchase, all within a single, engaging experience. As a growing startup, PARQIS works closely with brands to deliver authentic and high-quality products, with a strong focus on innovation and user engagement.\n\nThe Opportunity\n\nWe are looking for a resourceful Mobile App Developer to bring our fully functional, responsive web platform to the Google Play Store and Apple App Store. Instead of rebuilding our platform from scratch, your primary objective is to build a high-performance native wrapper app (WebView container) around our existing web infrastructure. You will design a secure mobile shell, integrate native device features, and own the end-to-end deployment pipeline.\n\nWhat We Are Building\n\nA cross-platform mobile application (iOS and Android) that securely hosts and displays our responsive web platform using a full-screen, native web-view container. A hybrid experience that blends our web-based features with essential native mobile utilities. We want to explore the best architectural path for this wrapper—whether that means leveraging a unified framework like CapacitorJS or React Native, or utilizing an optimized PWA + TWA (Trusted Web Activity) approach where supported.\n\n## Key Responsibilities\n\nApp Containerization: Build and maintain the mobile application shell targeting both iOS and Android platforms.\n\n• Native Feature Integration: Implement device-level features over the web interface, such as native push notifications, secure local biometrics (FaceID/TouchID), smooth splash screens, and hardware back-button handling.\n\n• UI/UX Polishing: Optimize the web-to-mobile user flow, addressing safe-area layouts (camera notches, bottom gesture bars) and ensuring seamless session and checkout management.\n\n• App Store Publishing: Own the end-to-end deployment lifecycle on the Apple App Store and Google Play Store—handling provisioning profiles, signing certificates, build submissions, and navigating the app review process to ensure store compliance.\n\n## Qualifications & Skills\n\n• Mobile Development Experience: Proven track record of packaging and deploying mobile applications using hybrid or cross-platform web-wrapper approaches (such as CapacitorJS, React Native, or automated PWA to TWA container pipelines).\n\nWeb Foundations: Strong proficiency in core web technologies (JavaScript/TypeScript, HTML5, CSS3) and mobile-first frontend responsiveness.\n\nPlatform SDK Tools: Hands-on experience building, debugging, and archiving binaries inside Xcode and Android Studio.\n\n• Store Publishing Success: Direct experience navigating the Google Play Console and Apple Developer portal, including managing TestFlight beta tracks and resolving store review feedback.\n\n## Preferred/Nice-to-Have\n\nExperience adapting embedded browser engines to handle external checkouts and third-party social authentication (OAuth) constraints.\n\nFamiliarity with writing lightweight native code (Swift, Kotlin, or Java) if a custom bridge plugin required.\n\nWhat You’ll Gain\n\nHands-on experience building and deploying real-world mobile applications for iOS & Android\n\n• Exposure to hybrid app architectures using WebView\n• PWA + TWA\n• and native integrations\n\nPractical experience with app publishing workflows on Google Play Store & Apple App Store\n\nOpportunity to contribute to a live consumer-facing platform used by Gen Z and millennial audiences\n\nPPO opportunity based on performance and contribution.\n\nSeniority level\nInternship\nEmployment type\nInternship\nIndustries\nTechnology, Information and Internet\n\nReferrals increase your chances of interviewing at PARQIS by 2x\n\nSee who you know\nGet notified when a new job is posted.\nSet alert\nSenior Application Developer jobs\nIntern- Mobile Application Development\nMobile Application Developer\nRemote/App Developer Team\nIndia\n1 month ago\nMobile Application Developer\nMobile Application Developer hotsourced\nIndia\n2 weeks ago\nMobile App Developer (Remote)\nMobile App Developer (Remote)\nRightangled\n• Bengaluru\n• Karnataka\n• India\n5 days ago\nMobile App Developer (Remote)\nMobile App Developer (Remote)\nRightangled\nDelhi, India\n5 days ago\nMobile Engineer (Flutter)\nMobile Engineer (Flutter)\nTarkio\nIndia\n2 weeks ago\nMobile Engineer - React Native (100% Remote)\nMobile Engineer - React Native (100% Remote)\nTether.io\nIndia\n1 month ago\nShow more jobs like this\nPeople also viewed\nExternal Intern\nExternal Intern\n\nHewlett Packard Enterprise\n\n13 hours ago\nFlutter Developer\n\nGlobalShiksha.com\n\n• ₹400\n• 000 - ₹1\n• 000\n1 year ago\nMobile Application Developer\nMobile Application Developer\n\n## Aivi\n\nBengaluru, Karnataka, India\n1 week ago iOS Developer iOS Developer\n\nDofin\n\nIndia\n₹250,000 - ₹300,000\n1 year ago\nSenior Mobile Software Engineer (iOS / Android), Identity & Security - India\nSenior Mobile Software Engineer (iOS / Android), Identity & Security - India\n\nJumpCloud\n\nBengaluru East, Karnataka, India\n2 weeks ago\nMobile Developer\nMobile Developer\n\nKodo\n\nMumbai Metropolitan Region\n2 months ago\nFlutter UI Developer\nFlutter UI Developer\n\nTechPranee\n\nHyderabad, Telangana, India\n₹200,000 - ₹300,000\n1 year ago\nMobile Engineer\nMobile Engineer\n\nGlomo\n\nBengaluru, Karnataka, India\n3 months ago\nMobile Application Developer\nMobile Application Developer\n\nXencia Technology Solutions\n\nKochi, Kerala, India\n3 weeks ago\nReact Native Developer\nReact Native Developer\n\nWing Assistant\n\nGreater Delhi Area\n$830 - $1,670\n10 months ago\nSimilar Searches\nSenior Application Developer jobs\n13,891 open jobs\nElectrical Software Engineer jobs\n49,440 open jobs\nJunior Application Developer jobs\n336 open jobs\nSharepoint Developer jobs\n434 open jobs\nMobile Application Developer jobs\n4,179 open jobs\nDynamics Developer jobs\n3,533 open jobs\nJava Application Developer jobs\n7,582 open jobs\nWeb Application Developer jobs\n10,986 open jobs\nLead Application Developer jobs\n7,956 open jobs\nAndroid Developer jobs\n14,001 open jobs\nUnix Developer jobs\n520 open jobs\nMicrosoft Developer jobs\n1,061 open jobs\nExplore top content on LinkedIn\n\nFind curated posts and insights for relevant topics all in one place.\n\nView top content\nMore searches\n\n## About\n\nUser Agreement\nBrand Policy\nGuest Controls\nCommunity Guidelines\nLanguage\nYou’re signed out\nSign in for the full experience.\nSign in Join now",
+    "sourceUrl": "https://www.linkedin.com/jobs/view/4491696492/",
+    "postedBy": {
+      "id": "usr_0747de3d0fb30f2d",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "nlr.jaswanth2004"
+    },
+    "postedAt": "2026-11-20T08:03:54.375Z"
   }
 ]

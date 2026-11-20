@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hamzooh Apply · Phase 0 Test Harness</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; padding: 24px;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.sub { margin: 0 0 18px; color: #94a3b8; font-size: 13px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    button {
+      border: 0; border-radius: 8px; padding: 9px 14px; font-weight: 600; font-size: 13px;
+      background: #009688; color: #fff; cursor: pointer;
+    }
+    button.secondary { background: #1e293b; color: #cbd5e1; border: 1px solid #334155; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .status { font-size: 13px; color: #cbd5e1; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #1e293b; vertical-align: top; }
+    th { color: #94a3b8; font-weight: 600; position: sticky; top: 0; background: #0f172a; }
+    tr.pass td { background: rgba(16, 185, 129, .08); }
+    tr.fail td { background: rgba(239, 68, 68, .08); }
+    tr.needs td { background: rgba(245, 158, 11, .08); }
+    .pill { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .pill.ok { background: #065f46; color: #a7f3d0; }
+    .pill.bad { background: #7f1d1d; color: #fecaca; }
+    .pill.warn { background: #78350f; color: #fde68a; }
+    .wrap { overflow: auto; max-height: 70vh; border: 1px solid #1e293b; border-radius: 10px; }
+    code { font-size: 11px; color: #93c5fd; word-break: break-all; }
+    #log { margin-top: 14px; background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; height: 150px; overflow: auto; font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Hamzooh Apply — Phase 0 harness (dry run)</h1>
+  <p class="sub">
+    Fills every reachable job form but never submits. Each run ends with
+    <code>REVIEW_READY</code>, a specific failure code, or times out at 6 minutes.
+    The same page is also driven by <code>scratch/harness-runner.mjs</code> when Chrome blocks <code>--load-extension</code>.
+  </p>
+  <div class="toolbar">
+    <button id="run">Run all 30 URLs</button>
+    <button id="stop" class="secondary" disabled>Stop</button>
+    <button id="dl-json" class="secondary" disabled>Download JSON</button>
+    <button id="dl-csv" class="secondary" disabled>Download CSV</button>
+    <button id="dl-logs" class="secondary" disabled>Download run logs</button>
+    <span id="status" class="status">Idle</span>
+  </div>
+  <div class="wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>ATS</th><th>URL</th><th>Terminal</th><th>Code</th>
+          <th>Form</th><th>Detected</th><th>Filled</th><th>Resume</th><th>Next</th><th>Review</th><th>Reason</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div id="log"></div>
+  <script src="test-runner.js"></script>
+</body>
+</html>

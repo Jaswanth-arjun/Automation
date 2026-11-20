@@ -7,9 +7,7 @@
     "batch": "2023",
     "institution": "N.B.K.R. Institute of Science and Technology, Tirupati CGPA: 7.5/10",
     "skills": [
-      "JavaScript",
       "Python",
-      "SQL",
       "Java",
       "C",
       "React",
@@ -17,17 +15,18 @@
       "Microservices",
       "Spring Boot",
       "MySQL",
-      "MongoDB",
       "Git",
       "GitHub",
-      "Docker",
-      "Postman",
+      "Debugging",
       "OOP",
+      "AI Agents",
+      "Version Control",
       "PHP",
+      "Flutter",
       "CI"
     ],
     "registeredAt": "2026-11-18T04:33:19.005Z",
-    "lastActiveAt": "2026-11-18T16:46:16.452Z"
+    "lastActiveAt": "2026-11-20T08:32:47.476Z"
   },
   {
     "id": "05152a76-bdf5-41c9-a048-01e5c66a2cd5",
@@ -38,6 +37,25 @@
     "institution": "",
     "skills": [],
     "registeredAt": "2026-11-18T04:33:02.646Z",
-    "lastActiveAt": "2026-11-19T05:09:02.485Z"
+    "lastActiveAt": "2026-11-19T13:03:55.481Z"
+  },
+  {
+    "id": "25c5229e-a4d3-404b-83fb-db2de966aa64",
+    "email": "test@example.com",
+    "fullName": "Nelluru Jaswanth",
+    "phone": "+91 9000000000",
+    "batch": "2027",
+    "institution": "Sree Venkateswara College of Engineering",
+    "skills": [
+      "Python",
+      "React",
+      "AI",
+      "OOP",
+      "Communication / Teamwork",
+      "Data Structures",
+      "JavaScript"
+    ],
+    "registeredAt": "2026-11-19T07:05:55.762Z",
+    "lastActiveAt": "2026-11-19T07:10:32.751Z"
   }
 ]

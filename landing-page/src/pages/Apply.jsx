@@ -1231,6 +1231,148 @@ ${firstName}`;
 
   // Vision AI auto-apply: the backend opens its own Chrome window, looks at the
   // screen with GPT-6-Luna and performs trusted mouse/keyboard actions.
+  // ── Backend train / replay flow ──────────────────────────────────────────
+  const loadApplyAnswers = async () => {
+    let answers = {};
+    try {
+      const r = await fetch('http://localhost:3000/api/vault/answers').then((res) => res.json());
+      answers = r.answers || {};
+    } catch {}
+    try { answers = { ...answers, ...JSON.parse(localStorage.getItem('hamzooh_apply_answers') || '{}') }; } catch {}
+    return answers;
+  };
+
+  const beginBackendRun = () => {
+    setAutoApplying(true);
+    setAutoApplyProgress([]);
+    setAutoApplyResult(null);
+    setShowAutoApplyModal(true);
+    setNeedsUser(null);
+  };
+
+  const applyLink = () => [job?.applyLink, job?.url, job?.sourceUrl]
+    .map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
+
+  const pollBackendRun = (statusPath, kind) => {
+    let lastStepCount = 0;
+    let consecutiveErrors = 0;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(statusPath);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const status = await res.json();
+        consecutiveErrors = 0;
+        const run = status.run;
+        if (!run) return;
+        const newSteps = (run.steps || []).slice(lastStepCount);
+        lastStepCount = (run.steps || []).length;
+        if (newSteps.length) {
+          setAutoApplyProgress((prev) => [...prev, ...newSteps.map((s) => ({
+            step: s.step, message: s.message, timestamp: s.t || Date.now(),
+          }))].slice(-80));
+        }
+        if (run.status !== 'RUNNING') {
+          clearInterval(poll);
+          setAutoApplying(false);
+          const isTrain = kind === 'train';
+          const finalStatus = run.status === 'SUBMITTED' || run.status === 'TRAINED'
+            ? 'submitted' : run.status === 'NEEDS_USER' ? 'needs_attention' : 'failed';
+          const filled = run.result?.filledFields || [];
+          setAutoApplyResult({
+            status: finalStatus,
+            message: run.result?.message || `${isTrain ? 'Training' : 'Auto apply'} finished: ${run.status}`,
+            filledFields: filled.map((f) => f.label || f),
+            filledCount: filled.length,
+          });
+          if (isTrain && run.result?.blueprint) {
+            setTrainNotice(`🎓 AI learned this portal: ${run.result.blueprint.fieldCount || 0} fields across ${run.result.blueprint.steps?.length || 0} steps. Future similar links will auto-fill with your details — no manual help.`);
+          } else if (finalStatus === 'needs_attention' && run.result?.message) {
+            setNeedsUser({
+              reasonCode: run.result.reasonCode || run.status,
+              message: run.result.message,
+              question: '',
+              runId: run.runId,
+            });
+          }
+        }
+      } catch (err) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= 4) {
+          clearInterval(poll);
+          setAutoApplying(false);
+          setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+        }
+      }
+    }, 2500);
+  };
+
+  // Auto Apply: use a learned blueprint when available; otherwise live AI vision.
+  const handleAutoApply = async () => {
+    const link = applyLink();
+    if (!link) { alert('This job has no application URL.'); return; }
+    beginBackendRun();
+    try {
+      const answers = await loadApplyAnswers();
+      const payload = {
+        url: link,
+        profile: { ...(profile || {}), jobTitle: job?.title || job?.role || '', company: job?.company || '' },
+        answers,
+        resumeBase64: tailoredPdfBase64 || '',
+        resumeName: tailoredFileName || '',
+      };
+      let res = await fetch('http://localhost:3000/api/auto-apply-blueprint', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      let data = await res.json();
+      if (res.ok && data.ok) {
+        setAutoApplyProgress([{ step: 'blueprint_started', message: data.learnedNow
+          ? `🧠 First time on ${data.domain} — learning the flow, then filling with your details automatically…`
+          : `🧠 Using the learned playbook for ${data.domain} — filling with your details automatically…`, timestamp: Date.now() }]);
+        pollBackendRun(`http://localhost:3000/api/auto-apply-blueprint/${data.runId}`, 'replay');
+        return;
+      }
+      // No blueprint yet — fall back to the live vision agent.
+      setAutoApplyProgress([{ step: 'vision_started', message: '👁️ No saved playbook yet — Vision AI is filling the application live…', timestamp: Date.now() }]);
+      res = await fetch('http://localhost:3000/api/auto-apply-vision', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Auto apply could not start.');
+      pollBackendRun(`http://localhost:3000/api/auto-apply-vision/${data.runId}`, 'vision');
+    } catch (err) {
+      setAutoApplying(false);
+      setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+    }
+  };
+
+  // Train: walk this link once and remember the flow for future similar links.
+  const handleTrainLink = async () => {
+    const link = applyLink();
+    if (!link) { alert('This job has no application URL.'); return; }
+    beginBackendRun();
+    setTrainNotice('');
+    try {
+      const answers = await loadApplyAnswers();
+      const res = await fetch('http://localhost:3000/api/train-link', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          url: link,
+          profile: { ...(profile || {}), jobTitle: job?.title || job?.role || '', company: job?.company || '' },
+          answers,
+          resumeBase64: tailoredPdfBase64 || '',
+          resumeName: tailoredFileName || '',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Training could not start.');
+      setAutoApplyProgress([{ step: 'train_started', message: '🎓 AI is walking this application once to learn its flow…', timestamp: Date.now() }]);
+      pollBackendRun(`http://localhost:3000/api/train-link/${data.trainId}`, 'train');
+    } catch (err) {
+      setAutoApplying(false);
+      setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+    }
+  };
+
   const handleVisionApply = async () => {
     const link = [job?.applyLink, job?.url, job?.sourceUrl].map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
     if (!link) {
@@ -1382,6 +1524,9 @@ ${firstName}`;
     totalKeywords,
   });
   const failedChecks = resumeChecks.filter((check) => !check.ok);
+  // Tailor summary card: one label column, one row of same-sized actions per target.
+  const tailorGroupLabel = { width: '96px', flexShrink: 0, fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#8a8f88' };
+  const tailorActionBtn = { padding: '0 13px', height: '34px', fontSize: '12.5px', fontWeight: '700', gap: '6px', borderRadius: '9px' };
 
   const jobProgress = applyProgressStore.get(jobId || job?.id);
   const resumeReady = Boolean(tailorResult || jobResume);
@@ -2499,18 +2644,15 @@ ${firstName}`;
           </div>
 
           {/* Tailor action box */}
-          <div style={{ border: tailorResult ? '1px solid #bbf7d0' : '2px dashed #445cf5', borderRadius: '14px', padding: '22px 24px', textAlign: 'center', background: tailorResult ? '#f0fdf4' : '#f8f9ff', marginBottom: '20px' }}>
-            {tailorResult ? <CheckCircle2 size={30} style={{ color: '#059669', marginBottom: '8px' }} /> : <Sparkles size={30} style={{ color: '#445cf5', marginBottom: '8px' }} />}
-            <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#171817', margin: '0 0 6px' }}>
-              {tailorResult ? 'Resume Tailored & Optimized!' : `Tailor Resume for ${job.title}`}
-            </h3>
-            <p style={{ fontSize: '13px', color: '#555852', maxWidth: '560px', margin: '0 auto 14px' }}>
-              {tailorResult
-                ? `Your resume is aligned with ${job.company}'s target keywords. Review the resume report below, then continue to the referral email.`
-                : 'Click below to re-align your resume highlights with the job description and cover more of its keywords.'}
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {!tailorResult ? (
+            <div style={{ border: '2px dashed #445cf5', borderRadius: '14px', padding: '22px 24px', textAlign: 'center', background: '#f8f9ff', marginBottom: '20px' }}>
+              <Sparkles size={30} style={{ color: '#445cf5', marginBottom: '8px' }} />
+              <h3 style={{ fontSize: '16px', fontWeight: '800', color: '#171817', margin: '0 0 6px' }}>
+                Tailor Resume for {job.title}
+              </h3>
+              <p style={{ fontSize: '13px', color: '#555852', maxWidth: '560px', margin: '0 auto 14px' }}>
+                Click below to re-align your resume highlights with the job description and cover more of its keywords.
+              </p>
               <button
                 className="btn-accent"
                 onClick={handleTailorResume}
@@ -2518,99 +2660,103 @@ ${firstName}`;
                 style={{ padding: '11px 22px', fontSize: '13.5px', gap: '8px' }}
               >
                 {isTailoring ? <RefreshCw size={16} className="spin" /> : <Sparkles size={16} />}
-                {isTailoring ? 'Optimizing Resume...' : tailorResult ? 'Re-Tailor Resume' : 'Tailor Resume Now'}
+                {isTailoring ? 'Optimizing Resume...' : 'Tailor Resume Now'}
               </button>
-              {tailorResult && (
-                <>
-                  <button
-                    className="btn-ghost"
-                    onClick={handleViewTailored}
-                    style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
-                  >
-                    <Eye size={16} /> View
-                  </button>
-                  <button
-                    className="btn-ghost"
-                    onClick={() => setEditorState({ formatId, format: chosenFormat })}
-                    style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
-                  >
-                    <Pencil size={16} /> Edit
-                  </button>
-                  <button
-                    className="btn-ghost"
-                    onClick={handleDownloadTailored}
-                    style={{ padding: '11px 18px', fontSize: '13.5px', gap: '8px' }}
-                  >
-                    <Download size={16} /> Download PDF
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    onClick={handleGenerateCoverLetter}
-                    disabled={isGeneratingCoverLetter}
-                    title={coverLetter ? "Re-generate cover letter" : "Generate a 1-page tailored cover letter for this role"}
-                    style={{
-                      padding: '11px 18px',
-                      fontSize: '13.5px',
-                      gap: '8px',
-                      background: coverLetter ? '#f5f3ff' : '#f0fdf4',
-                      borderColor: coverLetter ? '#c7d2fe' : '#86efac',
-                      color: coverLetter ? '#4f46e5' : '#15803d',
-                      fontWeight: '700'
-                    }}
-                  >
-                    {isGeneratingCoverLetter ? <RefreshCw size={16} className="spin" /> : <FileText size={16} />}
-                    {isGeneratingCoverLetter ? 'Generating Cover Letter...' : coverLetter ? 'Re-Generate Cover Letter' : 'Generate Cover Letter'}
-                  </button>
-                  {coverLetter && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        onClick={() => { setCoverLetterModalMode('view'); setShowCoverLetterModal(true); }}
-                        style={{ padding: '11px 16px', fontSize: '13.5px', gap: '6px', color: '#047857', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: '700' }}
-                      >
-                        <Eye size={16} /> View Cover Letter
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        onClick={() => { setCoverLetterModalMode('edit'); setShowCoverLetterModal(true); }}
-                        style={{ padding: '11px 16px', fontSize: '13.5px', gap: '6px', color: '#4338ca', borderColor: '#c7d2fe', background: '#eef2ff', fontWeight: '700' }}
-                      >
-                        <Pencil size={16} /> Edit Cover Letter
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
             </div>
-
-            {coverLetter && (
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: '#fefce8',
-                border: '1px solid #fde047',
-                borderRadius: '20px',
-                padding: '6px 16px',
-                fontSize: '12px',
-                fontWeight: '700',
-                color: '#854d0e',
-                marginTop: '12px'
-              }}>
-                <Sparkles size={14} style={{ color: '#ca8a04' }} />
-                <span>1-Page Cover Letter tailored for {job?.title} at {job?.company} ready!</span>
+          ) : (
+            <div style={{ border: '1px solid #dcefdf', borderRadius: '14px', background: '#ffffff', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 1px 2px rgba(16, 24, 40, 0.04)' }}>
+              {/* Status header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', padding: '15px 20px', background: '#f4fbf5', borderBottom: '1px solid #e6f3e9' }}>
+                <span style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <CheckCircle2 size={19} style={{ color: '#059669' }} />
+                </span>
+                <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                  <div style={{ fontSize: '14.5px', fontWeight: '800', color: '#14532d', lineHeight: 1.3 }}>
+                    Resume tailored &amp; optimized
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#4f6b57', lineHeight: 1.45, marginTop: '2px' }}>
+                    Aligned with {job.company}'s job keywords. Review the report below, then continue to the referral email.
+                  </div>
+                </div>
+                {totalKeywords ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#ffffff', border: '1px solid #cdebd6', borderRadius: '999px', padding: '5px 12px', fontSize: '11.5px', fontWeight: '700', color: '#15803d', whiteSpace: 'nowrap' }}>
+                    <Target size={12} /> {matchedCount}/{totalKeywords} keywords
+                  </span>
+                ) : null}
               </div>
-            )}
 
-            {tailorError && (
-              <div role="alert" style={{ marginTop: '14px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', color: '#991b1b', fontSize: '12.5px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                <AlertCircle size={15} /> {tailorError}
+              {/* Actions, grouped by what they act on */}
+              <div style={{ padding: '14px 20px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={tailorGroupLabel}>Resume</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: '1 1 260px' }}>
+                    <button className="btn-accent" onClick={handleDownloadTailored} style={tailorActionBtn}>
+                      <Download size={15} /> Download PDF
+                    </button>
+                    <button className="btn-ghost" onClick={handleViewTailored} style={tailorActionBtn}>
+                      <Eye size={15} /> View
+                    </button>
+                    <button className="btn-ghost" onClick={() => setEditorState({ formatId, format: chosenFormat })} style={tailorActionBtn}>
+                      <Pencil size={15} /> Edit
+                    </button>
+                    <button className="btn-ghost" onClick={handleTailorResume} disabled={isTailoring} style={{ ...tailorActionBtn, marginLeft: 'auto' }}>
+                      {isTailoring ? <RefreshCw size={15} className="spin" /> : <Sparkles size={15} />}
+                      {isTailoring ? 'Re-tailoring...' : 'Re-tailor'}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ height: '1px', background: '#eef2ee', margin: '12px 0' }} />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={tailorGroupLabel}>Cover letter</span>
+                  {coverLetter ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: '1 1 260px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '999px', padding: '4px 10px', fontSize: '11px', fontWeight: '700', color: '#047857' }}>
+                        <CheckCircle2 size={12} /> Ready
+                      </span>
+                      <button className="btn-ghost" onClick={() => { setCoverLetterModalMode('view'); setShowCoverLetterModal(true); }} style={tailorActionBtn}>
+                        <Eye size={15} /> View
+                      </button>
+                      <button className="btn-ghost" onClick={() => { setCoverLetterModalMode('edit'); setShowCoverLetterModal(true); }} style={tailorActionBtn}>
+                        <Pencil size={15} /> Edit
+                      </button>
+                      <button
+                        className="btn-ghost"
+                        onClick={handleGenerateCoverLetter}
+                        disabled={isGeneratingCoverLetter}
+                        title="Generate a fresh cover letter for this role"
+                        style={{ ...tailorActionBtn, marginLeft: 'auto' }}
+                      >
+                        {isGeneratingCoverLetter ? <RefreshCw size={15} className="spin" /> : <FileText size={15} />}
+                        {isGeneratingCoverLetter ? 'Regenerating...' : 'Regenerate'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        className="btn-ghost"
+                        onClick={handleGenerateCoverLetter}
+                        disabled={isGeneratingCoverLetter}
+                        title="Generate a 1-page tailored cover letter for this role"
+                        style={{ ...tailorActionBtn, color: '#4338ca', borderColor: '#c7d2fe', background: '#f5f3ff' }}
+                      >
+                        {isGeneratingCoverLetter ? <RefreshCw size={15} className="spin" /> : <FileText size={15} />}
+                        {isGeneratingCoverLetter ? 'Generating cover letter...' : 'Generate cover letter'}
+                      </button>
+                      <span style={{ fontSize: '11.5px', color: '#8a8f88' }}>1 page, written for this role</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {tailorError && (
+            <div role="alert" style={{ marginBottom: '20px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', color: '#991b1b', fontSize: '12.5px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={15} /> {tailorError}
+            </div>
+          )}
 
           {tailorResult && (
             <>
@@ -3008,7 +3154,7 @@ ${firstName}`;
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 className="btn-accent"
-                onClick={() => handleProceedDirectApply(false)}
+                onClick={handleAutoApply}
                 disabled={autoApplying || submitted}
                 style={{ 
                   background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
@@ -3029,9 +3175,9 @@ ${firstName}`;
 
               <button
                 type="button"
-                onClick={() => handleProceedDirectApply(true)}
+                onClick={handleTrainLink}
                 disabled={autoApplying || submitted}
-                title="Teach the AI how to apply on this portal by demonstrating it once. The AI records every action so future similar jobs apply with 100% accuracy!"
+                title="AI walks this application once, learns its fields and steps, then auto-fills future similar jobs with your details — no manual help."
                 style={{
                   background: 'transparent',
                   color: '#22a65b',

@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import net from 'net';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
 import multer from 'multer';
@@ -15,7 +16,8 @@ import { handleRagChat } from './lib/rag-assistant.js';
 import { askFreeLLM, askNara, askNvidia, askRadox } from './lib/ai-provider.js';
 import { AutoApplyEngine } from './lib/auto-apply-engine.js';
 import { VisionAgent } from './lib/vision-agent.js';
-import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, normalizeQuestion, saveVaultCredential, findVaultCredential } from './lib/vault-manager.js';
+import { BlueprintEngine } from './lib/blueprint-engine.js';
+import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, saveVaultCredential, findVaultCredential } from './lib/vault-manager.js';
 import { inferFromProfile } from './lib/apply-intelligence.js';
 
 import nodemailer from 'nodemailer';
@@ -23,7 +25,7 @@ import puppeteer from 'puppeteer-core';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
-import { fillPageGaps, fitResumeToOnePage, mergeWithBaseline, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
+import { fillPageGaps, fitResumeToOnePage, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
 import { renderCoverLetterPdf } from './lib/cover-letter-pdf.js';
 import { extractJobPostingJsonLd, extractJobPostingDescriptionHtml, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
@@ -31,15 +33,12 @@ import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import { registerBillingRoutes } from './lib/billing/routes.js';
-import {
-  accessForUser, accessFromRequest, applyContactAccess, consumeFeature, guardFeature,
-  isAdminUser, resolveUser, upgradePayload,
-} from './lib/billing/entitlements.js';
-import { CAMPAIGN_REQUESTS, FEATURE_KEYS } from './lib/billing/plans.js';
-import { createSession, getSettings, upsertUser } from './lib/billing/store.js';
+import { accessForUser, accessFromRequest, applyContactAccess, consumeFeature, guardFeature, resolveUser, upgradePayload } from './lib/billing/entitlements.js';
+import { FEATURE_KEYS } from './lib/billing/plans.js';
+import { createSession, upsertUser } from './lib/billing/store.js';
 import { campaignStore } from './lib/campaign-store.js';
 import { ReferralCampaignEngine } from './lib/referral-campaign-engine.js';
-import { connectMongo, isMongoActive, CandidateModel, BroadcastModel } from './lib/mongodb.js';
+import { connectMongo, isMongoActive, CandidateModel } from './lib/mongodb.js';
 
 connectMongo().catch((err) => console.error('MongoDB startup error:', err.message));
 
@@ -47,6 +46,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.disable('x-powered-by');
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -318,7 +318,7 @@ const PORT = process.env.PORT || 3000;
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -327,6 +327,15 @@ app.use(express.json({
   limit: '15mb',
   verify: (req, res, buf) => { req.rawBody = buf; },
 }));
+// Baseline hardening: never sniff content types, never leak the app URL to
+// third parties, and never let another origin frame the dashboard.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -399,14 +408,31 @@ app.post('/api/resume/render-edited-pdf', async (req, res) => {
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
+const LOGO_EXT = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+
 const logoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.png';
+    const ext = LOGO_EXT[String(file.mimetype || '').toLowerCase()] || '.png';
     cb(null, `logo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
   },
 });
-const uploadLogo = multer({ storage: logoStorage, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadLogo = multer({
+  storage: logoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  // Anything else could be served back from /uploads as an executable type
+  // (an .html or .svg upload would be stored XSS on this origin).
+  fileFilter: (req, file, cb) => {
+    const ok = Boolean(LOGO_EXT[String(file.mimetype || '').toLowerCase()]);
+    cb(ok ? null : Object.assign(new Error('Upload a PNG, JPG, WebP or GIF image.'), { status: 400 }), ok);
+  },
+});
 
 // ─── Jobs JSON Data Helper ───
 const jobsFilePath = path.join(__dirname, 'data', 'jobs.json');
@@ -876,7 +902,7 @@ const uploadList = multer({
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ok = LIST_FILE.test(file.originalname || '');
-    cb(ok ? null : new Error('Upload a PDF or Excel file.'), ok);
+    cb(ok ? null : Object.assign(new Error('Upload a PDF or Excel file.'), { status: 400 }), ok);
   },
 });
 
@@ -2083,13 +2109,33 @@ app.post('/api/reply/send', async (req, res) => {
   }
 });
 
+function isPrivateHostname(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')
+    || host.endsWith('.internal') || host.endsWith('.home.arpa') || host === 'metadata') return true;
+  const kind = net.isIP(host);
+  if (kind === 4) {
+    const [a, b] = host.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127
+      || (a === 169 && b === 254)          // link-local, cloud metadata
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 100 && b >= 64 && b <= 127) // CGNAT
+      || a >= 224;
+  }
+  if (kind === 6) {
+    return host === '::' || host === '::1' || /^f[cd]/.test(host) || host.startsWith('fe80') || host.startsWith('::ffff:');
+  }
+  return false;
+}
+
 function publicJobUrl(raw) {
   if (!String(raw || '').trim()) return null;
   let url;
   try { url = new URL(raw); } catch { return null; }
   if (!['http:', 'https:'].includes(url.protocol)) return null;
-  const host = url.hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.local') || host === '127.0.0.1' || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)) return null;
+  if (isPrivateHostname(url.hostname)) return null;
   return url;
 }
 
@@ -3194,6 +3240,11 @@ const otpStore = new Map();
 const OTP_TTL_MS = 10 * 60 * 1000;
 const AUTH_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function isLoopbackRequest(req) {
+  const address = String(req?.socket?.remoteAddress || req?.ip || '');
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+}
+
 function normalizeAuthEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -3223,8 +3274,12 @@ app.post('/api/auth/request-otp', async (req, res) => {
     return res.status(400).json({ error: 'A valid email address is required.' });
   }
 
+  const issuedAt = Date.now();
+  for (const [pendingEmail, pending] of otpStore) {
+    if (!pending || pending.expiresAt <= issuedAt) otpStore.delete(pendingEmail);
+  }
   const otp = String(crypto.randomInt(100000, 1000000));
-  otpStore.set(email, { otp, expiresAt: Date.now() + OTP_TTL_MS });
+  otpStore.set(email, { otp, expiresAt: issuedAt + OTP_TTL_MS, attempts: 0 });
 
   const gmailUser = String(process.env.GMAIL_USER || '').trim();
   const gmailAppPass = String(process.env.GMAIL_APP_PASS || '').trim();
@@ -3260,7 +3315,9 @@ app.post('/api/auth/request-otp', async (req, res) => {
     }
   }
 
-  if (process.env.NODE_ENV !== 'production') {
+  // The development shortcut only hands the code back to the machine that asked
+  // for it; a remote caller still needs working mail delivery.
+  if (process.env.NODE_ENV !== 'production' && isLoopbackRequest(req)) {
     return res.json({ success: true, message: 'OTP generated for development.', devOtp: otp });
   }
 
@@ -3284,6 +3341,10 @@ app.post('/api/auth/verify-otp', (req, res) => {
     return res.status(400).json({ error: 'OTP is invalid or has expired.' });
   }
   if (stored.otp !== otp) {
+    // Five wrong guesses retire the code, so the 6-digit space cannot be swept.
+    const attempts = Number(stored.attempts || 0) + 1;
+    if (attempts >= 5) otpStore.delete(email);
+    else stored.attempts = attempts;
     return res.status(400).json({ error: 'OTP is invalid or has expired.' });
   }
 
@@ -5146,6 +5207,130 @@ app.post('/api/blueprints/save', (req, res) => {
   res.json({ ok: true, domain: cleanDomain, blueprint: blueprints[cleanDomain] });
 });
 
+// ── Blueprint Train & Replay (learn a flow once, replay it reliably) ──────
+const trainRuns = new Map();
+const blueprintRuns = new Map();
+
+function writeResumeFile(resumeBase64, resumeName) {
+  if (!resumeBase64) return '';
+  let data = String(resumeBase64);
+  const comma = data.indexOf(',');
+  if (data.startsWith('data:') && comma > -1) data = data.slice(comma + 1);
+  const dir = path.join(__dirname, 'data', 'resumes');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = String(resumeName || 'resume.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const file = path.join(dir, `${Date.now()}_${safe}`);
+    fs.writeFileSync(file, Buffer.from(data, 'base64'));
+    return file;
+  } catch { return ''; }
+}
+
+// Train: walk the application once and save a semantic playbook.
+app.post('/api/train-link', async (req, res) => {
+  const { url, profile = {}, answers = {}, resumeBase64 = '', resumeName = '' } = req.body || {};
+  if (!/^https?:\/\//i.test(String(url || ''))) {
+    return res.status(400).json({ ok: false, error: 'A valid job URL is required.' });
+  }
+  const trainId = `train_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const run = { trainId, url, status: 'RUNNING', steps: [], startedAt: Date.now(), result: null };
+  trainRuns.set(trainId, run);
+  res.json({ ok: true, trainId });
+
+  const engine = new BlueprintEngine({
+    puppeteer,
+    profile,
+    answers,
+    resumePath: writeResumeFile(resumeBase64, resumeName),
+    headless: String(process.env.BLUEPRINT_HEADLESS || 'true') !== 'false',
+    onEvent: ({ step, message, data, t }) => {
+      run.steps.push({ step, message, data, t });
+      if (run.steps.length > 300) run.steps.shift();
+    },
+  });
+  try {
+    const result = await engine.train(url);
+    if (result.blueprint) {
+      const all = loadBlueprints();
+      all[result.domain] = { ...result.blueprint, updatedAt: new Date().toISOString() };
+      saveBlueprints(all);
+    }
+    run.result = { status: result.status, message: result.message || `Learned ${result.blueprint?.fieldCount || 0} fields across ${result.blueprint?.steps?.length || 0} steps.`, domain: result.domain, blueprint: result.blueprint };
+    run.status = 'TRAINED';
+  } catch (err) {
+    run.result = { status: 'failed', message: err.message };
+    run.status = 'FAILED';
+  } finally {
+    await engine.close();
+    run.endedAt = Date.now();
+  }
+});
+
+app.get('/api/train-link/:trainId', (req, res) => {
+  const run = trainRuns.get(req.params.trainId);
+  if (!run) return res.status(404).json({ ok: false, error: 'Unknown training run.' });
+  res.json({ ok: true, run });
+});
+
+// Replay: fill any similar job link using a learned playbook + current user data.
+app.post('/api/auto-apply-blueprint', async (req, res) => {
+  const { url, profile = {}, answers = {}, resumeBase64 = '', resumeName = '', domain = '', autoSubmit = false } = req.body || {};
+  if (!/^https?:\/\//i.test(String(url || ''))) {
+    return res.status(400).json({ ok: false, error: 'A valid job URL is required.' });
+  }
+  const host = (() => { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; } })();
+  const lookup = String(domain || host).toLowerCase().replace(/^www\./, '');
+  const blueprints = loadBlueprints();
+  let blueprint = blueprints[lookup]
+    || Object.values(blueprints).find((b) => b.domain && (lookup.includes(b.domain) || b.domain.includes(lookup)));
+  const learnedNow = !blueprint;
+
+  const runId = `bp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const run = { runId, url, domain: blueprint?.domain || lookup, status: 'RUNNING', steps: [], startedAt: Date.now(), result: null };
+  blueprintRuns.set(runId, run);
+  res.json({ ok: true, runId, domain: run.domain, learnedNow });
+
+  const engine = new BlueprintEngine({
+    puppeteer,
+    profile,
+    answers,
+    resumePath: writeResumeFile(resumeBase64, resumeName),
+    headless: String(process.env.BLUEPRINT_HEADLESS || 'true') !== 'false',
+    onEvent: ({ step, message, data, t }) => {
+      run.steps.push({ step, message, data, t });
+      if (run.steps.length > 300) run.steps.shift();
+    },
+  });
+  try {
+    if (!blueprint) {
+      run.steps.push({ step: 'auto_train', message: '🧠 No playbook for this portal yet — learning the flow on the fly…', t: Date.now() });
+      const trained = await engine.train(url);
+      blueprint = trained.blueprint;
+      const all = loadBlueprints();
+      all[trained.domain] = { ...blueprint, updatedAt: new Date().toISOString() };
+      saveBlueprints(all);
+      run.domain = trained.domain;
+      run.steps.push({ step: 'auto_trained', message: `✅ Learned ${blueprint.fieldCount} field(s) across ${blueprint.steps.length} step(s). Replaying with your details now.`, t: Date.now() });
+    }
+    const result = await engine.replay(url, blueprint, { autoSubmit: autoSubmit === true || autoSubmit === 'true' });
+    run.result = result;
+    run.status = result.status === 'submitted' ? 'SUBMITTED'
+      : result.status === 'needs_user' ? 'NEEDS_USER' : 'FAILED';
+  } catch (err) {
+    run.result = { status: 'failed', reasonCode: 'CRASH', message: err.message };
+    run.status = 'FAILED';
+  } finally {
+    await engine.close();
+    run.endedAt = Date.now();
+  }
+});
+
+app.get('/api/auto-apply-blueprint/:runId', (req, res) => {
+  const run = blueprintRuns.get(req.params.runId);
+  if (!run) return res.status(404).json({ ok: false, error: 'Unknown blueprint run.' });
+  res.json({ ok: true, run });
+});
+
 // API 404 Fallback - Always Return JSON
 app.use('/api', (req, res) => {
   res.status(404).json({ error: `API endpoint ${req.originalUrl} not found` });
@@ -5153,8 +5338,10 @@ app.use('/api', (req, res) => {
 
 // Global Error Handler Middleware - Always Return JSON
 app.use((err, req, res, next) => {
-  console.error('Unhandled API Error:', err);
-  res.status(500).json({ error: err.message || 'Internal Server Error' });
+  const status = Number(err?.status || err?.statusCode) || 500;
+  if (status >= 500) console.error('Unhandled API Error:', err);
+  else console.warn('Request rejected:', err?.message || err);
+  res.status(status).json({ error: err?.message || 'Internal Server Error' });
 });
 
 let currentPort = Number(PORT);
