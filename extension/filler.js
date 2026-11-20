@@ -187,6 +187,38 @@
     }
   }
 
+  function showTrainingModeBanner(domain) {
+    if (document.getElementById('hamzooh-train-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'hamzooh-train-banner';
+    banner.style.cssText = `
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      z-index: 2147483647;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: white;
+      padding: 12px 18px;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    `;
+    banner.innerHTML = `
+      <span>🎓 Hamzooh Train Mode Active: Recording your actions for ${domain}...</span>
+      <button id="hamzooh-stop-train" style="background: white; color: #047857; border: none; border-radius: 6px; padding: 5px 10px; font-size: 11px; font-weight: 700; cursor: pointer;">Done</button>
+    `;
+    document.body.appendChild(banner);
+    document.getElementById('hamzooh-stop-train')?.addEventListener('click', () => {
+      banner.remove();
+      sendProgress('trained', `✅ Training recorded and saved for ${domain}!`);
+    });
+  }
+
   function queryAllDeep(selector, root = document) {
     const out = [];
     const visit = (node) => {
@@ -2206,9 +2238,28 @@
     // RULE: If pending.applyClicked is true, NEVER click Easy Apply again!
     // Also, if the modal is already open, NEVER click Easy Apply!
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
-    const applyBtns = (!pending.applyClicked && !linkedInModal && earlyInputs.length < 2)
+    let applyBtns = (!pending.applyClicked && !linkedInModal && earlyInputs.length < 2)
       ? earlyApplyButtons
       : [];
+
+    // Polling wait for SPA buttons (e.g. LinkedIn Ember top card)
+    if (isLinkedIn && !pending.applyClicked && !linkedInModal && applyBtns.length === 0) {
+      sendProgress('looking_apply', '🔍 Waiting for LinkedIn Easy Apply button to appear…');
+      const startWait = Date.now();
+      while (Date.now() - startWait < 8000) {
+        await sleep(400);
+        const waitedBtn = findLinkedInEasyApplyButton();
+        if (waitedBtn && !findLinkedInModal()) {
+          applyBtns = [waitedBtn];
+          break;
+        }
+        if (findLinkedInModal()) break;
+      }
+    }
+
+    if (pending.trainMode) {
+      showTrainingModeBanner(location.hostname);
+    }
 
     if (applyBtns.length) {
       sendProgress('apply_opening', isLinkedIn ? '💼 LinkedIn Easy Apply detected — clicking Easy Apply…' : '📄 Job page detected — clicking Apply…');

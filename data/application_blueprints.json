@@ -1,0 +1,61 @@
+{
+  "linkedin.com": {
+    "domain": "linkedin.com",
+    "portalName": "LinkedIn Easy Apply",
+    "steps": [
+      {
+        "id": "open_easy_apply",
+        "action": "click",
+        "description": "Click the Easy Apply button on the job top card",
+        "selectors": [
+          "button.jobs-apply-button",
+          "button[aria-label*='Easy Apply']",
+          ".jobs-apply-button--top-card",
+          "[data-control-name*='apply']",
+          "button[data-job-id]"
+        ],
+        "waitForModal": true
+      },
+      {
+        "id": "wait_modal_ready",
+        "action": "wait_ready",
+        "description": "Wait for Easy Apply modal and spinner to disappear",
+        "modalSelector": ".jobs-easy-apply-modal, [role='dialog'].artdeco-modal, .artdeco-modal",
+        "spinnerSelector": ".artdeco-loader, .artdeco-spinner, svg.artdeco-loader__bars"
+      },
+      {
+        "id": "fill_step",
+        "action": "fill_current_step",
+        "description": "Fill form questions and advance through Next / Review",
+        "advanceButtonSelectors": [
+          "button[aria-label*='Continue to next step']",
+          "button[aria-label*='Review your application']",
+          "footer button.artdeco-button--primary",
+          "button.artdeco-button--primary"
+        ]
+      },
+      {
+        "id": "submit_step",
+        "action": "submit",
+        "description": "Submit application on final step",
+        "submitButtonSelectors": [
+          "button[aria-label*='Submit application']",
+          "footer button.artdeco-button--primary",
+          "button.artdeco-button--primary"
+        ]
+      },
+      {
+        "id": "dismiss_done",
+        "action": "dismiss",
+        "description": "Close 'Application sent' confirmation dialog",
+        "dismissSelectors": [
+          "button[aria-label*='Dismiss']",
+          ".artdeco-modal button[aria-label*='Dismiss']",
+          "button.artdeco-modal__dismiss"
+        ]
+      }
+    ],
+    "learnedAt": "2026-11-20T11:45:00.000Z",
+    "customAnswers": {}
+  }
+}

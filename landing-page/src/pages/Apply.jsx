@@ -996,7 +996,7 @@ ${firstName}`;
   }, [job, matchResult]);
 
   // Handle Direct Apply — Extension-based auto-apply (opens new tab in same browser)
-  const handleProceedDirectApply = async () => {
+  const handleProceedDirectApply = async (isTrainMode = false) => {
     const link = [job?.applyLink, job?.url, job?.sourceUrl].map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
     if (!link) {
       alert('This job has no application URL. Add an Apply link on the job, then try Auto Apply again.');
@@ -1101,7 +1101,8 @@ ${firstName}`;
       type: 'HAMZOOH_START_APPLY',
       requestId,
       url: link,
-      autoSubmit: fullAutoMode, // Use full auto mode setting
+      trainMode: isTrainMode === true,
+      autoSubmit: isTrainMode ? false : fullAutoMode, // Don't auto-submit in train mode
       profile: {
         ...(profile || {}),
         jobLocation: job?.location || job?.filters?.location || '',
@@ -2832,26 +2833,50 @@ ${firstName}`;
               </p>
             </div>
 
-            <button
-              className="btn-accent"
-              onClick={handleProceedDirectApply}
-              disabled={autoApplying || submitted}
-              style={{ 
-                background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
-                borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
-                fontSize: '14px', padding: '12px 24px', gap: '8px',
-                opacity: autoApplying ? 0.7 : 1,
-                cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {autoApplying ? (
-                <><Loader size={16} className="spin" /> Auto-Applying...</>
-              ) : submitted ? (
-                <><CheckCircle2 size={16} /> Applied Successfully</>
-              ) : (
-                <><Zap size={16} /> Auto Apply with AI</>
-              )}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                className="btn-accent"
+                onClick={() => handleProceedDirectApply(false)}
+                disabled={autoApplying || submitted}
+                style={{ 
+                  background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
+                  borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
+                  fontSize: '14px', padding: '12px 24px', gap: '8px',
+                  opacity: autoApplying ? 0.7 : 1,
+                  cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {autoApplying ? (
+                  <><Loader size={16} className="spin" /> Auto-Applying...</>
+                ) : submitted ? (
+                  <><CheckCircle2 size={16} /> Applied Successfully</>
+                ) : (
+                  <><Zap size={16} /> Auto Apply with AI</>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleProceedDirectApply(true)}
+                disabled={autoApplying || submitted}
+                title="Teach the AI how to apply on this portal by demonstrating it once. The AI records every action so future similar jobs apply with 100% accuracy!"
+                style={{
+                  background: 'transparent',
+                  color: '#22a65b',
+                  border: '1.5px dashed #22a65b',
+                  borderRadius: '10px',
+                  padding: '11px 18px',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                🎓 Train AI on this Link
+              </button>
+            </div>
           </div>
 
           {/* Stage navigation */}

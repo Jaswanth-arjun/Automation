@@ -4975,6 +4975,51 @@ Respond ONLY with valid JSON in this exact structure:
   }
 });
 
+// ── Application Flow Blueprints (Train & Replay) ───────────────────────
+const blueprintsFilePath = path.join(__dirname, 'data', 'application_blueprints.json');
+
+function loadBlueprints() {
+  try {
+    if (fs.existsSync(blueprintsFilePath)) {
+      return JSON.parse(fs.readFileSync(blueprintsFilePath, 'utf8'));
+    }
+  } catch {}
+  return {};
+}
+
+function saveBlueprints(data) {
+  try {
+    fs.writeFileSync(blueprintsFilePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch {}
+}
+
+app.get('/api/blueprints', (req, res) => {
+  const blueprints = loadBlueprints();
+  const domain = req.query.domain ? String(req.query.domain).toLowerCase().replace(/^www\./, '') : '';
+  if (domain) {
+    const match = blueprints[domain] || Object.values(blueprints).find((b) => domain.includes(b.domain) || b.domain.includes(domain));
+    return res.json({ ok: true, blueprint: match || null });
+  }
+  res.json({ ok: true, blueprints });
+});
+
+app.post('/api/blueprints/save', (req, res) => {
+  const { domain, blueprint } = req.body || {};
+  if (!domain || !blueprint) {
+    return res.status(400).json({ ok: false, error: 'domain and blueprint are required.' });
+  }
+  const cleanDomain = String(domain).toLowerCase().replace(/^www\./, '');
+  const blueprints = loadBlueprints();
+  blueprints[cleanDomain] = {
+    ...blueprint,
+    domain: cleanDomain,
+    updatedAt: new Date().toISOString(),
+  };
+  saveBlueprints(blueprints);
+  console.log(`[Blueprints] Successfully saved application blueprint for ${cleanDomain}`);
+  res.json({ ok: true, domain: cleanDomain, blueprint: blueprints[cleanDomain] });
+});
+
 // API 404 Fallback - Always Return JSON
 app.use('/api', (req, res) => {
   res.status(404).json({ error: `API endpoint ${req.originalUrl} not found` });
