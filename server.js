@@ -50,7 +50,10 @@ app.disable('x-powered-by');
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+const chromePathCache = new Map();
 function getSystemChromePath() {
+  const envKey = process.env.CHROME_PATH || '';
+  if (chromePathCache.has(envKey)) return chromePathCache.get(envKey);
   const candidates = [
     process.env.CHROME_PATH,
     'D:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -59,7 +62,9 @@ function getSystemChromePath() {
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google\\Chrome\\Application\\chrome.exe') : '',
     process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, 'Google\\Chrome\\Application\\chrome.exe') : '',
   ].filter(Boolean);
-  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+  const resolved = candidates.find((candidate) => fs.existsSync(candidate)) || '';
+  chromePathCache.set(envKey, resolved);
+  return resolved;
 }
 
 // ─── Sent Emails Data Helper ───
@@ -617,8 +622,11 @@ app.delete('/api/jobs/:id', (req, res) => {
   // Delete logo file if exists
   const job = jobs[idx];
   if (job.logo && job.logo.startsWith('/uploads/')) {
-    const logoFilePath = path.join(__dirname, job.logo);
-    if (fs.existsSync(logoFilePath)) {
+    // Resolve and confine deletion to the uploads folder; a crafted logo path
+    // like "/uploads/../../data/file" must never delete arbitrary files.
+    const uploadsRoot = path.resolve(__dirname, 'uploads') + path.sep;
+    const logoFilePath = path.resolve(__dirname, '.' + job.logo);
+    if (logoFilePath.startsWith(uploadsRoot) && fs.existsSync(logoFilePath)) {
       try { fs.unlinkSync(logoFilePath); } catch { }
     }
   }
@@ -1155,15 +1163,19 @@ async function fetchGoogleUserInfo(accessToken) {
   return userRes.json();
 }
 
+let cachedGeminiKeyFromFile;
 function getGeminiKey() {
   if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY.trim();
+  if (cachedGeminiKeyFromFile !== undefined) return cachedGeminiKeyFromFile;
   const files = [path.join(__dirname, '.env'), path.join(__dirname, 'Hamzooh', '.env'), path.join(__dirname, 'MailMind AI', '.env')];
+  let found = '';
   for (const file of files) {
     if (!fs.existsSync(file)) continue;
     const match = fs.readFileSync(file, 'utf8').match(/^GEMINI_API_KEY=(.*)$/m);
-    if (match && match[1].trim() && !match[1].includes('your_gemini')) return match[1].trim();
+    if (match && match[1].trim() && !match[1].includes('your_gemini')) { found = match[1].trim(); break; }
   }
-  return '';
+  cachedGeminiKeyFromFile = found;
+  return found;
 }
 
 async function askGemini(prompt) {
@@ -3412,7 +3424,7 @@ app.get('/api/gmail/callback', async (req, res) => {
 
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || tokenData.error) {
-      console.error('OAuth Token Exchange Error:', tokenData);
+      console.error('OAuth Token Exchange Error:', tokenData?.error || tokenData?.error_description || 'unknown error');
       return res.status(400).send(`Google Token Exchange Failed: ${tokenData.error_description || tokenData.error}`);
     }
 
@@ -3611,7 +3623,8 @@ app.post('/api/candidates/sync', (req, res) => {
 });
 
 app.get('/api/candidates', (req, res) => {
-  const all = readCandidates().map(candidateForClient);
+  const rawCandidates = readCandidates();
+  const all = rawCandidates.map(candidateForClient);
   const batch = normalizeBatch(req.query.batch);
   const search = cleanString(req.query.search, 120).toLowerCase();
 
@@ -3629,7 +3642,7 @@ app.get('/api/candidates', (req, res) => {
   }
   candidates.sort((a, b) => new Date(b.registeredAt || 0) - new Date(a.registeredAt || 0));
 
-  const summary = summarizeCandidates(readCandidates());
+  const summary = summarizeCandidates(rawCandidates);
   res.json({
     candidates,
     ...summary,
@@ -4360,7 +4373,11 @@ app.post('/api/start', async (req, res) => {
     broadcast('status_change', { status, error });
   });
 
-  res.json({ message: 'Automation starting...', config: activeBotInstance.config });
+  // Never expose server-side credentials to the browser (the original config
+  // includes geminiApiKey from process.env). Keep every other field unchanged.
+  const clientConfig = { ...activeBotInstance.config };
+  if (clientConfig.geminiApiKey) clientConfig.geminiApiKey = '***';
+  res.json({ message: 'Automation starting...', config: clientConfig });
 
   activeBotInstance.start().catch((err) => {
     pushLog({ timestamp: new Date().toLocaleTimeString(), message: `Fatal: ${err.message}`, level: 'error' });
@@ -5034,6 +5051,20 @@ ERRORS: ${JSON.stringify(errors).slice(0, 1500)}`;
 });
 
 // ── Vision-based auto apply (GPT-6-Luna / Gemini) ─────────────────────────
+// Keep in-memory run registries bounded (runs are read via polling, never
+// persisted) so long-lived servers do not leak memory over time.
+function pruneRunMap(map, maxAgeMs = 30 * 60 * 1000, maxEntries = 200) {
+  const now = Date.now();
+  for (const [id, run] of map) {
+    if (now - (run.startedAt || 0) > maxAgeMs) map.delete(id);
+  }
+  while (map.size > maxEntries) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 const visionRuns = new Map();
 
 app.post('/api/auto-apply-vision', async (req, res) => {
@@ -5045,6 +5076,7 @@ app.post('/api/auto-apply-vision', async (req, res) => {
     return res.status(409).json({ ok: false, error: 'That runId is already in use.' });
   }
   const run = { runId, url, status: 'RUNNING', steps: [], startedAt: Date.now(), result: null };
+  pruneRunMap(visionRuns);
   visionRuns.set(runId, run);
   res.json({ ok: true, runId });
 
@@ -5085,7 +5117,8 @@ app.post('/api/extension/vision-action', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Screenshot is required.' });
   }
 
-  const apiKey = process.env.BYNARA_API_KEY || process.env.RADOX_API_KEY || 'coa_3059813e52571581bcbf9f179c163db1';
+  const apiKey = process.env.BYNARA_API_KEY || process.env.RADOX_API_KEY || '';
+  if (!apiKey) return res.status(500).json({ ok: false, error: 'Vision API key is not configured on the server.' });
   const baseURL = (process.env.BYNARA_BASE_URL || process.env.RADOX_BASE_URL || 'https://coarena.ai/api/v1').replace(/\/+$/, '');
   const model = process.env.BYNARA_MODEL || process.env.RADOX_MODEL || 'gpt-6-luna';
 
@@ -5239,6 +5272,7 @@ app.post('/api/train-link', async (req, res) => {
   }
   const trainId = `train_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const run = { trainId, url, status: 'RUNNING', steps: [], startedAt: Date.now(), result: null };
+  pruneRunMap(trainRuns);
   trainRuns.set(trainId, run);
   res.json({ ok: true, trainId });
 
@@ -5292,6 +5326,7 @@ app.post('/api/auto-apply-blueprint', async (req, res) => {
 
   const runId = `bp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const run = { runId, url, domain: blueprint?.domain || lookup, status: 'RUNNING', steps: [], startedAt: Date.now(), result: null };
+  pruneRunMap(blueprintRuns);
   blueprintRuns.set(runId, run);
   res.json({ ok: true, runId, domain: run.domain, learnedNow });
 
