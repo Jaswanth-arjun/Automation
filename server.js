@@ -22,6 +22,7 @@ import { inferFromProfile } from './lib/apply-intelligence.js';
 
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer-core';
+import { registerAdminAccess } from './lib/admin-access.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
@@ -471,6 +472,9 @@ function normalizeJobLinkKey(value) {
     return raw || null;
   }
 }
+
+// ─── Admin dashboard gate (email OTP session) ───
+registerAdminAccess(app);
 
 // ─── Admin Dashboard Route ───
 app.get('/admin', (req, res) => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Link2, X, Sparkles, CheckCircle2, Circle, Eye, RefreshCw,
-  Check, AlertTriangle, FileText, Calendar, Users, Key, Download
+  Check, AlertTriangle, FileText, Key, Download
 } from 'lucide-react';
 import { api, profileStore, resumeStore } from '../lib/api';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';

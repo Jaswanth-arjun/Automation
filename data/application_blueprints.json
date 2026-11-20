@@ -632,5 +632,41 @@
     "fieldCount": 28,
     "learnedAt": "2026-11-20T08:27:36.756Z",
     "updatedAt": "2026-11-20T08:27:36.758Z"
+  },
+  "jobs.twilio.com": {
+    "domain": "jobs.twilio.com",
+    "ats": "generic",
+    "portalName": "jobs.twilio.com Flow",
+    "learnUrl": "https://jobs.twilio.com/careers/job/1099557142560",
+    "steps": [
+      {
+        "index": 1,
+        "fields": [],
+        "buttons": [
+          "Add to cart",
+          "Favourite this job",
+          "Share position, Software Engineer - Platform Engineering",
+          "Upload resume",
+          "Job description",
+          "Company and benefits",
+          "Previous similar jobs",
+          "Next similar jobs",
+          "Save Developer Evangelist",
+          "Save Staff, Software Engineer (L4)",
+          "Save Staff, Fullstack Software Engineer (P4)",
+          "Save Machine Learning Engineer 2",
+          "Save Staff Machine Learning Engineer",
+          "Save Principal, Machine Learning Engineer (L5)",
+          "Save Machine Learning Engineer (L3)",
+          "Save DevOps Engineer (Observability)",
+          "Save Developer Success Engineer, P2",
+          "Close"
+        ],
+        "isFinal": false
+      }
+    ],
+    "fieldCount": 0,
+    "learnedAt": "2026-11-20T10:36:39.275Z",
+    "updatedAt": "2026-11-20T10:36:39.277Z"
   }
 }

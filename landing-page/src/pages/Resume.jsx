@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Upload, FileText, Trash2, CheckCircle, Clock, Plus, X, Eye, LayoutTemplate } from 'lucide-react';
 import { resumeStore, profileStore, api } from '../lib/api';
-import { RESUME_TEMPLATES, getSelectedTemplateId, setSelectedTemplateId, DEFAULT_TEMPLATE_ID } from '../lib/resumeTemplates';
+import { RESUME_TEMPLATES, getSelectedTemplateId, setSelectedTemplateId } from '../lib/resumeTemplates';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import { extractProfilePdf, resumeUrlsFromText } from '../components/JobAnalyzerModal.helpers';
 

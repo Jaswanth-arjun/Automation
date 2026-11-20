@@ -1,7 +1,123 @@
 /**
  * Admin Dashboard - Job Posting Controller
  */
-document.addEventListener('DOMContentLoaded', () => {
+/**
+ * Admin gate — the panel stays blurred until the emailed code is verified.
+ * The admin address is never rendered: the popup only ever says "code sent".
+ */
+async function adminGate() {
+  const statusEl = document.getElementById('adminGateStatus');
+  const sendBtn = document.getElementById('adminOtpSend');
+  const otpRow = document.getElementById('adminOtpRow');
+  const otpInput = document.getElementById('adminOtpInput');
+  const verifyBtn = document.getElementById('adminOtpVerify');
+
+  const setStatus = (message, isError = false) => {
+    statusEl.textContent = message || '';
+    statusEl.classList.toggle('hidden', !message);
+    statusEl.classList.toggle('is-error', Boolean(isError));
+  };
+
+  const unlock = () => {
+    document.body.classList.remove('admin-locked');
+    document.getElementById('adminGate').classList.add('hidden');
+  };
+
+  try {
+    const res = await fetch('/api/admin/otp/status', { cache: 'no-store' });
+    const data = await res.json().catch(() => ({}));
+    if (data && data.authenticated) {
+      unlock();
+      return true;
+    }
+  } catch {
+    // Fall through to the gate: an unreachable status check must not open the panel.
+  }
+
+  return new Promise((resolve) => {
+    let cooldownTimer = null;
+
+    const startCooldown = (seconds) => {
+      let left = seconds;
+      sendBtn.disabled = true;
+      sendBtn.textContent = `Resend in ${left}s`;
+      clearInterval(cooldownTimer);
+      cooldownTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(cooldownTimer);
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'Send OTP again';
+          return;
+        }
+        sendBtn.textContent = `Resend in ${left}s`;
+      }, 1000);
+    };
+
+    sendBtn.addEventListener('click', async () => {
+      sendBtn.disabled = true;
+      setStatus('Sending the code…');
+      try {
+        const res = await fetch('/api/admin/otp/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not send the code.');
+        otpRow.classList.remove('hidden');
+        setStatus('Code sent to the admin inbox. It expires in 10 minutes.');
+        otpInput.focus();
+        startCooldown(res.status === 200 ? 20 : 5);
+      } catch (err) {
+        setStatus(err.message || 'Could not send the code.', true);
+        sendBtn.disabled = false;
+      }
+    });
+
+    otpInput.addEventListener('input', () => {
+      otpInput.value = otpInput.value.replace(/\D/g, '').slice(0, 6);
+    });
+
+    otpInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        verifyBtn.click();
+      }
+    });
+
+    verifyBtn.addEventListener('click', async () => {
+      const otp = otpInput.value.replace(/\D/g, '');
+      if (otp.length !== 6) {
+        setStatus('Enter the 6-digit code from the admin inbox.', true);
+        return;
+      }
+      verifyBtn.disabled = true;
+      setStatus('Verifying…');
+      try {
+        const res = await fetch('/api/admin/otp/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ otp }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) throw new Error(data.error || 'That code is not valid.');
+        unlock();
+        resolve(true);
+      } catch (err) {
+        setStatus(err.message || 'That code is not valid.', true);
+        otpInput.value = '';
+        otpInput.focus();
+        verifyBtn.disabled = false;
+      }
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Nothing loads until the admin code is verified.
+  if (!(await adminGate())) return;
+
   // State
   let mustHaveSkills = [];
   let goodToHaveSkills = [];

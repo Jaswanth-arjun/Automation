@@ -15,16 +15,10 @@ import {
   Sparkles,
   Menu,
   X,
-  Zap,
-  Users,
   Bell,
   Globe,
   Star,
-  AtSign,
   Puzzle,
-  ShieldCheck,
-  Eye,
-  CheckCircle,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import PawLogo from '../components/PawLogo';
@@ -195,13 +189,14 @@ function ParticleHero() {
     initParticles();
     draw();
 
-    window.addEventListener('resize', () => { resize(); initParticles(); });
+    const onResize = () => { resize(); initParticles(); };
+    window.addEventListener('resize', onResize);
     canvas.parentElement.addEventListener('mousemove', onMouseMove);
     canvas.parentElement.addEventListener('mouseleave', onMouseLeave);
 
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener('resize', resize);
+      window.removeEventListener('resize', onResize);
       canvas.parentElement?.removeEventListener('mousemove', onMouseMove);
       canvas.parentElement?.removeEventListener('mouseleave', onMouseLeave);
     };

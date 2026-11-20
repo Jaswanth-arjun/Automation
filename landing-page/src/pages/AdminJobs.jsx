@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit3, Upload, X, Eye, Briefcase, Building, MapPin, Clock, Link2, Image, FileText, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, Edit3, X, Eye, Briefcase, Building, MapPin, Clock, Link2, Image, FileText, ChevronDown } from 'lucide-react';
 import { adminJobStore } from '../lib/adminJobStore';
 import { useAuth } from '../lib/auth';
 import { jobOwner, manageableJobs, isAdminUser } from '../lib/jobOwnership';

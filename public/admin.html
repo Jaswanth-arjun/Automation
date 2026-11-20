@@ -11,7 +11,23 @@
   <link rel="stylesheet" href="admin.css" />
   <link rel="stylesheet" href="admin-subscriptions.css" />
 </head>
-<body>
+<body class="admin-locked">
+  <!-- ── Admin OTP gate: the panel stays blurred until a code is verified ── -->
+  <div class="admin-gate" id="adminGate" role="dialog" aria-modal="true" aria-labelledby="adminGateTitle">
+    <div class="admin-gate-card">
+      <span class="admin-gate-mark">H</span>
+      <h2 id="adminGateTitle">Admin verification</h2>
+      <p id="adminGateCopy">This dashboard is locked. Send a one-time code to the admin mailbox, then enter it here.</p>
+      <button type="button" class="btn btn-primary btn-lg admin-gate-send" id="adminOtpSend">Send OTP</button>
+      <div class="admin-gate-otp hidden" id="adminOtpRow">
+        <input type="text" id="adminOtpInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" aria-label="Six-digit code" />
+        <button type="button" class="btn btn-primary" id="adminOtpVerify">Verify</button>
+      </div>
+      <p class="admin-gate-status hidden" id="adminGateStatus"></p>
+      <p class="admin-gate-hint">The code goes to the admin inbox only — the address is never shown here.</p>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">

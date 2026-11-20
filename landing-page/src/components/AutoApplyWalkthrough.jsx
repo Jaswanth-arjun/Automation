@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Globe, ArrowRight, FileText, CheckCircle2, Check, Sparkles } from 'lucide-react';
+import { Globe, FileText, CheckCircle2, Check } from 'lucide-react';
 import PawLogo from './PawLogo';
 import './AutoApplyWalkthrough.css';
 

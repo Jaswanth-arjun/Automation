@@ -1,9 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Link2, Crown, X, Check, ExternalLink, Bookmark } from 'lucide-react';
+import { ArrowRight, Link2, Crown, X, Check, Bookmark } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, getUserName, getEmailUsername } from '../lib/api';
+import { profileStore, getUserName } from '../lib/api';
 import { DEMO_JOBS } from '../lib/mockData';
 import { computeJobScores } from '../lib/matchScore';
 import { savedJobsStore } from '../lib/savedJobsStore';
