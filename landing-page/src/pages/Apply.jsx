@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  ArrowLeft, ArrowRight, Mail, FileText, Sparkles, ExternalLink, 
-  Copy, Check, Send, UserPlus, Download, CheckCircle2, 
-  MapPin, Clock, Building, Bookmark, AlertCircle, RefreshCw,
-  Upload, Eye, ChevronRight, UserCheck, ShieldCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil,
+  ArrowLeft, ArrowRight, Mail, FileText, Sparkles, 
+  Copy, Check, Send, Download, CheckCircle2, 
+  AlertCircle, RefreshCw,
+  Upload, Eye, ChevronRight, UserCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil,
   Lock, Gem
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
@@ -158,13 +158,19 @@ export default function Apply() {
   const [autoApplyResult, setAutoApplyResult] = useState(null);
   const [showAutoApplyModal, setShowAutoApplyModal] = useState(false);
   const [autoRunId, setAutoRunId] = useState('');
-  const [autoVisionRunId, setAutoVisionRunId] = useState('');
   const [runLogState, setRunLogState] = useState('idle');
   const [needsUser, setNeedsUser] = useState(null);
   const [extensionReady, setExtensionReady] = useState(false);
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
   const [trainNotice, setTrainNotice] = useState('');
+
+  // Backend run pollers must be stopped if this page is left mid-run.
+  const activePollsRef = useRef([]);
+  useEffect(() => () => {
+    activePollsRef.current.forEach((id) => clearInterval(id));
+    activePollsRef.current = [];
+  }, []);
 
   // Cover Letter state
   const [coverLetter, setCoverLetter] = useState(() => coverLetterStore.get(jobId));
@@ -597,7 +603,7 @@ ${firstName}`;
     `Application Referral Request: ${job?.title || 'Role'} at ${job?.company || 'Company'}`
   );
   const [emailBody, setEmailBody] = useState(() => generateInitialDraft());
-  const [currentToneIndex, setCurrentToneIndex] = useState(0);
+  const toneIndexRef = useRef(0); // avoids a stale index when tone clicks are rapid
   const [isRewriting, setIsRewriting] = useState(false);
 
   // Sync draft whenever active job changes
@@ -627,8 +633,8 @@ ${firstName}`;
         generateInitialDraft()
       ];
 
-      const nextIndex = (currentToneIndex + 1) % TONES.length;
-      setCurrentToneIndex(nextIndex);
+      const nextIndex = (toneIndexRef.current + 1) % TONES.length;
+      toneIndexRef.current = nextIndex;
       setEmailBody(TONES[nextIndex]);
       setIsRewriting(false);
     }, 450);
@@ -954,10 +960,16 @@ ${firstName}`;
     };
   }, []);
 
+  // Keep latest job/match values without re-subscribing on every render
+  // (job and matchResult are freshly created objects each render).
+  const applyContextRef = useRef({ job, matchResult, hasMatchScore });
+  applyContextRef.current = { job, matchResult, hasMatchScore };
+
   // Listen for extension progress/completion messages
   useEffect(() => {
     const onExtensionMessage = (event) => {
       if (event.data?.source !== 'hamzooh-extension') return;
+      const ctx = applyContextRef.current;
 
       if (event.data.type === 'HAMZOOH_APPLY_PROGRESS') {
         setAutoApplyProgress(prev => [...prev, {
@@ -980,19 +992,19 @@ ${firstName}`;
         setAutoApplying(false);
         if (event.data.status === 'submitted') {
           applicationStore.add({
-            title: job?.title,
-            company: job?.company,
-            companyMark: job?.companyMark,
-            jobId: job?.id,
+            title: ctx.job?.title,
+            company: ctx.job?.company,
+            companyMark: ctx.job?.companyMark,
+            jobId: ctx.job?.id,
             status: 'Applied',
             stage: 'apply',
             appliedViaExtension: true,
-            ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
+            ...(ctx.hasMatchScore ? { matchScore: ctx.matchResult.score } : {}),
             resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
           });
-          applyProgressStore.mark(jobId || job?.id, 'apply', {
-            company: job?.company || '',
-            title: job?.title || '',
+          applyProgressStore.mark(jobId || ctx.job?.id, 'apply', {
+            company: ctx.job?.company || '',
+            title: ctx.job?.title || '',
           });
           setSubmitted(true);
         }
@@ -1031,7 +1043,7 @@ ${firstName}`;
     };
     window.addEventListener('message', onExtensionMessage);
     return () => window.removeEventListener('message', onExtensionMessage);
-  }, [job, matchResult]);
+  }, [jobId]);
 
   // Handle Direct Apply — Extension-based auto-apply (opens new tab in same browser)
   const handleProceedDirectApply = async (isTrainMode = false) => {
@@ -1256,7 +1268,12 @@ ${firstName}`;
   const pollBackendRun = (statusPath, kind) => {
     let lastStepCount = 0;
     let consecutiveErrors = 0;
-    const poll = setInterval(async () => {
+    let poll;
+    const stop = () => {
+      clearInterval(poll);
+      activePollsRef.current = activePollsRef.current.filter((id) => id !== poll);
+    };
+    poll = setInterval(async () => {
       try {
         const res = await fetch(statusPath);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1272,7 +1289,7 @@ ${firstName}`;
           }))].slice(-80));
         }
         if (run.status !== 'RUNNING') {
-          clearInterval(poll);
+          stop();
           setAutoApplying(false);
           const isTrain = kind === 'train';
           const finalStatus = run.status === 'SUBMITTED' || run.status === 'TRAINED'
@@ -1298,12 +1315,13 @@ ${firstName}`;
       } catch (err) {
         consecutiveErrors++;
         if (consecutiveErrors >= 4) {
-          clearInterval(poll);
+          stop();
           setAutoApplying(false);
           setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
         }
       }
     }, 2500);
+    activePollsRef.current.push(poll);
   };
 
   // Auto Apply: use a learned blueprint when available; otherwise live AI vision.
@@ -1373,84 +1391,6 @@ ${firstName}`;
     }
   };
 
-  const handleVisionApply = async () => {
-    const link = [job?.applyLink, job?.url, job?.sourceUrl].map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
-    if (!link) {
-      alert('This job has no application URL.');
-      return;
-    }
-    setAutoApplying(true);
-    setAutoApplyProgress([]);
-    setAutoApplyResult(null);
-    setShowAutoApplyModal(true);
-    setAutoVisionRunId('');
-    setNeedsUser(null);
-    try {
-      let savedAnswers = {};
-      try { savedAnswers = JSON.parse(localStorage.getItem('hamzooh_apply_answers') || '{}'); } catch {}
-      const response = await fetch('http://localhost:3000/api/auto-apply-vision', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          url: link,
-          profile: { ...(profile || {}), jobTitle: job?.title || '', company: job?.company || '' },
-          answers: savedAnswers,
-        }),
-      }).then((r) => r.json());
-      if (!response.ok) throw new Error(response.error || 'Vision agent could not start.');
-      setAutoVisionRunId(response.runId);
-      setAutoApplyProgress([{ step: 'vision_started', message: '👁️ Vision AI is opening the job in its own browser window…', timestamp: Date.now() }]);
-
-      let lastStepCount = 0;
-      let consecutiveErrors = 0;
-      const poll = setInterval(async () => {
-        try {
-          const res = await fetch(`http://localhost:3000/api/auto-apply-vision/${response.runId}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const status = await res.json();
-          consecutiveErrors = 0;
-          const run = status.run;
-          if (!run) return;
-          const newSteps = (run.steps || []).slice(lastStepCount);
-          lastStepCount = (run.steps || []).length;
-          if (newSteps.length) {
-            setAutoApplyProgress((prev) => [...prev, ...newSteps.map((s) => ({
-              step: s.step, message: s.message, timestamp: s.t || Date.now(),
-            }))].slice(-80));
-          }
-          if (run.status !== 'RUNNING') {
-            clearInterval(poll);
-            setAutoApplying(false);
-            setAutoApplyResult({
-              status: run.status === 'SUBMITTED' ? 'submitted'
-                : run.status === 'NEEDS_USER' ? 'needs_attention' : 'failed',
-              message: run.result?.message || `Vision agent finished: ${run.status}`,
-              filledFields: [],
-            });
-            if (run.result?.message) {
-              setNeedsUser({
-                reasonCode: run.result.reasonCode || run.status,
-                message: run.result.message,
-                question: '',
-                runId: response.runId,
-              });
-            }
-          }
-        } catch (err) {
-          consecutiveErrors++;
-          // Only abort if it fails 4 consecutive times (10+ seconds of disconnection)
-          if (consecutiveErrors >= 4) {
-            clearInterval(poll);
-            setAutoApplying(false);
-            setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
-          }
-        }
-      }, 2500);
-    } catch (err) {
-      setAutoApplying(false);
-      setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
-    }
-  };
 
   // Request the structured Phase-0 log for this run and download it.
   const handleDownloadRunLog = () => {
@@ -2939,53 +2879,6 @@ ${firstName}`;
               </div>
             </>
           )}
-
-          {/* Full Auto Mode Toggle - NEW */}
-          <div style={{ marginTop: '16px', padding: '14px 16px', background: '#fffbeb', border: '1px solid #fbbf24', borderRadius: '12px' }}>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={fullAutoMode}
-                onChange={(e) => setFullAutoMode(e.target.checked)}
-                style={{ 
-                  width: '20px', 
-                  height: '20px', 
-                  marginTop: '2px',
-                  cursor: 'pointer',
-                  accentColor: '#f59e0b'
-                }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <strong style={{ fontSize: '14px', color: '#92400e', fontWeight: '700' }}>
-                    ⚡ Full Auto-Submit Mode (100% Automation)
-                  </strong>
-                  <span style={{ 
-                    fontSize: '10px', 
-                    fontWeight: '800', 
-                    background: '#fbbf24', 
-                    color: '#78350f', 
-                    padding: '3px 8px', 
-                    borderRadius: '12px',
-                    letterSpacing: '0.5px'
-                  }}>
-                    BETA
-                  </span>
-                </div>
-                <p style={{ fontSize: '12px', color: '#78350f', margin: '0', lineHeight: '1.5' }}>
-                  {fullAutoMode ? (
-                    <>
-                      <strong>🤖 ACTIVE:</strong> AI makes all decisions and auto-submits without confirmation.
-                    </>
-                  ) : (
-                    <>
-                      AI fills form but you review before submission. Enable for mass applications.
-                    </>
-                  )}
-                </p>
-              </div>
-            </label>
-          </div>
 
           {/* Stage navigation */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #e8e8e3' }}>
