@@ -59,6 +59,28 @@
           filledCount: message.filledCount,
           emptyCount: message.emptyCount,
           skipped: message.skipped || [],
+          runId: message.runId,
+        }, '*');
+      }
+
+      // Relay pause events from the background into the dashboard.
+      if (message.type === 'HAMZOOH_NEEDS_USER') {
+        window.postMessage({
+          source: 'hamzooh-extension',
+          type: 'HAMZOOH_NEEDS_USER',
+          reasonCode: message.reasonCode,
+          message: message.message,
+          question: message.question || '',
+          runId: message.runId || '',
+        }, '*');
+      }
+
+      // Relay a full run log requested by the dashboard.
+      if (message.type === 'HAMZOOH_RUN_LOG') {
+        window.postMessage({
+          source: 'hamzooh-extension',
+          type: 'HAMZOOH_RUN_LOG',
+          run: message.run || null,
         }, '*');
       }
     });
@@ -106,11 +128,41 @@
       return;
     }
 
+    if (data.type === 'HAMZOOH_RESUME_RUN') {
+      chrome.runtime.sendMessage({ type: 'HAMZOOH_RESUME_RUN' }, (result) => {
+        reply('HAMZOOH_RESUME_RESULT', {
+          ok: Boolean(result?.ok),
+          error: chrome.runtime.lastError?.message || result?.error || '',
+          tabId: result?.tabId || null,
+          runId: result?.runId || '',
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'HAMZOOH_GET_RUN') {
+      chrome.runtime.sendMessage({ type: 'HAMZOOH_GET_RUN', runId: data.runId || '' }, (result) => {
+        reply('HAMZOOH_RUN_LOG', { run: result?.run || null });
+      });
+      return;
+    }
+
+    if (data.type === 'HAMZOOH_LIST_RUNS') {
+      chrome.runtime.sendMessage({ type: 'HAMZOOH_LIST_RUNS' }, (result) => {
+        reply('HAMZOOH_RUN_LIST', { runs: result?.runs || [] });
+      });
+      return;
+    }
+
     if (data.type === 'HAMZOOH_START_APPLY') {
+      try { chrome.storage.local.set({ hamzoohTrainMode: data.trainMode === true }); } catch {}
       chrome.runtime.sendMessage({
         type: 'HAMZOOH_OPEN_JOB',
         requestId: data.requestId || '',
         url: data.url,
+        dryRun: data.dryRun === true,
+        force: data.force === true,
+        trainMode: data.trainMode === true,
         profile: data.profile || {},
         answers: data.answers || {},
         resumeBase64: data.resumeBase64 || '',
@@ -118,10 +170,16 @@
         resumeText: data.resumeText || '',
         jobTitle: data.jobTitle || '',
         company: data.company || '',
-        autoSubmit: data.autoSubmit === true,
+        autoSubmit: data.trainMode ? false : data.autoSubmit === true,
       }, (result) => {
         const error = chrome.runtime.lastError?.message || result?.error || '';
-        reply('HAMZOOH_APPLY_READY', { requestId: data.requestId || '', ok: Boolean(result?.ok) && !error, error, url: result?.url || '' });
+        reply('HAMZOOH_APPLY_READY', {
+          requestId: data.requestId || '',
+          ok: Boolean(result?.ok) && !error,
+          error,
+          url: result?.url || '',
+          runId: result?.runId || '',
+        });
       });
     }
   });

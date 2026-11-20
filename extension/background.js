@@ -542,7 +542,7 @@ async function injectFiller(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      files: ['agent.js', 'filler.js'],
+      files: ['filler.js'],
     });
     return true;
   } catch (err) {
@@ -963,7 +963,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       resumeText: String(message.resumeText || '').slice(0, 20000),
       jobTitle: message.jobTitle || '',
       company: message.company || '',
-      autoSubmit: message.autoSubmit === true,
+      trainMode: message.trainMode === true,
+      autoSubmit: message.trainMode ? false : message.autoSubmit === true,
       startedAt: Date.now(),
       hasResume: Boolean(message.resumeBase64),
     };
@@ -972,6 +973,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await storageSet({
         profile: message.profile || {},
         answers: message.answers || {},
+        hamzoohTrainMode: message.trainMode === true,
         pendingApply,
       });
     } catch (err) {

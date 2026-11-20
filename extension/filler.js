@@ -2623,7 +2623,18 @@
 
   async function runPending(stored) {
     const pending = stored.pendingApply;
-    if (!pending || filling || window.__HAMZOOH_FILLER_BUSY__) return;
+    if (!pending) return;
+
+    // 🎓 Train Mode: 100% passive recording on top window, NO automated actions whatsoever!
+    const isTrain = pending.trainMode === true || stored.hamzoohTrainMode === true;
+    if (isTrain) {
+      if (window.top === window) {
+        initTrainModeRecorder(location.hostname, pending);
+      }
+      return;
+    }
+
+    if (filling || window.__HAMZOOH_FILLER_BUSY__) return;
     if (!(await shouldRun(pending))) return;
     CURRENT_RUN_ID = pending.runId || pending.sessionId || '';
     CURRENT_DRY_RUN = pending.dryRun === true;
