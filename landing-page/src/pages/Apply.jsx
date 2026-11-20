@@ -2834,7 +2834,7 @@ ${firstName}`;
 
             <button
               className="btn-accent"
-              onClick={handleVisionApply}
+              onClick={handleProceedDirectApply}
               disabled={autoApplying || submitted}
               style={{ 
                 background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 

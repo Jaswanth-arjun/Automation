@@ -48,6 +48,14 @@
   const skipped = [];
   const logs = [];
   let filling = false;
+  let CURRENT_RUN_ID = '';
+  let CURRENT_DRY_RUN = false;
+  let NEXT_CLICKS = 0;
+  let RESUME_ATTACHED = false;
+  let STEP_COUNT = 0;
+  let NO_PROGRESS_STEPS = 0;
+  let LAST_SIGNATURE = '';
+  let TERMINAL_REPORTED = false;
 
   function extensionAlive() {
     try { return Boolean(chrome.runtime && chrome.runtime.id); } catch { return false; }
@@ -70,6 +78,12 @@
   let autoPromptMissed = false;
 
   async function askOrSkip(question, index, total, options, reason, autoSubmit) {
+    // Harness/dry-run never blocks waiting for a human. The question is
+    // recorded (so the log shows what was unknowable) and the run continues.
+    if (CURRENT_DRY_RUN) {
+      runEvent('dry_run_skipped_question', { question: String(question || '').slice(0, 200), reason, options }, 'Dry run: question left unanswered');
+      return null;
+    }
     if (!autoSubmit) return askHamzoohQuestion(question, index, total, options, reason);
     // Auto mode already asked and nobody answered: asking again would just make
     // the run sit on another prompt the user is clearly not watching.
@@ -104,11 +118,31 @@
     try {
       chrome.runtime.sendMessage({
         type: 'HAMZOOH_FILLER_PROGRESS',
+        runId: CURRENT_RUN_ID,
         step,
         message,
         timestamp: Date.now(),
+        frameUrl: location.href,
         skipped: uniqueSkipped(),
         ...details,
+      });
+    } catch {}
+  }
+
+  // Structured per-run event for the Phase-0 diagnostic log. Unlike
+  // sendProgress this also carries counts/snapshots that are not user-facing.
+  function runEvent(step, data = {}, message = '') {
+    if (!extensionAlive() || !CURRENT_RUN_ID) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: 'HAMZOOH_RUN_EVENT',
+        runId: CURRENT_RUN_ID,
+        step,
+        message,
+        data,
+        href: location.href,
+        frameUrl: location.href,
+        t: Date.now(),
       });
     } catch {}
   }
@@ -127,6 +161,30 @@
 
   function proxyFetch(path, body, method = 'POST') {
     return runtimeSend({ type: 'HAMZOOH_PROXY_FETCH', path, method, body });
+  }
+
+  async function requestVisionDecision(profile, answers, pending) {
+    try {
+      const snap = await runtimeSend({ type: 'HAMZOOH_CAPTURE_SCREENSHOT' });
+      if (!snap?.ok || !snap.dataUrl) return null;
+      const res = await fetch('http://localhost:3000/api/extension/vision-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          screenshot: snap.dataUrl,
+          profile,
+          answers,
+          jobTitle: pending.jobTitle || '',
+          company: pending.company || '',
+          url: location.href,
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.decision || null;
+    } catch {
+      return null;
+    }
   }
 
   function queryAllDeep(selector, root = document) {
@@ -333,8 +391,16 @@
     const name = profile.fullName || '';
     const [first, ...rest] = name.split(' ').filter(Boolean);
     const education = profile.education?.[0] || {};
-    const internships = profile.experience || profile.internships || [];
-    const intern = internships.map((item) => [item.title, item.company, item.dates].filter(Boolean).join(' — ')).filter(Boolean).join('; ');
+    const experienceRaw = profile.experience || profile.internships || [];
+    // Profiles can store experience as a list of roles or as a plain
+    // "7 years" string; both must be safe here or the whole run crashes.
+    const internships = Array.isArray(experienceRaw) ? experienceRaw : [];
+    const experienceYears = profile.yearsOfExperience ?? profile.yearsExperience
+      ?? (typeof experienceRaw === 'string' || typeof experienceRaw === 'number' ? experienceRaw : internships.length);
+    const skills = Array.isArray(profile.skills)
+      ? profile.skills
+      : String(profile.skills || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const intern = internships.map((item) => [item?.title, item?.company, item?.dates].filter(Boolean).join(' - ')).filter(Boolean).join('; ');
     const projects = profile.projects || [];
     const projectUrl = projects.map((p) => p.link || p.url).find(Boolean)
       || profile.links?.github || profile.github || profile.links?.portfolio || '';
@@ -362,13 +428,12 @@
       degree: [education.degree, education.branch].filter(Boolean).join(' ') || '',
       graduation: education.dates || education.graduationYear || profile.batch || '',
       salary: profile.expectedSalary || profile.salary || '',
-      experience_years: profile.yearsOfExperience != null && profile.yearsOfExperience !== ''
-        ? String(profile.yearsOfExperience) : String(internships.length || '0'),
+      experience_years: String(experienceYears || '0'),
       codechef: profile.codechef || profile.codechefRating || '',
       codeforces: profile.codeforces || profile.codeforcesRating || '',
       leetcode: profile.leetcode || profile.leetcodeRating || '',
       hackerrank: profile.hackerrank || profile.hackerrankRating || '',
-      cover_letter: `I am excited to apply for the ${jobTitle || 'position'} at ${company || 'your company'}. With my background in ${(profile.skills || []).slice(0, 4).join(', ') || 'software development'}, I am confident in my ability to contribute effectively.`,
+      cover_letter: `I am excited to apply for the ${jobTitle || 'position'} at ${company || 'your company'}. With my background in ${skills.slice(0, 4).join(', ') || 'software development'}, I am confident in my ability to contribute effectively.`,
     };
     return String(map[key] || '').trim();
   }
@@ -538,8 +603,10 @@
     if (known) return known;
     if (/privacy|acknowledge|agree|consent|terms|i understand|i certify/.test(q) && !isSensitiveQuestion(q)) return 'yes';
     if (isEeoQuestion(q)) return 'decline';
-    const workedHere = (profile.experience || []).some((item) => {
-      const c = String(item.company || '').toLowerCase();
+    const experienceList = Array.isArray(profile.experience) ? profile.experience : [];
+    const internshipsList = Array.isArray(profile.internships) ? profile.internships : [];
+    const workedHere = [...experienceList, ...internshipsList].some((item) => {
+      const c = String(item?.company || '').toLowerCase();
       return c && company && (c.includes(String(company).toLowerCase()) || String(company).toLowerCase().includes(c));
     });
     if (/employed by|worked (for|at)|previously employed|ever been employed/.test(q)) {
@@ -810,6 +877,22 @@
     return Boolean(input.files && input.files.length);
   }
 
+  // Phase 1f: collect visible validation messages so a rejected Next click can
+  // be repaired instead of blindly retried.
+  function detectValidationErrors() {
+    const nodes = queryAllDeep('[role="alert"], [aria-invalid="true"], .error, [class*="error"], [data-testid*="error"], [data-automation-id*="error"]');
+    const out = [];
+    for (const el of nodes) {
+      if (!visible(el)) continue;
+      const text = String(el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+      if (text && text.length < 300 && !out.includes(text)) out.push(text);
+    }
+    const body = String(document.body?.innerText || '').slice(0, 4000);
+    const match = body.match(/(?:please|must) (?:fill|complete|enter|select|answer)[^\n.]{0,120}/gi);
+    if (match) match.slice(0, 5).forEach((text) => { if (!out.includes(text)) out.push(text); });
+    return out.slice(0, 10);
+  }
+
   function allFileInputs() {
     return queryAllDeep('input[type="file"]').sort((a, b) => {
       const aText = `${a.id} ${a.name} ${labelFor(a)}`.toLowerCase();
@@ -877,8 +960,18 @@
       }
     }
     if (attached) {
+      // Phase 1i: confirm the browser actually holds the file and, where the
+      // page shows it, that its name is visible before moving to Next.
+      let verified = allFileInputs().some((input) => input.files && input.files.length > 0);
+      const startedAt = Date.now();
+      while (!verified && Date.now() - startedAt < 2500) {
+        await sleep(250);
+        verified = allFileInputs().some((input) => input.files && input.files.length > 0);
+      }
+      const nameShown = String(document.body?.innerText || '').includes(file.name);
+      runEvent('resume_verified', { verified, nameShown, name: file.name }, `Resume verification: files=${verified}, filename shown=${nameShown}`);
       sendProgress('resume_attached', `📎 Attached ${file.name}`);
-      await sleep(1500);
+      await sleep(800);
     } else {
       skipped.push({ field: 'resume', reason: 'Could not find a file input or dropzone for the resume.' });
       sendProgress('resume_failed', '⚠️ Could not attach the tailored resume — no file input found.');
@@ -886,8 +979,37 @@
     return attached;
   }
 
+  // LinkedIn Easy Apply often shows previously uploaded resumes instead of a
+  // file input. Pick one (or open the upload control) before pressing Next.
+  async function selectLinkedInResume(pending) {
+    if (!/linkedin\.com/i.test(location.hostname)) return false;
+    const modal = findLinkedInModal() || document;
+    const options = queryAllDeep('div, li, label, span', modal).filter((el) => visible(el)
+      && /\.(pdf|docx?|doc)\b/i.test(el.innerText || '')
+      && (el.innerText || '').length < 180);
+    if (options.length) {
+      const stem = String(pending?.resumeName || '').replace(/\.[^.]+$/, '').slice(0, 12).toLowerCase();
+      const target = options.find((el) => stem && (el.innerText || '').toLowerCase().includes(stem)) || options[0];
+      await realClick(target);
+      await sleep(700);
+      runEvent('resume_selected', { label: String(target.innerText || '').replace(/\s+/g, ' ').slice(0, 120) }, 'Selected an existing resume in the LinkedIn Easy Apply modal');
+      return true;
+    }
+    const uploadBtn = queryAllDeep('button, a', modal).find((el) => visible(el)
+      && /^(upload resume|upload (a )?(cv|resume)|choose file)$/i.test((el.innerText || '').trim()));
+    if (uploadBtn) {
+      await realClick(uploadBtn);
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 3000 && !allFileInputs().length) await sleep(200);
+      return attachGeneratedResume(pending);
+    }
+    return false;
+  }
+
   function detectCaptchaOrMFA() {
-    const captchaIframes = [...document.querySelectorAll('iframe')].filter((iframe) => /recaptcha|hcaptcha|captcha|turnstile|challenge/i.test(iframe.src || ''));
+    const captchaIframes = queryAllDeep('iframe').filter((iframe) => /recaptcha|hcaptcha|captcha|turnstile|challenge/i.test(
+      `${iframe.getAttribute('src') || ''} ${iframe.src || ''} ${iframe.title || ''} ${iframe.name || ''}`,
+    ));
     if (captchaIframes.length) return 'captcha';
     if (queryAllDeep('[class*="captcha"], [id*="captcha"], .g-recaptcha, .h-captcha').length) return 'captcha';
     const mfa = queryAllDeep('input').filter((input) => /otp|verification code|two.?factor|2fa|mfa|authenticator|security code/i.test(labelFor(input) + ' ' + (input.placeholder || '')));
@@ -1061,15 +1183,27 @@
   ].join(', ');
 
   function findLinkedInModal() {
-    const candidates = queryAllDeep('.jobs-easy-apply-modal, [data-test-modal-id="easy-apply-modal"], .artdeco-modal[role="dialog"], [role="dialog"], .artdeco-modal');
-    return candidates.find((el) => {
+    const candidates = queryAllDeep('.jobs-easy-apply-modal, [data-test-modal-id="easy-apply-modal"], .artdeco-modal[role="dialog"], [role="dialog"], .artdeco-modal, div[class*="modal"]');
+    const found = candidates.find((el) => {
       const r = el.getBoundingClientRect?.() || { width: 0, height: 0 };
       if (r.width < 100 || r.height < 100) return false;
       const cs = window.getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden') return false;
       const text = (el.innerText || '').toLowerCase();
       return text.includes('apply to') || text.includes('easy apply') || el.classList.contains('jobs-easy-apply-modal') || el.getAttribute('data-test-modal-id') === 'easy-apply-modal';
-    }) || null;
+    });
+    if (found) return found;
+    // LinkedIn sometimes renders the modal without a dialog role. Walk up
+    // from the visible Next button until we find the "Apply to … / N of M
+    // pages" container.
+    const next = queryAllDeep('button').find((b) => /^next$/i.test((b.innerText || '').trim()) && visible(b));
+    if (!next) return null;
+    let node = next.parentElement;
+    for (let depth = 0; node && depth < 10; depth += 1, node = node.parentElement) {
+      const text = (node.innerText || '').toLowerCase();
+      if (/\d+\s*\/\s*\d+\s*pages|select or upload a resume|upload resume/.test(text)) return node;
+    }
+    return null;
   }
 
   async function waitForLinkedInModalReady() {
@@ -1125,27 +1259,55 @@
     return null;
   }
 
+  // Scored discovery of the initial Apply control. On job description pages it
+  // can be a link, button, div[role=button], a shadow-root control, or an
+  // <a href="/apply"> whose visible text is only "I'm interested".
+  function scoreApplyCandidate(el) {
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const href = norm(el.getAttribute('href'));
+    const visibleText = norm([el.innerText, el.value].filter(Boolean).join(' '));
+    const attrsText = norm([el.getAttribute('aria-label'), el.title,
+      el.getAttribute('data-testid'), el.getAttribute('data-automation-id')].filter(Boolean).join(' '));
+    const text = `${visibleText} ${attrsText}`;
+    if (!text) return -1;
+    // Only VISIBLE text decides whether this is an Apply control. Aria-labels
+    // on nav links ("Home", "Search for jobs to apply", "privacy notice")
+    // produced false positives that broke Workday/Workable in the harness.
+    if (!/apply|interested|start application|begin application/i.test(visibleText) && !/\/apply|apply=/i.test(href)) return -1;
+    if (/search for jobs|view all jobs|browse jobs|privacy|cookie|accept all|decline all|settings|language|english|manage settings|^home$/i.test(visibleText)) return -1;
+    if (/apply (filter|to all|changes)|save (job|this)|share|sign in|log in|contact sales|attach file|create alert|job alert/i.test(text)) return -1;
+    let score = 0;
+    if (/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply)$/i.test(visibleText)) score += 60;
+    else if (/\b(i'?m interested|i am interested)\b/i.test(visibleText)) score += 25;
+    else if (/\b(apply now|easy apply|apply for this job|start application|begin application)\b/i.test(visibleText)) score += 35;
+    else if (/\bapply\b/i.test(visibleText)) score += 20;
+    if (/apply/i.test(attrsText)) score += 15;
+    if (/\/apply|apply=/i.test(href)) score += 30;
+    if (/apply/i.test(norm(el.getAttribute('data-testid') || el.getAttribute('data-automation-id') || el.getAttribute('data-qa') || ''))) score += 20;
+    if (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') score += 10;
+    else if (el.tagName === 'A') score += 8;
+    if (el.getAttribute('target') === '_blank' || /_blank/.test(norm(el.getAttribute('rel')))) score -= 5;
+    const form = el.closest?.('form');
+    if (form && form.querySelectorAll('input, textarea, select').length >= 3) return -1;
+    return score;
+  }
+
   function findDescriptionApplyButtons() {
     // Check for LinkedIn Easy Apply first
     const easyApply = findLinkedInEasyApplyButton();
     if (easyApply) return [easyApply];
 
-    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
     const out = [];
     for (const el of queryAllDeep(ACTION_SELECTOR)) {
       try {
         if (el.disabled || !visible(el)) continue;
-        const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || '');
-        if (!/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply)$/i.test(text)
-            && !/easy\s*apply/i.test(text)) continue;
-        if (/sign in|log in|contact sales|attach file/i.test(text)) continue;
-        const form = el.closest('form');
-        if (form && form.querySelectorAll('input, textarea, select').length >= 3) continue;
+        const score = scoreApplyCandidate(el);
+        if (score < 10) continue;
         const r = el.getBoundingClientRect?.() || { top: 0 };
-        out.push({ el, top: r.top });
+        out.push({ el, top: r.top, score });
       } catch {}
     }
-    out.sort((a, b) => a.top - b.top);
+    out.sort((a, b) => b.score - a.score || a.top - b.top);
     return out.map((o) => o.el);
   }
 
@@ -1163,13 +1325,33 @@
   // and they react to the full pointer sequence instead of a synthetic click.
   async function realClick(el) {
     const target = clickTarget(el);
-    try { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
-    await sleep(400);
+    try { target.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch {
+      try { target.scrollIntoView({ block: 'center' }); } catch {}
+    }
+    await sleep(200);
+    let rect = target.getBoundingClientRect();
+    // Smooth scroll / sticky headers can leave the target outside the viewport.
+    for (let attempt = 0; attempt < 12
+      && (rect.bottom < 0 || rect.top > window.innerHeight || rect.width <= 1); attempt += 1) {
+      await sleep(150);
+      rect = target.getBoundingClientRect();
+    }
     try {
-      const rect = target.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const inViewport = rect.width > 1 && rect.height > 1
+        && x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight;
+      if (CDP_AVAILABLE && window.top === window && inViewport) {
+        const ok = await cdpInput({ action: 'click', x, y });
+        if (ok) {
+          runEvent('cdp_click', { x, y, label: buttonText(target) }, `Trusted CDP click: ${buttonText(target)}`);
+          return;
+        }
+        CDP_AVAILABLE = false;
+      }
       const base = {
         bubbles: true, cancelable: true, view: window,
-        clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, button: 0,
+        clientX: x, clientY: y, button: 0,
       };
       for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
         try {
@@ -1214,6 +1396,16 @@
       const body = (document.body?.innerText || '').slice(0, 3500);
       return /sign in to apply|log in to apply|please login to continue|create an account to apply/i.test(body);
     } catch { return false; }
+  }
+
+  // Site blocks and bot challenges are NEEDS_USER, never something to bypass.
+  function detectSiteBlock() {
+    try {
+      const body = String(document.body?.innerText || '').slice(0, 5000);
+      if (/access denied|unusual traffic|verify you are (a )?human|are you a robot|request blocked|too many requests|service unavailable|403 forbidden/i.test(body)) return 'SITE_BLOCKED';
+      if (/this job (is no longer available|has been closed|has expired)|position (is no longer available|has been filled)/i.test(body)) return 'JOB_CLOSED';
+      return '';
+    } catch { return ''; }
   }
 
   // Identity providers reached by redirecting an Apply link. Filling these is
@@ -1444,47 +1636,97 @@
     return false;
   }
 
-  // Submission is only reported once a success state is actually observed.
+  // Submission is only reported once multiple success signals agree. If they
+  // disagree, a cheap LLM call classifies the post-submit page.
   async function submitAndVerify(submitBtn) {
     const beforeUrl = location.href;
     const beforeText = pageBodyText();
     const beforeSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-    try {
-      submitBtn.click();
-    } catch {
-      try { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); } catch {}
-    }
+    await realClick(submitBtn);
 
     const startedAt = Date.now();
+    let signals = {};
     while (Date.now() - startedAt < 25000) {
       await sleep(800);
 
       const text = pageBodyText();
-      if (text !== beforeText) {
-        const success = SUCCESS_PATTERNS.find((re) => re.test(text));
-        if (success) return { ok: true, reason: 'confirmation message shown' };
-      }
-
-      if (location.href !== beforeUrl && /\/(thank|thanks|confirmation|success|submitted|complete|applied)|\/apply\/(status|confirm)/i.test(location.href)) {
-        return { ok: true, reason: `redirected to ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}` };
-      }
-
-      const errors = VALIDATION_PATTERNS.filter((re) => {
-        const match = text.match(re);
-        return match && !beforeText.match(re);
-      });
-      if (errors.length) {
-        return { ok: false, reason: 'the form reported a validation error (form is still on screen)' };
-      }
-
+      const successPattern = SUCCESS_PATTERNS.find((re) => re.test(text));
+      const successUrl = location.href !== beforeUrl
+        && /\/(thank|thanks|confirmation|success|submitted|complete|applied)|\/apply\/(status|confirm)/i.test(location.href);
       const currentSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-      const formGone = currentSnapshot !== beforeSnapshot && collectInputs().length === 0;
-      if (formGone && !findSubmitButton()) {
-        return { ok: true, reason: 'the application form was replaced after submission' };
+      const formGone = currentSnapshot !== beforeSnapshot && collectInputs().length === 0 && !findSubmitButton();
+      const emailSent = /confirmation email|we('| a)?ve emailed you|check your (inbox|email)/i.test(text);
+      const negative = /something went wrong|submission failed|there was an error|please try again/i.test(text)
+        || VALIDATION_PATTERNS.some((re) => re.test(text) && !beforeText.match(re));
+
+      signals = {
+        successPattern: Boolean(successPattern), successUrl, formGone, emailSent, negative,
+        url: location.href,
+        text: text.slice(0, 2500),
+      };
+      if (negative && !successPattern && !successUrl) {
+        runEvent('submit_signals', signals, 'Submission showed a negative signal');
+        return { ok: false, reason: 'the form reported an error after Submit' };
       }
+      if (successPattern || successUrl) {
+        runEvent('submit_signals', signals, `Submission verified: ${successPattern || 'confirmation URL'}`);
+        return { ok: true, reason: successPattern ? 'confirmation message shown' : `redirected to ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}` };
+      }
+      if (formGone || emailSent) break;
     }
 
+    // Ambiguous: the form disappeared but there is no explicit success text.
+    if (formGone || emailSent) {
+      let verdict = 'unclear';
+      try {
+        const response = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({
+            type: 'HAMZOOH_PROXY_FETCH',
+            path: '/api/agent/classify-submission',
+            method: 'POST',
+            body: { text: signals.text || '', url: signals.url || location.href, errors: detectValidationErrors() },
+          }, (result) => resolve(result || null));
+        });
+        verdict = response?.data?.verdict || 'unclear';
+      } catch { verdict = 'unclear'; }
+      runEvent('submit_signals', { ...signals, verdict, classified: true }, `Submission classified as ${verdict}`);
+      return {
+        ok: verdict === 'submitted',
+        reason: verdict === 'submitted' ? 'LLM classified the post-submit page as success'
+          : `submission could not be verified (${verdict})`,
+      };
+    }
+
+    runEvent('submit_signals', signals, 'No confirmation within 25s');
     return { ok: false, reason: 'no confirmation appeared within 25s' };
+  }
+
+  // Phase 1c: wait until the DOM has stopped mutating before deciding a step
+  // is complete. Caps at 6s so a busy spinner can never hang the run.
+  function waitForDomStable(quietMs = 800, timeoutMs = 6000) {
+    return new Promise((resolve) => {
+      let timer = null;
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearTimeout(hardStop);
+        observer.disconnect();
+        resolve();
+      };
+      const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(finish, quietMs);
+      });
+      const hardStop = setTimeout(finish, timeoutMs);
+      try {
+        observer.observe(document.documentElement || document, {
+          subtree: true, childList: true, attributes: true, characterData: true,
+        });
+      } catch { finish(); return; }
+      timer = setTimeout(finish, quietMs);
+    });
   }
 
   async function waitForForm() {
@@ -1505,6 +1747,40 @@
       if ((document.body?.innerText || '').replace(/\s+/g, ' ').trim().length > 200) return;
       await sleep(400);
     }
+  }
+
+  async function cdpInput(payload) {
+    if (!extensionAlive()) return false;
+    try {
+      const result = await runtimeSend({ type: 'HAMZOOH_CDP_INPUT', ...payload });
+      return Boolean(result?.ok);
+    } catch { return false; }
+  }
+
+  let CDP_AVAILABLE = true;
+
+  async function typeWithCdp(input, value) {
+    if (!CDP_AVAILABLE) return false;
+    try { input.focus(); } catch {}
+    const ok = await cdpInput({ action: 'type', text: String(value) });
+    if (!ok) { CDP_AVAILABLE = false; return false; }
+    try { input.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+    return String(input.value) === String(value);
+  }
+
+  // Phase 1g: always read the value back. If a framework rejected the
+  // synthetic input event, fall back to trusted CDP text insertion.
+  async function setVerified(input, value) {
+    if (!setNativeValue(input, value)) return false;
+    await sleep(80);
+    if (String(input.value) === String(value)) return true;
+    const recovered = await typeWithCdp(input, value);
+    if (recovered) {
+      runEvent('cdp_type', { tag: input.tagName, name: input.name || '', value: String(value).slice(0, 80) }, 'Recovered a rejected fill with CDP typing');
+    } else {
+      runEvent('fill_rejected', { tag: input.tagName, name: input.name || '', value: String(value).slice(0, 80) }, 'Field did not keep the typed value');
+    }
+    return recovered;
   }
 
   function updatePending(patch) {
@@ -1572,52 +1848,59 @@
     const company = pending.company || '';
     sendProgress('finding_form', '🔍 Looking for the application form…');
     const inputs = await waitForForm();
+    const fieldsDetected = inputs.length;
 
     const captchaType = detectCaptchaOrMFA();
     if (captchaType) {
       sendProgress('captcha_detected', '⚠️ Verification detected — waiting for you.');
-      await showCaptchaPauseOverlay(captchaType);
+      if (!CURRENT_DRY_RUN) await showCaptchaPauseOverlay(captchaType);
     }
 
     sendProgress('filling', '📝 Filling known profile fields…');
     let filledCount = 0;
-    inputs.forEach((input) => {
+    for (const input of inputs) {
       const type = (input.getAttribute('type') || '').toLowerCase();
-      if (type === 'file' || type === 'password' || type === 'checkbox' || type === 'radio') return;
-      if (input.tagName !== 'SELECT' && !isPlaceholderValue(input) && input.value) return;
+      if (type === 'file' || type === 'password' || type === 'checkbox' || type === 'radio') continue;
+      if (input.tagName !== 'SELECT' && !isPlaceholderValue(input) && input.value) continue;
       const label = labelFor(input);
       const hint = FIELD_HINTS.find((item) => item.test.test(label));
-      if (!hint) return;
+      if (!hint) continue;
       const value = profileValue(profile, hint.key, jobTitle, company);
-      if (value && setNativeValue(input, value)) filledCount += 1;
-    });
+      if (value && await setVerified(input, value)) filledCount += 1;
+    }
 
-    if (await attachGeneratedResume(pending)) filledCount += 1;
+    let resumeOk = await selectLinkedInResume(pending);
+    if (!resumeOk) resumeOk = await attachGeneratedResume(pending);
+    if (resumeOk) {
+      RESUME_ATTACHED = true;
+      filledCount += 1;
+    }
 
     filledCount += fillChoices(profile, answers, company);
     await fillCustomDropdowns(new Map(), answers, profile, company);
 
-    const unknown = collectInputs().filter((input) => {
+    const unknown = [];
+    for (const input of collectInputs()) {
       const type = (input.getAttribute('type') || '').toLowerCase();
-      if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) return false;
-      if (!isPlaceholderValue(input)) return false;
+      if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) continue;
+      if (!isPlaceholderValue(input)) continue;
       const label = labelFor(input);
       const hint = FIELD_HINTS.find((item) => item.test.test(label));
       if (hint) {
         const value = profileValue(profile, hint.key, jobTitle, company);
-        if (value && setNativeValue(input, value)) {
+        if (value && await setVerified(input, value)) {
           filledCount += 1;
-          return false;
+          continue;
         }
       }
       const isRequired = input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(label);
       if (!isRequired) {
         // Optional fields never block the flow: record why instead of asking.
         if (label) skipped.push({ field: label.slice(0, 80), reason: 'Optional field — no value in your profile or saved answers.' });
-        return false;
+        continue;
       }
-      return Boolean(label);
-    });
+      if (label) unknown.push(input);
+    }
 
     if (unknown.length) sendProgress('unknown_fields', `🔎 Resolving ${unknown.length} remaining fields…`);
     for (let i = 0; i < unknown.length && i < 20; i += 1) {
@@ -1641,7 +1924,17 @@
       if (!group.items.some((input) => input.checked)) stillEmpty.push(group.items[0]);
     });
 
-    return { filledCount, stillEmpty };
+    runEvent('form_filled', {
+      url: location.href,
+      fieldsDetected,
+      filledCount,
+      emptyCount: stillEmpty.length,
+      resumeAttached: RESUME_ATTACHED,
+      nextClicks: NEXT_CLICKS,
+      missing: stillEmpty.map((input) => labelFor(input).slice(0, 90)).filter(Boolean),
+    }, `Form filled: ${filledCount}/${fieldsDetected} fields, ${stillEmpty.length} required still empty`);
+
+    return { filledCount, stillEmpty, fieldsDetected };
   }
 
   // Required can be declared on the group wrapper (aria-required on
@@ -1718,29 +2011,152 @@
     return resolved;
   }
 
+  // Phase 2: hand the current page to the AI agent when deterministic logic
+  // stalls. The agent only receives facts from the profile/vault and executes
+  // through the same verified input helpers as the deterministic path.
+  async function runAgentFallback(profile, answers, pending, reason) {
+    const api = window.__HAMZOOH_AGENT_API__;
+    if (!api) {
+      runEvent('agent_unavailable', { reason }, 'AI agent module not loaded');
+      return false;
+    }
+    sendProgress('agent_start', '🤖 Deterministic fill stalled — asking the AI agent for the next action…');
+    runEvent('agent_start', { reason, url: location.href }, `Agent fallback: ${reason}`);
+    try {
+      return await api.run({ profile, answers, pending, reason }, {
+        click: async (el) => { await realClick(el); return true; },
+        fill: async (el, value) => setVerified(el, value),
+        select: async (el, option) => {
+          const wanted = String(option || '').trim().toLowerCase();
+          const options = [...(el.options || [])];
+          const match = options.find((o) => o.value === option || o.text.trim().toLowerCase() === wanted)
+            || options.find((o) => o.text.trim().toLowerCase().includes(wanted) || wanted.includes(o.text.trim().toLowerCase()));
+          if (!match) return false;
+          el.value = match.value;
+          ['input', 'change', 'blur'].forEach((t) => {
+            try { el.dispatchEvent(new Event(t, { bubbles: true })); } catch {}
+          });
+          return true;
+        },
+        check: async (el, value) => {
+          if (Boolean(el.checked) !== Boolean(value)) await realClick(el);
+          return Boolean(el.checked) === Boolean(value);
+        },
+        uploadResume: async () => attachGeneratedResume(pending),
+        pressKey: async (key) => {
+          try {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+          } catch {}
+        },
+        scroll: async (direction) => {
+          try { window.scrollBy({ top: direction === 'up' ? -700 : 700, behavior: 'smooth' }); } catch {}
+        },
+        wait: (ms) => sleep(ms),
+        finish: async (message, details) => finish(message, details),
+        log: (step, data, message) => runEvent(step, data, message),
+      });
+    } catch (err) {
+      runEvent('agent_error', { error: err.message, stack: String(err.stack || '').slice(0, 1500) }, `Agent crashed: ${err.message}`);
+      return false;
+    }
+  }
+
   async function fillPage(profile, answers, pending, depth = 0) {
+    if (pending.done) return;
     if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
-    if (depth > 12) {
-      await finish('⚠️ Too many application steps — continue manually.', { status: 'needs_attention', filledCount: 0, emptyCount: 0 });
+
+    // Progress-based loop (Phase 1d): keep going only while the page state
+    // actually changes. Hard cap 40 steps; stop after 3 no-progress steps.
+    STEP_COUNT += 1;
+    const signature = [
+      location.href,
+      collectInputs().map((i) => `${i.name}:${i.id}:${i.type}:${i.value}`).join('|'),
+      findSubmitButton() ? 'submit' : '',
+      findAdvanceButton() ? 'next' : '',
+    ].join('::');
+    if (signature === LAST_SIGNATURE) NO_PROGRESS_STEPS += 1;
+    else { NO_PROGRESS_STEPS = 0; LAST_SIGNATURE = signature; }
+    runEvent('step', {
+      step: STEP_COUNT, depth, noProgress: NO_PROGRESS_STEPS,
+      url: location.href, inputs: collectInputs().length,
+      submit: Boolean(findSubmitButton()), next: Boolean(findAdvanceButton()),
+    }, `Step ${STEP_COUNT}: inputs=${collectInputs().length}, noProgress=${NO_PROGRESS_STEPS}`);
+    if (STEP_COUNT > 40 || NO_PROGRESS_STEPS >= 3) {
+      if (NO_PROGRESS_STEPS === 2) {
+        const agentResult = await runAgentFallback(profile, answers, pending, 'The deterministic filler made no progress.');
+        if (agentResult === 'terminal') return;
+        if (agentResult === true) return fillPage(profile, answers, { ...pending }, depth + 1);
+      }
+      await finish(NO_PROGRESS_STEPS >= 3
+        ? '⚠️ Stopped: the form did not change after 3 attempts (no progress).'
+        : '⚠️ Stopped: reached the 40-step safety cap.', {
+        status: 'needs_attention',
+        reasonCode: NO_PROGRESS_STEPS >= 3 ? 'NO_PROGRESS' : 'STEP_LIMIT',
+        filledCount: 0, emptyCount: 0,
+      });
       return;
     }
+
+    if (depth > 20) {
+      await finish('⚠️ Too many application steps — continue manually.', { status: 'needs_attention', reasonCode: 'STEP_LIMIT', filledCount: 0, emptyCount: 0 });
+      return;
+    }
+
+    const earlyApplyButtons = findDescriptionApplyButtons();
+    runEvent('frame_report', {
+      url: location.href,
+      title: document.title,
+      top: window.top === window,
+      depth,
+      inputs: collectInputs().length,
+      fileInputs: allFileInputs().length,
+      hasForm: pageHasForm(),
+      applyButtons: earlyApplyButtons.slice(0, 6).map((el) => buttonText(el)),
+      applyButtonCount: earlyApplyButtons.length,
+      captcha: detectCaptchaOrMFA(),
+      loginWall: detectLoginWall(),
+    }, `Frame report: ${collectInputs().length} inputs, ${earlyApplyButtons.length} apply buttons`);
 
     // Check if portal needs sign in or account creation.
     // Auto-fill if credentials exist in Vault, or display a helper banner to save them.
     if (detectAuthGate() || detectLoginWall()) {
+      if (CURRENT_DRY_RUN) {
+        await finish('🔐 Login wall detected — dry run stops here.', { status: 'needs_attention', reasonCode: 'LOGIN_REQUIRED' });
+        return;
+      }
       const loggedIn = await handlePortalAuthGate(pending.company);
       if (loggedIn) {
         return fillPage(profile, answers, pending, depth + 1);
       }
-      if (pending.awaitingManualApply && pending.loginHost === location.hostname) return;
+      if (pending.awaitingManualApply && pending.loginHost === location.hostname) {
+        await finish('🔐 Waiting for you to sign in. Use Resume after signing in.', {
+          status: 'needs_attention', reasonCode: 'LOGIN_REQUIRED',
+        });
+        return;
+      }
       sendProgress(
         'login_required',
         `🔐 Sign in or create an account for ${pending.company || location.hostname}. Hamzooh will save credentials and resume automatically.`,
       );
       await updatePending({ awaitingManualApply: true, loginHost: location.hostname });
+      await finish('🔐 Sign-in is required before the application form is available.', {
+        status: 'needs_attention', reasonCode: 'LOGIN_REQUIRED',
+      });
       return;
     }
 
+    const siteBlock = detectSiteBlock();
+    if (siteBlock) {
+      await finish(siteBlock === 'JOB_CLOSED'
+        ? '🚫 This job posting is closed or no longer available.'
+        : '🚫 The site blocked automated access. Open the job tab and continue manually.', {
+        status: 'needs_attention', reasonCode: siteBlock,
+      });
+      return;
+    }
+
+    await waitForDomStable();
     await waitForContent();
 
     // Check if Workday or ATS is displaying an "Autofill with Resume" choice dialog
@@ -1750,19 +2166,54 @@
     }
 
     const isLinkedIn = /linkedin\.com/i.test(location.hostname);
-    const linkedInModal = isLinkedIn ? findLinkedInModal() : null;
+    let linkedInModal = isLinkedIn ? findLinkedInModal() : null;
+
+    // ─── GPT-6 Luna Vision Inspection in New Tab ───
+    if (!pending.done && depth < 12) {
+      sendProgress('vision_inspect', '👁️ GPT-6 Luna inspecting screen in this tab…');
+      const visionDecision = await requestVisionDecision(profile, answers, pending);
+      if (visionDecision) {
+        hamzoohLog('info', 'GPT-6 Luna Vision decision', visionDecision);
+        runEvent('vision_decision', visionDecision, `Luna Vision: ${visionDecision.action} (${visionDecision.screenState})`);
+
+        if (visionDecision.action === 'wait' || visionDecision.screenState === 'modal_loading') {
+          sendProgress('waiting', `⏳ GPT-6 Luna: ${visionDecision.reasoning || 'Page loading spinner detected, waiting…'}`);
+          await sleep(2500);
+          return fillPage(profile, answers, pending, depth + 1);
+        }
+
+        if (visionDecision.action === 'click_easy_apply' && !pending.applyClicked) {
+          sendProgress('easy_apply', '💼 Easy Apply button detected by GPT-6 Luna — clicking…');
+          const applyBtn = findLinkedInEasyApplyButton() || earlyApplyButtons[0];
+          if (applyBtn) {
+            try { applyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+            await realClick(applyBtn);
+            await updatePending({ url: location.href, applyClicked: true });
+            await waitForLinkedInModalReady(15000);
+            return fillPage(profile, answers, { ...pending, url: location.href, applyClicked: true }, depth + 1);
+          }
+        }
+
+        if (visionDecision.action === 'done' || visionDecision.screenState === 'application_submitted') {
+          handleLinkedInDoneModal();
+          sendProgress('submitted', '🎉 Application submitted successfully via GPT-6 Luna Vision!');
+          return finish('✅ Application submitted successfully!', { status: 'submitted', filledCount: 1, emptyCount: 0 });
+        }
+      }
+    }
 
     // Check if we need to click the initial Apply / Easy Apply button.
     // RULE: If pending.applyClicked is true, NEVER click Easy Apply again!
     // Also, if the modal is already open, NEVER click Easy Apply!
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
     const applyBtns = (!pending.applyClicked && !linkedInModal && earlyInputs.length < 2)
-      ? findDescriptionApplyButtons()
+      ? earlyApplyButtons
       : [];
 
     if (applyBtns.length) {
       sendProgress('apply_opening', isLinkedIn ? '💼 LinkedIn Easy Apply detected — clicking Easy Apply…' : '📄 Job page detected — clicking Apply…');
       const beforeUrl = location.href;
+      runEvent('apply_click', { label: buttonText(applyBtns[0]), href: location.href }, `Clicking apply: ${buttonText(applyBtns[0])}`.slice(0, 160));
       await realClick(applyBtns[0]);
       await updatePending({ url: location.href, applyClicked: true });
 
@@ -1784,13 +2235,22 @@
         if (location.href !== beforeUrl || pageHasForm()) { changed = true; break; }
       }
       if (!changed) {
-        if (detectLoginWall()) {
-          sendProgress('login_required', '🔐 Log in on the job site, then click Apply — Hamzooh will continue automatically.');
-          await updatePending({ awaitingManualApply: true });
-          return;
-        }
+        const captchaNow = detectCaptchaOrMFA();
+        const blockedReason = captchaNow ? 'CAPTCHA'
+          : detectLoginWall() ? 'LOGIN_REQUIRED' : 'APPLY_BUTTON_NOT_FOUND';
+        sendProgress('login_required', blockedReason === 'CAPTCHA'
+          ? '⚠️ LinkedIn showed a verification challenge. Solve it in the job tab, then click Resume.'
+          : blockedReason === 'LOGIN_REQUIRED'
+            ? '🔐 Log in on the job site, then click Apply — Hamzooh will continue automatically.'
+            : '⚠️ Click Apply yourself — Hamzooh will fill the form when it appears.');
         await updatePending({ awaitingManualApply: true });
-        sendProgress('apply_blocked', '⚠️ Click Apply yourself — Hamzooh will fill the form when it appears.');
+        await finish(blockedReason === 'CAPTCHA'
+          ? '⚠️ A CAPTCHA/verification challenge blocked the application. Solve it in the job tab, then resume.'
+          : blockedReason === 'LOGIN_REQUIRED'
+            ? '🔐 Login is required before the application form opens.'
+            : '⚠️ The Apply control did not open a form. Open the job tab and click Apply — Hamzooh will resume.', {
+          status: 'needs_attention', reasonCode: blockedReason,
+        });
         return;
       }
       await runtimeSend({ type: 'HAMZOOH_ADOPT_TAB' });
@@ -1809,13 +2269,33 @@
     }
 
     if (!pageHasForm() && detectLoginWall()) {
-      sendProgress('login_required', '🔐 Please sign in. Hamzooh will resume when the form appears.');
       await updatePending({ awaitingManualApply: true });
+      sendProgress('login_required', '🔐 Please sign in. Hamzooh will resume when the form appears.');
+      await finish('🔐 Sign-in is required before the application form is available.', {
+        status: 'needs_attention', reasonCode: 'LOGIN_REQUIRED',
+      });
       return;
     }
 
     const snapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-    const { filledCount, stillEmpty } = await fillFormPhase(profile, answers, pending);
+    const { filledCount, stillEmpty, fieldsDetected } = await fillFormPhase(profile, answers, pending);
+
+    // No fillable HTML fields but an actionable control is visible: this is a
+    // widget/modal-only step (LinkedIn resume picker, custom ATS step, etc.).
+    // Let the AI agent drive it instead of blindly clicking Next.
+    if (fieldsDetected === 0 && !CURRENT_DRY_RUN) {
+      const hasControl = findAdvanceButton() || findSubmitButton()
+        || queryAllDeep('button, [role="button"]').some((el) => visible(el) && /\.(pdf|docx?|doc)\b/i.test(el.innerText || ''));
+      if (hasControl) {
+        sendProgress('agent_start', '🤖 No fillable fields found — asking the AI agent to drive this step…');
+        const agentResult = await runAgentFallback(profile, answers, pending, 'No fillable HTML fields; the page is driven by widgets or a resume picker.');
+        if (agentResult === 'terminal') return;
+        if (agentResult === true) {
+          await sleep(600);
+          return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
+        }
+      }
+    }
 
     const advance = findAdvanceButton();
     const submitBtn = findSubmitButton();
@@ -1826,21 +2306,30 @@
     if (advance && !submitBtn) {
       sendProgress('page_advancing', '➡️ Continuing to the next section…');
       const beforeUrl = location.href;
-      await realClick(advance);
-      const startedAt = Date.now();
       let progressed = false;
-      while (Date.now() - startedAt < 25000) {
-        await sleep(400);
-        const modal = findLinkedInModal();
-        const spinner = modal?.querySelector('.artdeco-loader, .artdeco-spinner, [data-automation-id="loading-spinner"], svg.artdeco-loader__bars, .loader');
-        if (spinner) continue;
-        const newSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-        if (location.href !== beforeUrl || newSnapshot !== snapshot || findSubmitButton()) {
-          progressed = true;
-          break;
+      for (let attempt = 0; attempt < 3 && !progressed; attempt += 1) {
+        const errors = detectValidationErrors();
+        if (errors.length) {
+          runEvent('validation_errors', { attempt, errors }, `Validation errors: ${errors.slice(0, 3).join(' | ')}`);
+          await fillFormPhase(profile, answers, pending);
         }
-        if (advance.disabled || /loading|saving|please wait|processing/i.test(buttonText(advance))
-          || document.querySelector('[data-automation-id="loading-spinner"], [aria-busy="true"]')) continue;
+        NEXT_CLICKS += 1;
+        runEvent('next_click', { count: NEXT_CLICKS, attempt, label: buttonText(advance), url: location.href, errors }, `Next click #${NEXT_CLICKS}: ${buttonText(advance)}`);
+        await realClick(advance);
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < 20000) {
+          await sleep(400);
+          const modal = findLinkedInModal();
+          const spinner = modal?.querySelector('.artdeco-loader, .artdeco-spinner, [data-automation-id="loading-spinner"], svg.artdeco-loader__bars, .loader');
+          if (spinner) continue;
+          const newSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
+          if (location.href !== beforeUrl || newSnapshot !== snapshot || findSubmitButton()) {
+            progressed = true;
+            break;
+          }
+          if (advance.disabled || /loading|saving|please wait|processing/i.test(buttonText(advance))
+            || document.querySelector('[data-automation-id="loading-spinner"], [aria-busy="true"]')) continue;
+        }
       }
       if (progressed) {
         await sleep(600);
@@ -1848,7 +2337,8 @@
         return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
       }
       advanceBlocked = true;
-      skipped.push({ field: 'Continue', reason: 'The application did not advance after activation. Check validation messages in the job tab.' });
+      const errors = detectValidationErrors();
+      skipped.push({ field: 'Continue', reason: errors.length ? `Validation: ${errors.slice(0, 2).join(' | ')}` : 'The application did not advance after 3 attempts.' });
       sendProgress('advance_blocked', '⚠️ Could not confirm that the application advanced. Review the current step.');
     }
 
@@ -1856,17 +2346,58 @@
       stillEmpty.forEach((el) => skipped.push({ field: labelFor(el).slice(0, 80), reason: 'Required field still empty after automation.' }));
     }
 
+    // Unrecognised page: nothing fillable, no next/submit control. Give the
+    // AI agent one chance to find a control before declaring failure.
+    if (!collectInputs().length && !submitBtn && !advance && !pageHasForm() && !detectLoginWall()) {
+      const agentResult = await runAgentFallback(profile, answers, pending, 'No recognisable form or apply control on this page.');
+      if (agentResult === 'terminal') return;
+      if (agentResult === true) return fillPage(profile, answers, { ...pending }, depth + 1);
+    }
+
     sendProgress('confirming', '✅ Form prepared. Waiting for your review…');
     const canSubmitCleanly = Boolean(submitBtn) && stillEmpty.length === 0;
     const autoSubmit = pending.autoSubmit === true;
+    const missingLabels = stillEmpty.map((el) => labelFor(el).slice(0, 60)).filter(Boolean);
+
+    runEvent('review_check', {
+      url: location.href,
+      submitButton: Boolean(submitBtn),
+      nextClicks: NEXT_CLICKS,
+      resumeAttached: RESUME_ATTACHED,
+      advanceBlocked,
+      filledCount,
+      emptyCount: stillEmpty.length,
+      missing: missingLabels,
+      dryRun: CURRENT_DRY_RUN,
+    }, `Review check: submit=${Boolean(submitBtn)}, missing=${stillEmpty.length}`);
+
+    // Dry run (test harness): never submit, never block on a dialog. End with a
+    // deterministic REVIEW_READY / failure code so runs can be compared.
+    if (CURRENT_DRY_RUN) {
+      if (submitBtn) {
+        await finish(`🧪 Dry run: form filled, review step reached (${filledCount} filled, ${stillEmpty.length} required empty).`, {
+          status: 'needs_attention', reasonCode: 'REVIEW_READY', reviewReady: true,
+          filledCount, emptyCount: stillEmpty.length,
+        });
+      } else {
+        await finish(advanceBlocked
+          ? '🧪 Dry run: the Next button did not advance — the page rejected a required answer.'
+          : '🧪 Dry run: form filled but no submit button was found on this step.', {
+          status: 'needs_attention',
+          reasonCode: advanceBlocked ? 'VALIDATION_BLOCKED' : 'NO_SUBMIT_BUTTON',
+          reviewReady: false,
+          filledCount, emptyCount: stillEmpty.length,
+        });
+      }
+      return;
+    }
 
     // Auto-apply never blocks on the review overlay: an unattended run must end
     // with a clear report instead of stalling behind a dialog nobody clicks.
     if (autoSubmit && !canSubmitCleanly) {
-      const missing = stillEmpty.map((el) => labelFor(el).slice(0, 60)).filter(Boolean);
       const details = advanceBlocked
         ? 'the Next button did not advance the form — the page likely rejected a required answer'
-        : `required field(s) could not be answered automatically${missing.length ? `: ${missing.join(', ')}` : ''}`;
+        : `required field(s) could not be answered automatically${missingLabels.length ? `: ${missingLabels.join(', ')}` : ''}`;
       await finish(`⚠️ Stopped before submitting — ${details}.`, {
         status: 'needs_attention', filledCount, emptyCount: stillEmpty.length,
       });
@@ -1895,8 +2426,44 @@
     }
   }
 
+  // Mirrors the background's reason derivation so the run event already
+  // carries a stable code even if the worker missed intermediate steps.
+  function deriveFinishReason(status, message, details) {
+    if (details.reasonCode) return details.reasonCode;
+    if (status === 'submitted') return 'SUBMITTED';
+    const text = String(message || '').toLowerCase();
+    if (/captcha|verification|turnstile|hcaptcha/.test(text)) return 'CAPTCHA';
+    if (/sign in|log in|login|sign-in/.test(text)) return 'LOGIN_REQUIRED';
+    if (/create an account|account creation/.test(text)) return 'ACCOUNT_CREATION';
+    if (/no submit button/.test(text)) return 'NO_SUBMIT_BUTTON';
+    if (/did not advance|validation|rejected|required field/.test(text)) return 'VALIDATION_BLOCKED';
+    if (/resume|cv/.test(text)) return 'RESUME_ATTACH_FAILED';
+    if (/apply/.test(text) && /(not|could not|did not)/.test(text)) return 'APPLY_BUTTON_NOT_FOUND';
+    if (/no form|not recognized|could not find/.test(text)) return 'NO_FORM';
+    if (status === 'failed') return 'CRASH';
+    if (status === 'cancelled') return 'USER_CANCELLED';
+    return 'NEEDS_USER_GENERIC';
+  }
+
   function finish(message, details = {}) {
-    sendProgress('complete', message, { status: 'needs_attention', filledCount: 0, emptyCount: 0, ...details, skipped: uniqueSkipped() });
+    if (TERMINAL_REPORTED) return markPendingDone();
+    TERMINAL_REPORTED = true;
+    const status = details.status || 'needs_attention';
+    const payload = {
+      status,
+      filledCount: 0,
+      emptyCount: 0,
+      ...details,
+      reasonCode: deriveFinishReason(status, message, details),
+      nextClicks: NEXT_CLICKS,
+      resumeAttached: RESUME_ATTACHED,
+      reviewReady: Boolean(details.reviewReady),
+      dryRun: CURRENT_DRY_RUN,
+      url: location.href,
+    };
+    runEvent('complete', payload, message);
+    sendProgress('complete', message, { ...payload, skipped: uniqueSkipped() });
+    try { if (extensionAlive()) chrome.runtime.sendMessage({ type: 'HAMZOOH_CDP_INPUT', action: 'detach' }); } catch {}
     return markPendingDone();
   }
   function sameJobPage(pendingUrl, pending) {
@@ -1925,20 +2492,62 @@
 
   async function runPending(stored) {
     const pending = stored.pendingApply;
-    if (!pending || filling) return;
+    if (!pending || filling || window.__HAMZOOH_FILLER_BUSY__) return;
     if (!(await shouldRun(pending))) return;
-    if (!frameLooksActionable() && detectLoginWall() === false) {
+    CURRENT_RUN_ID = pending.runId || pending.sessionId || '';
+    CURRENT_DRY_RUN = pending.dryRun === true;
+    NEXT_CLICKS = 0;
+    RESUME_ATTACHED = false;
+    STEP_COUNT = 0;
+    NO_PROGRESS_STEPS = 0;
+    LAST_SIGNATURE = '';
+    TERMINAL_REPORTED = false;
+    const isTop = window.top === window;
+    let actionable = frameLooksActionable();
+    const loginWall = detectLoginWall();
+    // Tracking/preload iframes contain navigation links (and sometimes
+    // "apply"-ish aria-labels) but no form. They must never enter the fill
+    // pipeline: that is what stalled the Carousell LinkedIn run.
+    if (!isTop && collectInputs().length === 0 && allFileInputs().length === 0) actionable = false;
+    if (!frameLooksActionable() && loginWall === false) {
       hamzoohLog('log', 'frame not actionable yet', location.href);
     }
+    runEvent('frame_started', {
+      url: location.href,
+      title: document.title,
+      top: window.top === window,
+      actionable,
+      dryRun: CURRENT_DRY_RUN,
+      hasForm: pageHasForm(),
+      loginWall,
+    }, `Frame started: ${location.hostname}${location.pathname}`.slice(0, 160));
+
+    // Phase-0 guard: every injected frame used to enter the fill pipeline, so
+    // an empty tracking iframe could report completion for the whole run.
+    // A frame with no form, no apply control and no file input has nothing to
+    // do; record it and leave the run to the frame that owns the form.
+    if (!actionable && !loginWall) {
+      runEvent('frame_skipped', {
+        url: location.href,
+        inputs: collectInputs().length,
+        fileInputs: allFileInputs().length,
+        top: window.top === window,
+      }, 'Frame skipped: no form or apply control');
+      return;
+    }
+
     filling = true;
+    window.__HAMZOOH_FILLER_BUSY__ = true;
     autoPromptMissed = false;
     try {
       await fillPage(stored.profile || {}, stored.answers || {}, pending);
     } catch (err) {
       hamzoohLog('error', 'fill pipeline crashed', err.message);
-      await finish(`❌ Automation error: ${err.message}`, { status: 'failed' });
+      runEvent('error', { error: err.message, stack: String(err.stack || '').slice(0, 2000) }, 'Fill pipeline crashed');
+      await finish(`❌ Automation error: ${err.message}`, { status: 'failed', reasonCode: 'CRASH' });
     } finally {
       filling = false;
+      window.__HAMZOOH_FILLER_BUSY__ = false;
     }
   }
 
@@ -1948,10 +2557,22 @@
   }
   window.__HAMZOOH_BOOT__ = bootApply;
 
+  // Watchdog: guarantees a terminal state instead of a silent hang.
+  window.__HAMZOOH_FORCE_TERMINAL__ = (reason) => {
+    if (TERMINAL_REPORTED || !CURRENT_RUN_ID) return;
+    runEvent('watchdog_force_terminal', { reason: reason || '', url: location.href, top: window.top === window }, 'Watchdog forced a terminal state');
+    finish('⏱️ Automation timed out without reaching a form. The job tab is still open for manual review.', {
+      status: 'needs_attention', reasonCode: 'TIMEOUT_NO_TERMINAL', filledCount: 0, emptyCount: 0,
+    });
+  };
+
   bootApply();
   if (extensionAlive()) {
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'HAMZOOH_BEGIN_FILL') bootApply();
+      if (message?.type === 'HAMZOOH_FORCE_TERMINAL') {
+        try { window.__HAMZOOH_FORCE_TERMINAL__(message.reason || ''); } catch {}
+      }
     });
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local' || !changes.pendingApply?.newValue) return;
@@ -1985,5 +2606,9 @@
   }
 
   window.__HAMZOOH_TEST_RUN__ = (profile, answers, pending) => fillPage(profile, answers || {}, pending || { url: location.href });
-  window.__HAMZOOH_DEBUG__ = { questionFor, labelFor, chooseFromProfile, heuristicChoice, applyChoice, profileValue, collectInputs };
+  window.__HAMZOOH_DEBUG__ = {
+    questionFor, labelFor, chooseFromProfile, heuristicChoice, applyChoice,
+    profileValue, collectInputs, SUCCESS_PATTERNS, VALIDATION_PATTERNS,
+    detectValidationErrors, findDescriptionApplyButtons, scoreApplyCandidate,
+  };
 })();

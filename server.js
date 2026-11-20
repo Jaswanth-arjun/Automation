@@ -4886,6 +4886,95 @@ app.get('/api/auto-apply-vision/:runId', (req, res) => {
   res.json({ ok: true, run });
 });
 
+// ── Extension Vision Action with GPT-6 Luna ───────────────────────────
+app.post('/api/extension/vision-action', async (req, res) => {
+  const { screenshot, profile = {}, answers = {}, jobTitle = '', company = '', url = '' } = req.body || {};
+  if (!screenshot) {
+    return res.status(400).json({ ok: false, error: 'Screenshot is required.' });
+  }
+
+  const apiKey = process.env.BYNARA_API_KEY || process.env.RADOX_API_KEY || 'coa_3059813e52571581bcbf9f179c163db1';
+  const baseURL = (process.env.BYNARA_BASE_URL || process.env.RADOX_BASE_URL || 'https://coarena.ai/api/v1').replace(/\/+$/, '');
+  const model = process.env.BYNARA_MODEL || process.env.RADOX_MODEL || 'gpt-6-luna';
+
+  const cleanBase64 = screenshot.includes(',') ? screenshot.split(',')[1] : screenshot;
+
+  const prompt = `You are an expert autonomous browser automation agent applying to a job.
+Job: ${jobTitle || 'Role'} at ${company || 'Company'}
+Applicant Profile:
+- Name: ${profile?.fullName || profile?.name || 'Applicant'}
+- Email: ${profile?.email || ''}
+- Phone: ${profile?.phone || ''}
+- Location: ${profile?.location || ''}
+- Experience: ${profile?.experienceYears || '3'} years in software/tech
+- Work Authorization: Authorized to work in the country, does NOT require visa sponsorship
+- Resume Summary: ${(profile?.resume?.text || profile?.summary || '').slice(0, 300)}
+
+Look carefully at this screenshot of the browser window.
+Analyze what is currently on the screen:
+1. Is there an "Easy Apply" / "Apply" button visible on the page? -> action: "click_easy_apply"
+2. Is an application modal/dialog currently open?
+   - Is it loading (spinner active)? -> action: "wait"
+   - Are there input fields, radio options, dropdowns, or checkboxes to fill? -> action: "fill_fields"
+   - Is there a "Next", "Review", or "Submit application" button? -> action: "click_next" / "click_review" / "click_submit"
+3. Is an "Application sent" / "Done" confirmation dialog visible? -> action: "done"
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "screenState": "job_page_with_easy_apply" | "modal_loading" | "modal_form_step" | "modal_review_step" | "application_submitted" | "unknown",
+  "action": "click_easy_apply" | "wait" | "fill_fields" | "click_next" | "click_review" | "click_submit" | "close_done" | "needs_user",
+  "reasoning": "Brief explanation of your decision",
+  "fieldsToFill": [
+    { "fieldType": "text" | "phone" | "radio" | "dropdown", "fieldLabel": "label or question", "recommendedValue": "answer" }
+  ]
+}`;
+
+  try {
+    const response = await fetch(`${baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an autonomous AI browser vision agent. You must inspect the screenshot and return JSON only.',
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${cleanBase64}` } },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 600,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      return res.status(502).json({ ok: false, error: `GPT-6 Luna error: ${err.slice(0, 200)}` });
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return res.status(502).json({ ok: false, error: 'Could not parse JSON action from GPT-6 Luna.' });
+    }
+
+    const decision = JSON.parse(match[0]);
+    res.json({ ok: true, decision });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // API 404 Fallback - Always Return JSON
 app.use('/api', (req, res) => {
   res.status(404).json({ error: `API endpoint ${req.originalUrl} not found` });
