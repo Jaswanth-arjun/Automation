@@ -7,6 +7,20 @@
     window.postMessage({ source: 'hamzooh-extension', type, ...extra }, '*');
   }
 
+  // When the extension is reloaded/updated, this content script becomes an
+  // orphan: chrome.runtime disappears but the page keeps this stale instance.
+  // Heal automatically by refreshing the page once so a fresh bridge is
+  // injected; the dashboard remembers the pending apply and retries it.
+  function healByReload() {
+    try {
+      const last = Number(sessionStorage.getItem('hamzooh_heal_at') || 0);
+      if (Date.now() - last < 15000) return;
+      sessionStorage.setItem('hamzooh_heal_at', String(Date.now()));
+      sessionStorage.setItem('hamzooh_resume_apply', '1');
+    } catch {}
+    window.location.reload();
+  }
+
   if (window.__HAMZOOH_BRIDGE_LOADED__ && window.__HAMZOOH_BRIDGE_ALIVE__ && window.__HAMZOOH_BRIDGE_ALIVE__()) {
     try { reply('HAMZOOH_PONG'); } catch {}
     return;
@@ -92,12 +106,24 @@
     const data = event.data;
 
     if (data.type === 'HAMZOOH_PING') {
-      reply('HAMZOOH_PONG');
+      reply('HAMZOOH_PONG', { alive: extensionAlive() });
       return;
     }
 
     if (!extensionAlive()) {
-      if (data.type === 'HAMZOOH_START_APPLY') reply('HAMZOOH_APPLY_READY', { requestId: data.requestId || '', ok: false, error: 'Extension was reloaded. Please refresh (F5) this page and click Auto Apply with AI again.' });
+      // A stale bridge must never look alive: drop the "extension present"
+      // marker so the dashboard can react instead of dead-ending.
+      try { delete document.documentElement.dataset.hamzoohExtension; } catch {}
+      if (data.type === 'HAMZOOH_START_APPLY') {
+        reply('HAMZOOH_APPLY_READY', {
+          requestId: data.requestId || '',
+          ok: false,
+          stale: true,
+          error: 'Extension was just updated. Reconnecting automatically...',
+        });
+        // Refresh so a live bridge loads; the dashboard retries by itself.
+        setTimeout(healByReload, 300);
+      }
       return;
     }
 
@@ -123,6 +149,37 @@
         const merged = { ...(stored.answers || {}), ...serverAnswers };
         chrome.storage.local.set({ answers: merged }, () => {
           reply('HAMZOOH_ANSWERS_SYNCED', { count: Object.keys(merged).length });
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'HAMZOOH_CHECK_SUBMISSION') {
+      chrome.runtime.sendMessage({
+        type: 'HAMZOOH_CHECK_SUBMISSION',
+        url: String(data.url || ''),
+      }, (result) => {
+        reply('HAMZOOH_SUBMISSION_CHECK_RESULT', {
+          requestId: data.requestId || '',
+          ok: Boolean(result?.ok),
+          submitted: Boolean(result?.submitted),
+          task: result?.task || null,
+          error: chrome.runtime.lastError?.message || result?.error || '',
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'HAMZOOH_TASK_CONTROL') {
+      chrome.runtime.sendMessage({
+        type: 'HAMZOOH_TASK_CONTROL',
+        action: String(data.action || ''),
+        taskId: data.taskId || '',
+      }, (result) => {
+        reply('HAMZOOH_TASK_CONTROL_RESULT', {
+          ok: Boolean(result?.ok),
+          action: data.action || '',
+          error: chrome.runtime.lastError?.message || result?.error || '',
         });
       });
       return;
@@ -169,6 +226,9 @@
         dryRun: data.dryRun === true,
         force: data.force === true,
         trainMode: data.trainMode === true,
+        taskId: data.taskId || '',
+        taskToken: data.taskToken || '',
+        requireApproval: data.requireApproval !== false,
         profile: data.profile || {},
         answers: data.answers || {},
         resumeBase64: data.resumeBase64 || '',
@@ -176,7 +236,6 @@
         resumeText: data.resumeText || '',
         jobTitle: data.jobTitle || '',
         company: data.company || '',
-        autoSubmit: data.trainMode ? false : data.autoSubmit === true,
       }, (result) => {
         const error = chrome.runtime.lastError?.message || result?.error || '';
         reply('HAMZOOH_APPLY_READY', {

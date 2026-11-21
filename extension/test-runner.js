@@ -246,7 +246,7 @@
       type: 'HAMZOOH_OPEN_JOB',
       url: meta.url,
       dryRun: true,
-      autoSubmit: false,
+
       profile: PROFILE,
       answers: ANSWERS,
       resumeBase64: makeResumeBase64(),

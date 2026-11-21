@@ -136,7 +136,7 @@ export default function MailAutomation() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [flash, setFlash] = useState(null);
-  const [lastSync, setLastSync] = useState(() => localStorage.getItem('hamzooh_last_sync') || localStorage.getItem('mailmind_last_sync') || '');
+  const [lastSync, setLastSync] = useState(() => localStorage.getItem('hamzo_last_sync') || localStorage.getItem('mailmind_last_sync') || '');
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
@@ -150,8 +150,6 @@ export default function MailAutomation() {
   const [composer, setComposer] = useState(null);
   const [ai, setAi] = useState(null);
   const [copiedId, setCopiedId] = useState('');
-  const [threadMessages, setThreadMessages] = useState([]);
-  const [threadState, setThreadState] = useState('idle');
 
   const searchRef = useRef(null);
   const splitRef = useRef(null);
@@ -172,18 +170,18 @@ export default function MailAutomation() {
         el.style.marginBottom = '';
         return;
       }
-              el.style.marginBottom = '0px';
-        const top = Math.max(0, el.getBoundingClientRect().top);
-        // Fill to the bottom of the screen plus ~2 extra rows, so a short page
-        // scroll reveals them instead of only showing three at a time.
-        const extra = 520;
-        const next = Math.max(240, Math.round(window.innerHeight - top - 18 + extra));
-        el.style.height = `${next}px`;
-        // Cancel whatever trailing space the shell adds below the pane, so the
-        // box ends at the viewport bottom and the page itself never scrolls.
-        const paneBottom = el.getBoundingClientRect().bottom;
-        const trailing = document.documentElement.scrollHeight - paneBottom;
-        if (trailing > 18) el.style.marginBottom = `${18 - Math.round(trailing)}px`;
+      el.style.marginBottom = '0px';
+      const top = Math.max(0, el.getBoundingClientRect().top);
+      // Fill to the bottom of the screen plus ~2 extra rows, so a short page
+      // scroll reveals them instead of only showing three at a time.
+      const extra = 520;
+      const next = Math.max(240, Math.round(window.innerHeight - top - 18 + extra));
+      el.style.height = `${next}px`;
+      // Cancel whatever trailing space the shell adds below the pane, so the
+      // box ends at the viewport bottom and the page itself never scrolls.
+      const paneBottom = el.getBoundingClientRect().bottom;
+      const trailing = document.documentElement.scrollHeight - paneBottom;
+      if (trailing > 18) el.style.marginBottom = `${18 - Math.round(trailing)}px`;
     };
     fit();
     const timer = setTimeout(fit, 120);
@@ -220,7 +218,7 @@ export default function MailAutomation() {
     }
     // A successful mailbox load means we just read Gmail, so record it.
     const stamp = new Date().toISOString();
-    localStorage.setItem('hamzooh_last_sync', stamp);
+    localStorage.setItem('hamzo_last_sync', stamp);
     localStorage.setItem('mailmind_last_sync', stamp);
     setLastSync(stamp);
     return true;
@@ -289,13 +287,13 @@ export default function MailAutomation() {
 
         if (justConnected) {
           // Dashboard checklist + sidebar dot should reflect the new account.
-          refreshConnectStatus(user?.id, { force: true }).catch(() => {});
+          refreshConnectStatus(user?.id, { force: true }).catch(() => { });
           notify('ok', `Gmail connected${connectedEmail ? ` — ${connectedEmail}` : ''}. Syncing your inbox…`);
           try {
             await api.triggerSync();
             await loadMail();
             const stamp = new Date().toISOString();
-            localStorage.setItem('hamzooh_last_sync', stamp);
+            localStorage.setItem('hamzo_last_sync', stamp);
             localStorage.setItem('mailmind_last_sync', stamp);
             setLastSync(stamp);
             notify('ok', 'Inbox synced.');
@@ -356,7 +354,7 @@ export default function MailAutomation() {
 
   const handleDisconnect = async () => {
     if (disconnecting) return;
-    if (!window.confirm('Disconnect this Gmail account? Hamzooh will stop syncing until you reconnect.')) return;
+    if (!window.confirm('Disconnect this Gmail account? Hamzo will stop syncing until you reconnect.')) return;
 
     setDisconnecting(true);
     let failed = false;
@@ -376,7 +374,7 @@ export default function MailAutomation() {
     setSummaries({});
     setComposer(null);
     setAi(null);
-    localStorage.removeItem('hamzooh_last_sync');
+    localStorage.removeItem('hamzo_last_sync');
     localStorage.removeItem('mailmind_last_sync');
     setLastSync('');
     setDisconnecting(false);
@@ -406,7 +404,7 @@ export default function MailAutomation() {
       const res = await api.triggerSync();
       await loadMail();
       const stamp = new Date().toISOString();
-      localStorage.setItem('hamzooh_last_sync', stamp);
+      localStorage.setItem('hamzo_last_sync', stamp);
       localStorage.setItem('mailmind_last_sync', stamp);
       setLastSync(stamp);
       notify('ok', `Inbox synced — ${res?.received ?? 0} received, ${res?.sent ?? 0} sent.`);
@@ -422,7 +420,7 @@ export default function MailAutomation() {
     setDetailOpen(true);
     if (mail.mailbox === 'INBOX' && !mail.isRead) {
       setInbox((list) => list.map((item) => (item.id === mail.id ? { ...item, isRead: true } : item)));
-      api.markRead(mail.id, true).catch(() => {});
+      api.markRead(mail.id, true).catch(() => { });
     }
     // Fetch the full body lazily; the list only carries metadata.
     ensureBody(mail);
@@ -438,7 +436,7 @@ export default function MailAutomation() {
       await api.toggleStar(mail.id, next);
     } catch (err) {
       notify('err', err.message || 'Could not update the star.');
-      await loadMail().catch(() => {});
+      await loadMail().catch(() => { });
     }
   };
 
@@ -459,7 +457,7 @@ export default function MailAutomation() {
       notify('ok', 'Archived in Gmail.');
     } catch (err) {
       notify('err', err.message || 'Could not archive the email.');
-      await loadMail().catch(() => {});
+      await loadMail().catch(() => { });
     }
   };
 
@@ -471,7 +469,7 @@ export default function MailAutomation() {
       notify('ok', 'Moved to Gmail trash.');
     } catch (err) {
       notify('err', err.message || 'Could not trash the email.');
-      await loadMail().catch(() => {});
+      await loadMail().catch(() => { });
     }
   };
 
@@ -558,12 +556,12 @@ export default function MailAutomation() {
       setAi((prev) =>
         prev && prev.mail.id === mail.id
           ? {
-              ...prev,
-              text: res?.text || '',
-              subject: res?.subject || prev.subject,
-              loading: false,
-              note: res?.fallback ? res.note || '' : '',
-            }
+            ...prev,
+            text: res?.text || '',
+            subject: res?.subject || prev.subject,
+            loading: false,
+            note: res?.fallback ? res.note || '' : '',
+          }
           : prev,
       );
     } catch (err) {
@@ -602,32 +600,6 @@ export default function MailAutomation() {
     () => [...inbox, ...sent].find((mail) => mail.id === selectedId) || null,
     [inbox, sent, selectedId],
   );
-
-  /* Load every message in the opened email's Gmail thread, so the reader shows
-     the whole back-and-forth instead of just the one message that was clicked. */
-  useEffect(() => {
-    const threadId = selected?.threadId;
-    if (!threadId) {
-      setThreadMessages([]);
-      setThreadState('idle');
-      return undefined;
-    }
-    let alive = true;
-    setThreadMessages([]);
-    setThreadState('loading');
-    api.getThread(threadId)
-      .then((result) => {
-        if (!alive) return;
-        setThreadMessages(Array.isArray(result?.messages) ? result.messages : []);
-        setThreadState('ready');
-      })
-      .catch(() => {
-        if (!alive) return;
-        setThreadMessages([]);
-        setThreadState('error');
-      });
-    return () => { alive = false; };
-  }, [selected?.threadId]);
 
   const stats = useMemo(() => {
     const needsReply = inbox.filter((mail) => mail.needsReply).length;
@@ -716,7 +688,7 @@ export default function MailAutomation() {
           <strong>Gmail account</strong>
           <small>
             {connected
-              ? `${account.email || account.method || 'Connected'} · Hamzooh reads job mail only`
+              ? `${account.email || account.method || 'Connected'} · Hamzo reads job mail only`
               : 'Connect an inbox to read recruiter threads, draft replies and track application updates.'}
           </small>
         </div>
@@ -798,22 +770,22 @@ export default function MailAutomation() {
               </div>
             </div>
 
-              <div className="mm-hero-kpis">
-                <div className="mm-kpi is-indigo">
-                  <span>Inbox</span>
-                  <strong>{inbox.length}</strong>
-                  <small>{stats.unread} unread</small>
-                </div>
-                <div className="mm-kpi is-green">
-                  <span>Interviews</span>
-                  <strong>{stats.interviews}</strong>
-                  <small>Invites &amp; scheduling</small>
-                </div>
-                <div className="mm-kpi is-amber">
-                  <span>Offers</span>
-                  <strong>{stats.offers}</strong>
-                  <small>Offer letters</small>
-                </div>
+            <div className="mm-hero-kpis">
+              <div className="mm-kpi is-indigo">
+                <span>Inbox</span>
+                <strong>{inbox.length}</strong>
+                <small>{stats.unread} unread</small>
+              </div>
+              <div className="mm-kpi is-green">
+                <span>Interviews</span>
+                <strong>{stats.interviews}</strong>
+                <small>Invites &amp; scheduling</small>
+              </div>
+              <div className="mm-kpi is-amber">
+                <span>Offers</span>
+                <strong>{stats.offers}</strong>
+                <small>Offer letters</small>
+              </div>
               <div className="mm-kpi is-slate">
                 <span>Sent</span>
                 <strong>{sent.length}</strong>
@@ -993,7 +965,7 @@ export default function MailAutomation() {
                     <EmptyBlock
                       icon={Send}
                       title="No sent mail yet"
-                      description="Replies and follow-ups you send from Hamzooh appear here."
+                      description="Replies and follow-ups you send from Hamzo appear here."
                     />
                   ) : (
                     <div>
@@ -1112,8 +1084,6 @@ export default function MailAutomation() {
                     copied={copiedId === selected?.id}
                     bodyState={selected ? bodyState[selected.id] : null}
                     onLoadBody={() => ensureBody(selected)}
-                    threadMessages={threadMessages}
-                    threadState={threadState}
                   />
                 </div>
               </div>
@@ -1126,7 +1096,7 @@ export default function MailAutomation() {
                 query={query}
                 setQuery={setQuery}
                 filter="all"
-                setFilter={() => {}}
+                setFilter={() => { }}
                 sort="newest"
                 setSort={setSort}
                 inbox={[]}
@@ -1144,7 +1114,7 @@ export default function MailAutomation() {
                       description={
                         query
                           ? `No sent email matches “${query}”.`
-                          : 'Replies and follow-ups you send from Hamzooh appear here.'
+                          : 'Replies and follow-ups you send from Hamzo appear here.'
                       }
                     />
                   ) : (
@@ -1181,8 +1151,6 @@ export default function MailAutomation() {
                     copied={copiedId === selected?.id}
                     bodyState={selected ? bodyState[selected.id] : null}
                     onLoadBody={() => ensureBody(selected)}
-                    threadMessages={threadMessages}
-                    threadState={threadState}
                   />
                 </div>
               </div>
@@ -1218,8 +1186,6 @@ export default function MailAutomation() {
               copied={copiedId === selected.id}
               bodyState={bodyState[selected.id]}
               onLoadBody={() => ensureBody(selected)}
-              threadMessages={threadMessages}
-              threadState={threadState}
             />
           </div>
         </div>
@@ -1361,7 +1327,7 @@ function ConnectPanel({ loading, onConnect }) {
           Turn your inbox into a job pipeline
         </h2>
         <p style={{ margin: '0 0 16px', fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.6 }}>
-          Hamzooh reads recruiter threads, interviews, assessments and offers, then links them to your
+          Hamzo reads recruiter threads, interviews, assessments and offers, then links them to your
           applications. You keep full control: every reply is editable before it is sent, and you can
           disconnect in one click.
         </p>
@@ -1543,8 +1509,6 @@ function ReadingPane({
   copied,
   bodyState,
   onLoadBody,
-  threadMessages = [],
-  threadState = 'idle',
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1680,32 +1644,6 @@ function ReadingPane({
           <button type="button" className="mm-link" onClick={() => setExpanded((value) => !value)}>
             {expanded ? 'Show less' : 'Show full email'} <ChevronRight size={12} style={{ transform: expanded ? 'rotate(-90deg)' : 'rotate(90deg)' }} />
           </button>
-        </div>
-      )}
-
-      {threadState === 'loading' && threadMessages.length === 0 && (
-        <div className="mm-thread mm-thread-loading">
-          <Loader2 size={13} className="spin" /> Loading the full conversation…
-        </div>
-      )}
-      {threadMessages.length > 1 && (
-        <div className="mm-thread">
-          <div className="mm-thread-head">
-            <span>Conversation</span>
-            <strong>{threadMessages.length} messages</strong>
-          </div>
-          {threadMessages.map((item) => {
-            const fromCounterparty = String(item.fromEmail || '').toLowerCase() === String(mail.senderEmail || '').toLowerCase();
-            return (
-              <article key={item.id} className={`mm-thread-msg ${fromCounterparty ? 'in' : 'out'}`}>
-                <header>
-                  <span>{fromCounterparty ? (item.fromName || item.fromEmail || sender) : 'You'}</span>
-                  <time>{formatWhen(item.at)}</time>
-                </header>
-                <p>{item.bodyText || item.snippet || '(No readable text)'}</p>
-              </article>
-            );
-          })}
         </div>
       )}
 

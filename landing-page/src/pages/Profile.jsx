@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../lib/auth';
 import { profileStore, resumeStore, candidateStore, getUserName } from '../lib/api';
 import { DEFAULT_PROFILE } from '../lib/mockData';
+import JobProfileSection from '../components/JobProfileSection';
 import './Profile.css';
 
 const BATCH_OPTIONS = ['2024', '2025', '2026', '2027', '2028', 'Other'];
@@ -530,6 +531,9 @@ export default function Profile() {
             />
           </div>
         </SectionCard>
+
+        {/* Job Profile — job-related questions + application preferences */}
+        <JobProfileSection profile={profile} setProfile={setProfile} />
 
         {/* Education */}
         <SectionCard

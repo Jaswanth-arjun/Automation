@@ -156,7 +156,7 @@ export default function JobDetail() {
   const dimMeta = {
     required: requiredTotal ? `${matchedRequired.length} of ${requiredTotal} covered` : 'No skills listed',
     preferred: preferredTotal ? `${matchedPreferred.length} of ${preferredTotal} covered` : 'No preferred skills listed',
-    experience: `${matchResult.evidenceStats?.yearsOfExperience || 0} yr evidence`,
+    experience: `${Number((matchResult.evidenceStats?.yearsOfExperienceExact ?? matchResult.evidenceStats?.yearsOfExperience ?? 0).toFixed(2))} yr evidence`,
     projects: `${matchResult.relevantProjects?.length || 0} relevant project${(matchResult.relevantProjects?.length || 0) === 1 ? '' : 's'}`,
     education: matchResult.education?.degree || 'No degree on file',
     domain: domainSkills ? `${domainMatched.length} of ${domainSkills} role technologies` : 'No technology terms in the JD',
@@ -574,7 +574,7 @@ export default function JobDetail() {
                       <span>{matchResult.evidenceStats?.skills || 0} skills</span>
                       <span>{matchResult.evidenceStats?.projects || 0} projects</span>
                       <span>{matchResult.evidenceStats?.experience || 0} roles</span>
-                      <span>{matchResult.evidenceStats?.yearsOfExperience || 0} yrs</span>
+                      <span>{Number((matchResult.evidenceStats?.yearsOfExperienceExact ?? matchResult.evidenceStats?.yearsOfExperience ?? 0).toFixed(2))} yrs</span>
                       <span>{matchResult.evidenceStats?.resumeChars || 0} resume chars</span>
                     </div>
                     <span className="jm-foot-note">

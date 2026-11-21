@@ -5,6 +5,12 @@ function getToken() {
   return localStorage.getItem('hamzooh_token') || localStorage.getItem('hamzo_token') || localStorage.getItem('mailmind_token');
 }
 
+/** Auth headers for the few plain `fetch` calls (the saved-answers vault). */
+export function authHeaders() {
+  const token = getToken();
+  return token && token !== 'demo_token' ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function apiFetch(baseUrl, path, options = {}) {
   const token = getToken();
   const headers = {
@@ -28,6 +34,8 @@ export async function apiFetch(baseUrl, path, options = {}) {
     if (payload) {
       error.code = payload.code || '';
       error.uncertain = Boolean(payload.uncertain);
+      error.payload = payload;
+      error.missing = payload.missing || undefined;
     }
     throw error;
   }
@@ -135,6 +143,35 @@ export const api = {
   autoApply: (payload) => apiFetch('', '/api/auto-apply', { method: 'POST', body: JSON.stringify(payload) }),
   autoApplyClose: () => apiFetch('', '/api/auto-apply/close', { method: 'POST' }),
   provideAutoApplyInput: (payload) => apiFetch('', '/api/auto-apply/provide-input', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // Autonomous Auto Apply with AI (Chrome extension executes, backend owns task state)
+  startAutoApply: (payload) => apiFetch('', '/api/applications/auto-apply/start', { method: 'POST', body: JSON.stringify(payload) }),
+  extensionHeartbeat: (taskId, token, payload = {}) => apiFetch('', '/api/applications/extension/heartbeat', {
+    method: 'POST',
+    body: JSON.stringify({ taskId, token, ...payload }),
+  }),
+  getApplicationTask: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}`),
+  getActiveApplicationTask: () => apiFetch('', '/api/applications/tasks/active'),
+  listApplicationTasks: (limit = 50) => apiFetch('', `/api/applications/tasks?limit=${encodeURIComponent(limit)}`),
+  getApplicationReview: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/review`),
+  pauseApplicationTask: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST' }),
+  resumeApplicationTask: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' }),
+  cancelApplicationTask: (taskId, reason = '') => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  approveApplicationTask: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/approve`, { method: 'POST' }),
+  answerApplicationQuestion: (taskId, questionId, payload) => apiFetch(
+    '',
+    `/api/applications/tasks/${encodeURIComponent(taskId)}/questions/${encodeURIComponent(questionId)}/answer`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  ),
+
+  // Saved answer memory
+  listAnswerMemory: () => apiFetch('', '/api/answer-memory'),
+  saveAnswerMemory: (payload) => apiFetch('', '/api/answer-memory', { method: 'POST', body: JSON.stringify(payload) }),
+  updateAnswerMemory: (id, payload) => apiFetch('', `/api/answer-memory/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteAnswerMemory: (id) => apiFetch('', `/api/answer-memory/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  lookupAnswerMemory: (question, options = []) => apiFetch('', '/api/answer-memory/lookup', { method: 'POST', body: JSON.stringify({ question, options }) }),
+  getAiUsage: (taskId = '') => apiFetch('', `/api/ai/usage${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`),
+  getAiModels: () => apiFetch('', '/api/ai/models'),
 };
 
 const EMPLOYEE_CACHE_KEY = 'hamzooh_employees';
@@ -358,8 +395,10 @@ export const applicationStore = {
     const all = this.getAll();
     all.unshift({
       ...application,
-      id: Date.now().toString(),
-      appliedAt: new Date().toISOString(),
+      // Unique even when several records are created in the same millisecond
+      // (e.g. a batch of application-status emails).
+      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      appliedAt: application.appliedAt || new Date().toISOString(),
       status: application.status || 'Applied',
     });
     return saveApplications(all);
@@ -481,6 +520,66 @@ export const tailorReportStore = {
     window.dispatchEvent(new Event('tailor_report_updated'));
   },
 };
+
+/**
+ * Record applications the backend verified as submitted — including a manual
+ * submit in the job tab — so the Job Tracker and the role page show "Applied"
+ * even when the dashboard was closed while the submission happened.
+ */
+export async function reconcileSubmittedApplications({ limit = 25, jobId = '', jobUrl = '', jobTitle = '', jobCompany = '' } = {}) {
+  try {
+    const res = await api.listApplicationTasks(limit);
+    const tasks = Array.isArray(res?.tasks) ? res.tasks : [];
+    const submitted = tasks.filter((task) => task?.status === 'submitted');
+    if (!submitted.length) return false;
+    const norm = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const sameJobPage = (left, right) => {
+      try {
+        const a = new URL(left);
+        const b = new URL(right);
+        return a.hostname === b.hostname && a.pathname.replace(/\/+$/, '') === b.pathname.replace(/\/+$/, '');
+      } catch { return false; }
+    };
+    const existing = applicationStore.getAll();
+    let changed = false;
+    for (const task of submitted) {
+      const title = task.job?.title || task.title || '';
+      const company = task.job?.company || task.company || '';
+      // Older tasks predate `job.id`, so match this role by page URL or by
+      // company + title before falling back to the task's own job id.
+      const sameRole = Boolean(jobTitle && jobCompany)
+        && norm(jobTitle) === norm(title)
+        && norm(jobCompany) === norm(company);
+      const matchesCurrentJob = Boolean(jobId) && ((jobUrl && sameJobPage(jobUrl, task.url)) || sameRole);
+      const jobId = matchesCurrentJob ? String(jobId) : (task.job?.id ? String(task.job.id) : '');
+      const already = existing.some((app) => (
+        (task.id && String(app.taskId || '') === String(task.id))
+        || (jobId && String(app.jobId || '') === jobId)
+        || (app.appliedViaExtension && norm(app.company) === norm(company) && norm(app.title) === norm(title))
+      ));
+      if (!already && (title || company)) {
+        applicationStore.add({
+          title,
+          company,
+          jobId: jobId || undefined,
+          jobUrl: task.url || '',
+          status: 'Applied',
+          stage: 'apply',
+          appliedViaExtension: true,
+          appliedViaManualSubmission: task.result?.reasonCode === 'MANUAL_SUBMISSION',
+          taskId: task.id,
+          resumeUsed: task.resumeName || task.selectedResume?.name || 'Tailored Resume (AI agent)',
+        });
+        existing.push({ taskId: task.id, jobId, company, title, appliedViaExtension: true });
+        changed = true;
+      }
+      if (jobId) applyProgressStore.mark(jobId, 'apply', { company, title });
+    }
+    return changed;
+  } catch {
+    return false;
+  }
+}
 
 export const coverLetterStore = {
   get(jobId) {

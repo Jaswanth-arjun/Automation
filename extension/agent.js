@@ -76,6 +76,7 @@
         required: el.required === true || el.getAttribute('aria-required') === 'true',
         disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
         checked: el.checked === true || el.getAttribute('aria-checked') === 'true',
+        inForm: Boolean(el.closest && el.closest('form')),
         rect: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)],
         inViewport: rect.top < innerHeight && rect.bottom > 0 && rect.left < innerWidth && rect.right > 0,
       });
@@ -115,27 +116,77 @@
   }
 
   async function decide(snapshot, ctx) {
-    const response = await proxy('/api/agent/next-action', {
-      snapshot: {
-        url: snapshot.url,
-        title: snapshot.title,
-        headings: snapshot.headings,
-        errors: snapshot.errors,
-        elements: snapshot.elements,
+    const taskId = ctx.pending?.taskId || '';
+    const taskToken = ctx.pending?.taskToken || '';
+    const taskMode = Boolean(taskId && taskToken);
+    const response = await proxy(
+      taskMode ? '/api/applications/extension/agent/next-action' : '/api/agent/next-action',
+      taskMode ? {
+        taskId,
+        token: taskToken,
+        snapshot: {
+          url: snapshot.url,
+          title: snapshot.title,
+          headings: snapshot.headings,
+          errors: snapshot.errors,
+          elements: snapshot.elements,
+        },
+        // A screenshot is only captured when DOM understanding is not enough;
+        // the backend routes those steps to the vision model.
+        ...(ctx.screenshot ? { screenshot: ctx.screenshot } : {}),
+        history: ctx.history || [],
+        reason: ctx.reason || '',
+      } : {
+        snapshot: {
+          url: snapshot.url,
+          title: snapshot.title,
+          headings: snapshot.headings,
+          errors: snapshot.errors,
+          elements: snapshot.elements,
+        },
+        ...(ctx.screenshot ? { screenshot: ctx.screenshot } : {}),
+        profile: ctx.profile || {},
+        answers: ctx.answers || {},
+        job: { title: ctx.pending?.jobTitle || '', company: ctx.pending?.company || '', url: ctx.pending?.url || '' },
+        history: ctx.history || [],
+        reason: ctx.reason || '',
       },
-      profile: ctx.profile || {},
-      answers: ctx.answers || {},
-      job: { title: ctx.pending?.jobTitle || '', company: ctx.pending?.company || '', url: ctx.pending?.url || '' },
-      history: ctx.history || [],
-      reason: ctx.reason || '',
-    });
+    );
     if (!response?.ok || !response.data?.ok || !response.data?.action) return null;
     return response.data.action;
+  }
+
+  /**
+   * Visible-tab screenshot for the vision fallback. Returns bare base64 or ''.
+   * The service worker captures it; the page never gets browser APIs directly.
+   */
+  async function captureScreenshot() {
+    if (window.__HAMZOOH_ALLOW_VISION__ === false) return '';
+    try {
+      return await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'HAMZOOH_CAPTURE_SCREENSHOT' }, (response) => {
+          if (chrome.runtime.lastError) return resolve('');
+          const dataUrl = String(response?.dataUrl || '');
+          if (!response?.ok || !dataUrl) return resolve('');
+          resolve(dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl);
+        });
+      });
+    } catch { return ''; }
+  }
+
+  function isSubmitControl(el) {
+    if (!el) return false;
+    const type = String(el.getAttribute?.('type') || '').toLowerCase();
+    const label = `${el.innerText || el.value || ''} ${el.getAttribute?.('aria-label') || ''}`.toLowerCase();
+    return type === 'submit' || /\b(submit|send application|finish application|complete application)\b/.test(label);
   }
 
   function validate(action, snapshot) {
     if (!action || typeof action !== 'object') return 'Malformed action.';
     if (action.id != null && !elements.has(Number(action.id))) return `Element ${action.id} is no longer on the page.`;
+    if (action.action === 'click' && isSubmitControl(elements.get(Number(action.id)))) {
+      return 'Submission requires explicit dashboard approval.';
+    }
     if (SENSITIVE_RE.test(`${action.reason || ''} ${action.question || ''}`)) return 'Sensitive step — needs the user.';
     return '';
   }
@@ -179,9 +230,14 @@
         });
         return 'terminal';
       case 'done':
-        await handlers.finish('✅ The AI agent marked this application complete.', {
-          status: action.status === 'submitted' ? 'submitted' : 'needs_attention',
-          reasonCode: action.status === 'submitted' ? 'SUBMITTED' : 'REVIEW_READY',
+        // Hand the prepared form to the real approval gate. The filler builds
+        // the review, waits for the dashboard click, then submits and verifies.
+        if (typeof handlers.requestReview === 'function') {
+          await handlers.requestReview({ reason: action.reason || '' });
+          return 'review';
+        }
+        await handlers.finish('✅ The AI agent prepared this application. Review and approve submission in Hamzooh.', {
+          status: 'needs_attention', reasonCode: 'REVIEW_READY', reviewReady: true,
         });
         return 'terminal';
       default:
@@ -192,10 +248,23 @@
   async function run(ctx, handlers) {
     const history = [];
     const failures = new Map();
+    let lastScreenshotStep = -99;
     for (let step = 0; step < MAX_AGENT_STEPS; step += 1) {
       const before = observe();
       handlers.log('agent_observe', { step, url: before.url, elements: before.elements.length, errors: before.errors }, `Agent observe #${step + 1}: ${before.elements.length} elements`);
-      const action = await decide(before, { ...ctx, history, reason: ctx.reason || '' });
+      const totalFailures = [...failures.values()].reduce((sum, count) => sum + count, 0);
+      // Vision fallback: only when the DOM gives no usable controls or the agent
+      // has already failed twice. Never spend a vision call on a healthy page.
+      const needVision = (before.elements.length < 3 || totalFailures >= 2) && step - lastScreenshotStep >= 2;
+      let screenshot = '';
+      if (needVision) {
+        screenshot = await captureScreenshot();
+        if (screenshot) {
+          lastScreenshotStep = step;
+          handlers.log('agent_vision', { step }, 'DOM was insufficient — captured a screenshot for visual understanding');
+        }
+      }
+      const action = await decide(before, { ...ctx, history, reason: ctx.reason || '', screenshot });
       if (!action) {
         handlers.log('agent_unavailable', { step }, 'Agent endpoint unavailable');
         return false;
@@ -216,6 +285,9 @@
       }
       const result = await act(action, handlers);
       if (result === 'terminal') return true;
+      // The approval gate already finished the run (submitted, cancelled or
+      // paused). Do not keep observing a page that is no longer ours to drive.
+      if (result === 'review') return 'review';
       await handlers.wait(900);
       const after = observe();
       const changed = snapshotSignature(before) !== snapshotSignature(after) || before.url !== after.url;

@@ -538,12 +538,84 @@ try {
   log('navigation/keepalive setup failed', err?.message);
 }
 
+const SUBMISSION_CONFIRM_RE = /application (has been |was )?(submitted|received|complete|sent)|thank you for (applying|your application)|we('| a)?ve received your application|successfully (applied|submitted)/i;
+const SUBMISSION_URL_RE = /\/(thank|thanks|confirmation|success|submitted|applied)(\/|\?|$)/i;
+
+/**
+ * Inspect open tabs for this job and record a real submission confirmation.
+ * This is the automatic path used when the content script is gone (extension
+ * reloaded mid-run) but the job tab still shows the confirmation page.
+ */
+async function checkOpenTabsForSubmission(jobUrl = '') {
+  const { pendingApply } = await chrome.storage.local.get('pendingApply');
+  if (!pendingApply?.taskId || !pendingApply?.taskToken) return { ok: false, reason: 'no-task' };
+  let host = '';
+  try { host = new URL(pendingApply.url || jobUrl).hostname; } catch { return { ok: false, reason: 'bad-url' }; }
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const tab of tabs) {
+    if (!tab?.id || !tab.url) continue;
+    try { if (new URL(tab.url).hostname !== host) continue; } catch { continue; }
+    let probe = null;
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const text = (document.body?.innerText || '').slice(0, 200000);
+          const fields = [...document.querySelectorAll('input, textarea, select')].filter((el) => {
+            const type = (el.getAttribute('type') || '').toLowerCase();
+            if (['hidden', 'submit', 'button', 'image', 'reset', 'password', 'file'].includes(type)) return false;
+            if (el.disabled) return false;
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 1 || rect.height <= 1) return false;
+            return Boolean(el.closest('form, fieldset, [data-automation-id*="formField"], [data-automation-id*="question"]'));
+          }).length;
+          return { url: location.href, text, fields };
+        },
+      });
+      probe = results?.[0]?.result || null;
+    } catch { continue; }
+    if (!probe) continue;
+    // A page that still shows the application form is not a confirmation.
+    if (probe.fields > 0) continue;
+    const messageHit = SUBMISSION_CONFIRM_RE.test(probe.text || '');
+    const urlHit = SUBMISSION_URL_RE.test(probe.url || '');
+    if (!messageHit && !urlHit) continue;
+    const confirmation = messageHit
+      ? 'confirmation message shown in the job tab'
+      : `confirmation page ${String(probe.url).replace(/^https?:\/\//, '').slice(0, 80)}`;
+    const response = await fetch(`${API_BASE}/api/applications/extension/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        taskId: pendingApply.taskId,
+        token: pendingApply.taskToken,
+        status: 'submitted',
+        verified: true,
+        manual: true,
+        message: 'Detected that you submitted this application in the browser tab.',
+        confirmation,
+        confirmationUrl: probe.url,
+        url: probe.url,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      log('submission detection rejected', response.status, data?.error || '');
+      return { ok: false, error: data?.error || 'Could not record the submission.', status: response.status };
+    }
+    await storageSet({ pendingApply: { ...pendingApply, done: true } }).catch(() => {});
+    log('submission detected in tab', tab.id);
+    return { ok: true, submitted: true, task: data?.task || null };
+  }
+  return { ok: false, reason: 'no-confirmation' };
+}
+
 async function injectFiller(tabId) {
   if (!tabId) return false;
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
-      files: ['filler.js'],
+      files: ['agent.js', 'filler.js'],
     });
     return true;
   } catch (err) {
@@ -658,6 +730,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     loadResumeBlob().then((blob) => {
       sendResponse({ ok: Boolean(blob?.base64), resumeBase64: blob?.base64 || '', resumeName: blob?.name || 'hamzooh-resume.pdf' });
     }).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message?.type === 'HAMZOOH_CHECK_SUBMISSION') {
+    checkOpenTabsForSubmission(String(message.url || ''))
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || 'submission check failed' }));
     return true;
   }
 
@@ -905,6 +984,68 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 
 
+  if (message?.type === 'HAMZOOH_TASK_CONTROL') {
+    const action = String(message.action || '');
+    chrome.storage.local.get('pendingApply', async ({ pendingApply }) => {
+      try {
+        let tabId = pendingApply?.tabId || jobTabId;
+        if (!tabId) { sendResponse({ ok: false, error: 'No job tab is attached to this run.' }); return; }
+
+        // The candidate may have closed the job tab while reviewing. A resume
+        // (or an approval) is a request to continue, so recreate the run in a
+        // fresh tab. The normal tab-load path injects the filler and resumes
+        // from the server-owned checkpoint.
+        if (action === 'resume' || action === 'approve') {
+          let tabAlive = true;
+          try { await chrome.tabs.get(tabId); } catch { tabAlive = false; }
+          if (!tabAlive) {
+            if (!pendingApply?.url) {
+              sendResponse({ ok: false, error: 'The job tab was closed and no application URL is stored.' });
+              return;
+            }
+            const created = await chrome.tabs.create({ url: pendingApply.url, active: true });
+            await storageSet({ pendingApply: { ...pendingApply, tabId: created.id, done: false, paused: false } }).catch(() => {});
+            sendResponse({ ok: true, tabId: created.id, reopened: true });
+            return;
+          }
+          if (action === 'approve') {
+            // The tab is still open and already polls the approval state; just
+            // surface it so submission proceeds without a second click.
+            try { await chrome.tabs.update(tabId, { active: true }); } catch {}
+            try { await chrome.tabs.sendMessage(tabId, { type: 'HAMZOOH_TASK_CONTROL', action }); } catch {}
+            sendResponse({ ok: true, tabId });
+            return;
+          }
+        }
+
+        if (action === 'cancel' || action === 'pause' || action === 'resume') {
+          const resume = action === 'resume' && pendingApply
+            ? storageSet({ pendingApply: { ...pendingApply, done: false, paused: false } }).catch(() => {})
+            : Promise.resolve();
+          await resume;
+          if (action === 'resume') await injectFiller(tabId);
+          try {
+            await chrome.tabs.sendMessage(tabId, { type: 'HAMZOOH_TASK_CONTROL', action });
+            sendResponse({ ok: true, tabId });
+          } catch (err) {
+            // Pause/cancel are already persisted by the backend. Only a failed
+            // resume actually prevents the browser from continuing.
+            if (action === 'resume') {
+              sendResponse({ ok: false, error: err?.message || 'Could not reach the job tab.' });
+            } else {
+              sendResponse({ ok: true, tabId, detached: true });
+            }
+          }
+          return;
+        }
+        sendResponse({ ok: false, error: `Unknown task control: ${action}` });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message || 'Task control failed.' });
+      }
+    });
+    return true;
+  }
+
   if (message?.type !== 'HAMZOOH_OPEN_JOB') return undefined;
 
   if (sender.tab?.id) dashboardTabId = sender.tab.id;
@@ -918,12 +1059,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     company: message.company || '',
     title: message.jobTitle || '',
     dryRun: message.dryRun === true,
-    autoSubmit: message.autoSubmit === true,
     startedAt,
   }).then(() => appendRunEvent(runId, {
     step: 'open_requested',
     message: 'Auto-apply requested',
-    data: { url: message.url || '', dryRun: message.dryRun === true, autoSubmit: message.autoSubmit === true },
+    data: { url: message.url || '', dryRun: message.dryRun === true },
     t: startedAt,
   })).then(() => {
     if (chrome.alarms) chrome.alarms.create('hamzooh-apply-keepalive', { periodInMinutes: 0.3 }).catch(() => {});
@@ -983,7 +1123,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       jobTitle: message.jobTitle || '',
       company: message.company || '',
       trainMode: message.trainMode === true,
-      autoSubmit: message.trainMode ? false : message.autoSubmit === true,
+      taskId: message.taskId || '',
+      taskToken: message.taskToken || '',
+      requireApproval: message.taskId ? true : message.requireApproval !== false,
       startedAt: Date.now(),
       hasResume: Boolean(message.resumeBase64),
     };

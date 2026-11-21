@@ -635,6 +635,9 @@ export function buildUserEvidence(profile, resume) {
     graduationYear: graduationYears.length ? Math.max(...graduationYears) : null,
     graduationYears,
     yearsOfExperience: Math.max(declaredYears, Math.round(computedYears * 10) / 10),
+    // Exact (unrounded) value for display. Scoring/eligibility keep using the
+    // rounded `yearsOfExperience` so match behaviour is unchanged.
+    yearsOfExperienceExact: Math.max(declaredYears, computedYears),
     location: safeProfile.location || '',
   };
 }
@@ -1099,6 +1102,7 @@ export function scoreJobMatch(profile, job, options = {}) {
       projects: evidence.projects.length,
       experience: evidence.experience.length,
       yearsOfExperience: evidence.yearsOfExperience,
+      yearsOfExperienceExact: evidence.yearsOfExperienceExact,
       resumeChars: evidence.resumeText.length,
     },
     job: {
@@ -1123,8 +1127,11 @@ export function scoreJobMatch(profile, job, options = {}) {
 /* Cached entry points                                                  */
 /* ------------------------------------------------------------------ */
 
+const MATCH_CACHE_VERSION = 'v2'; // bumped when result fields change (e.g. exact years)
+
 export function cacheKeyFor(userId, job, profile, resume) {
   return [
+    MATCH_CACHE_VERSION,
     userId || 'anon',
     jobVersion(job),
     profileVersion(profile),

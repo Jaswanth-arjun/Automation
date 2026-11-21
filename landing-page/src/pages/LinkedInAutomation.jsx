@@ -195,7 +195,7 @@ export default function LinkedInAutomation() {
   const [logs, setLogs] = useState([]);
 
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');  const [connError, setConnError] = useState('');
+  const [loadError, setLoadError] = useState(''); const [connError, setConnError] = useState('');
   const [analyticsError, setAnalyticsError] = useState('');
   const [wsLive, setWsLive] = useState(false);
 
@@ -299,7 +299,7 @@ export default function LinkedInAutomation() {
         if (!alive) return;
         if (res?.active) setCampaign(res.active);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => { alive = false; };
   }, []);
 
@@ -449,7 +449,7 @@ export default function LinkedInAutomation() {
     connect();
 
     const poll = setInterval(() => {
-      if (!wsOkRef.current) refreshData().catch(() => {});
+      if (!wsOkRef.current) refreshData().catch(() => { });
     }, 10000);
 
     return () => {

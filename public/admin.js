@@ -5,7 +5,7 @@
  * Admin gate — the panel stays blurred until the emailed code is verified.
  * The admin address is never rendered: the popup only ever says "code sent".
  */
-async function adminGate() {
+function adminGate() {
   const statusEl = document.getElementById('adminGateStatus');
   const sendBtn = document.getElementById('adminOtpSend');
   const otpRow = document.getElementById('adminOtpRow');
@@ -23,18 +23,9 @@ async function adminGate() {
     document.getElementById('adminGate').classList.add('hidden');
   };
 
-  try {
-    const res = await fetch('/api/admin/otp/status', { cache: 'no-store' });
-    const data = await res.json().catch(() => ({}));
-    if (data && data.authenticated) {
-      unlock();
-      return true;
-    }
-  } catch {
-    // Fall through to the gate: an unreachable status check must not open the panel.
-  }
-
   return new Promise((resolve) => {
+    // Listeners attach before the session probe, so a click right after load
+    // never lands on a dead button.
     let cooldownTimer = null;
 
     const startCooldown = (seconds) => {
@@ -111,6 +102,18 @@ async function adminGate() {
         verifyBtn.disabled = false;
       }
     });
+
+    fetch('/api/admin/otp/status', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.authenticated) {
+          unlock();
+          resolve(true);
+        }
+      })
+      .catch(() => {
+        // An unreachable probe must never open the panel.
+      });
   });
 }
 

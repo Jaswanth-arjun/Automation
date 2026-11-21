@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
 
 import Landing from './pages/Landing';
@@ -19,6 +19,7 @@ import AdminJobs from './pages/AdminJobs';
 import SavedJobs from './pages/SavedJobs';
 import Subscription from './pages/Subscription';
 import VideoLoader from './components/VideoLoader';
+import HamzoohAssistant from './components/HamzoohAssistant';
 
 // The admin panel is a separate page served by the API server. While running
 // the Vite dev server on :5173, /admin only exists on :3000.
@@ -32,6 +33,16 @@ function AdminPanelRedirect() {
     window.location.replace(adminPanelUrl());
   }, []);
   return <div className="ad-boot">Opening the admin panel…</div>;
+}
+
+// The copilot belongs to the signed-in dashboard only: it is never shown on the
+// public landing/auth pages, even for an authenticated visitor.
+function GlobalAssistant() {
+  const { isAuthenticated } = useAuth();
+  const { pathname } = useLocation();
+  if (!isAuthenticated) return null;
+  if (!pathname.startsWith('/dashboard')) return null;
+  return <HamzoohAssistant />;
 }
 
 function ProtectedRoute({ children }) {
@@ -73,6 +84,7 @@ export default function App() {
           <Route path="/admin/*" element={<AdminPanelRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <GlobalAssistant />
       </AuthProvider>
     </BrowserRouter>
   );

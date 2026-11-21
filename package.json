@@ -5,7 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "test": "node --test test/job-analysis.test.js test/resume-pdf.test.js test/apply-intelligence.test.js test/auto-apply-form.test.js test/two-stage-campaign.test.js",
+    "test": "node --test test/job-analysis.test.js test/rag-assistant-engine.test.js test/resume-pdf.test.js test/apply-intelligence.test.js test/auto-apply-form.test.js test/two-stage-campaign.test.js test/auto-apply-autonomous.test.js test/apply-safety.test.js",
     "hamzo": "node scripts/dev-hamzo.mjs",
     "hamzooh": "node scripts/dev-hamzo.mjs",
     "start": "node server.js",

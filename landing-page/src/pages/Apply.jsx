@@ -1,15 +1,15 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { 
-  ArrowLeft, ArrowRight, Mail, FileText, Sparkles, 
-  Copy, Check, Send, Download, CheckCircle2, 
+import {
+  ArrowLeft, ArrowRight, Mail, FileText, Sparkles,
+  Copy, Check, Send, Download, CheckCircle2,
   AlertCircle, RefreshCw,
   Upload, Eye, ChevronRight, UserCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil,
   Lock, Gem
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore, coverLetterStore } from '../lib/api';
+import { profileStore, applicationStore, resumeStore, api, authHeaders, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore, coverLetterStore, reconcileSubmittedApplications } from '../lib/api';
 import CoverLetterModal from '../components/CoverLetterModal';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { calculateMatchScore } from '../lib/matchScore';
@@ -18,6 +18,8 @@ import CampaignStatus from '../components/CampaignStatus';
 import { ResumeRichEditor } from '../components/JobAnalyzerModal';
 import { keywordAudit, scoreValue, scoreLabel, mapProfileForBackend, extractProfilePdf } from '../components/JobAnalyzerModal.helpers';
 import MatchScore from '../components/MatchScore';
+import AutoApplyTaskPanel from '../components/AutoApplyTaskPanel';
+import SavedAnswersModal from '../components/SavedAnswersModal';
 
 const Linkedin = ({ size = 16, style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -161,9 +163,16 @@ export default function Apply() {
   const [runLogState, setRunLogState] = useState('idle');
   const [needsUser, setNeedsUser] = useState(null);
   const [extensionReady, setExtensionReady] = useState(false);
+  const [autoTask, setAutoTask] = useState(null);
+  const [autoTaskError, setAutoTaskError] = useState('');
+  const [blockingTask, setBlockingTask] = useState(null);
+  const [taskAnswerDrafts, setTaskAnswerDrafts] = useState({});
+  const [taskAnswerConsent, setTaskAnswerConsent] = useState({});
+  const [taskBusy, setTaskBusy] = useState('');
+  const [showAnswersModal, setShowAnswersModal] = useState(false);
+  const handledTaskTerminalRef = useRef('');
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
-  const [trainNotice, setTrainNotice] = useState('');
 
   // Backend run pollers must be stopped if this page is left mid-run.
   const activePollsRef = useRef([]);
@@ -177,7 +186,7 @@ export default function Apply() {
   const [isGeneratingCoverLetter, setIsGeneratingCoverLetter] = useState(false);
   const [showCoverLetterModal, setShowCoverLetterModal] = useState(false);
   const [coverLetterModalMode, setCoverLetterModalMode] = useState('view');
-  
+
   // Full Auto Mode state - NEW
   const [fullAutoMode, setFullAutoMode] = useState(() => {
     try {
@@ -191,8 +200,31 @@ export default function Apply() {
   useEffect(() => {
     try {
       localStorage.setItem('hamzooh_full_auto_mode', fullAutoMode ? 'true' : 'false');
-    } catch {}
+    } catch { }
   }, [fullAutoMode]);
+
+  // A verified submission recorded by the backend — including a manual submit in
+  // the job tab after the run stopped — must mark this role as applied.
+  useEffect(() => {
+    if (!jobId) return;
+    const jobUrl = [job?.applyLink, job?.url, job?.sourceUrl]
+      .map((value) => String(value || '').trim())
+      .find((value) => /^https?:\/\//i.test(value)) || '';
+    const norm = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    reconcileSubmittedApplications({
+      jobId, jobUrl, jobTitle: job?.title || job?.role || '', jobCompany: job?.company || '',
+    })
+      .then((changed) => {
+        if (!changed) return;
+        const applied = applyProgressStore.get(jobId)?.apply
+          || applicationStore.getAll().some((app) => (
+            String(app.jobId || '') === String(jobId)
+            || (norm(app.company) === norm(job?.company) && norm(app.title) === norm(job?.title)))
+          );
+        if (applied) setSubmitted(true);
+      })
+      .catch(() => {});
+  }, [jobId, job?.applyLink, job?.url, job?.title, job?.company]);
 
   // A tailored resume only belongs to the job it was generated for. If this job
   // was already tailored, restore that report instead of asking for it again.
@@ -336,7 +368,7 @@ export default function Apply() {
           setLiConnecting(false);
           setLiConnectError(acc.error || 'Login failed. Please try again.');
         }
-      } catch {}
+      } catch { }
     }, 3000);
     return () => clearInterval(interval);
   }, [liConnecting, liUserId]);
@@ -360,7 +392,7 @@ export default function Apply() {
   };
 
   const handleLiCancelConnect = async () => {
-    try { await api.disconnectLinkedIn(liUserId); } catch {}
+    try { await api.disconnectLinkedIn(liUserId); } catch { }
     setLiConnecting(false);
     setLiConnectError('');
   };
@@ -599,7 +631,7 @@ Thanks,
 ${firstName}`;
   };
 
-  const [emailSubject, setEmailSubject] = useState(() => 
+  const [emailSubject, setEmailSubject] = useState(() =>
     `Application Referral Request: ${job?.title || 'Role'} at ${job?.company || 'Company'}`
   );
   const [emailBody, setEmailBody] = useState(() => generateInitialDraft());
@@ -918,11 +950,12 @@ ${firstName}`;
     const markReady = () => {
       if (!alive) return;
       setExtensionReady(true);
-      fetch('/api/vault/answers').then(r => r.json()).then(data => {
-        if (data.answers) {
-          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_SYNC_ANSWERS', answers: data.answers }, '*');
+      fetch('/api/vault/answers', { headers: authHeaders() }).then(r => (r.ok ? r.json() : null)).then(data => {
+        const answers = data?.map || {};
+        if (Object.keys(answers).length) {
+          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_SYNC_ANSWERS', answers }, '*');
         }
-      }).catch(() => {});
+      }).catch(() => { });
     };
 
     // Check DOM attribute set by bridge.js
@@ -933,6 +966,10 @@ ${firstName}`;
     const onMsg = (event) => {
       if (!alive) return;
       if (event.data?.source === 'hamzooh-extension' && (event.data.type === 'HAMZOOH_PONG' || event.data.type === 'HAMZOOH_ANSWERS_SYNCED')) {
+        if (event.data.type === 'HAMZOOH_PONG' && event.data.alive === false) {
+          setExtensionReady(false);
+          return;
+        }
         markReady();
       }
     };
@@ -959,6 +996,25 @@ ${firstName}`;
       clearTimeout(stopTimer);
     };
   }, []);
+
+  // If the extension was reloaded while the user was starting an apply, the
+  // bridge refreshes this page and leaves a one-shot flag. Retry the apply
+  // automatically once the fresh extension reconnects, so the user does not
+  // have to press F5 and click again.
+  const handleAutoApplyRef = useRef(null);
+  useEffect(() => {
+    if (!extensionReady) return undefined;
+    let pending = false;
+    try {
+      pending = sessionStorage.getItem('hamzooh_resume_apply') === '1';
+      if (pending) sessionStorage.removeItem('hamzooh_resume_apply');
+    } catch {}
+    if (!pending) return undefined;
+    const timer = setTimeout(() => {
+      Promise.resolve(handleAutoApplyRef.current?.()).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [extensionReady]);
 
   // Keep latest job/match values without re-subscribing on every render
   // (job and matchResult are freshly created objects each render).
@@ -991,17 +1047,22 @@ ${firstName}`;
         });
         setAutoApplying(false);
         if (event.data.status === 'submitted') {
-          applicationStore.add({
-            title: ctx.job?.title,
-            company: ctx.job?.company,
-            companyMark: ctx.job?.companyMark,
-            jobId: ctx.job?.id,
-            status: 'Applied',
-            stage: 'apply',
-            appliedViaExtension: true,
-            ...(ctx.hasMatchScore ? { matchScore: ctx.matchResult.score } : {}),
-            resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
-          });
+          const alreadyTracked = applicationStore.getAll().some((item) => (
+            item?.appliedViaExtension && String(item?.jobId || '') === String(ctx.job?.id || '')
+          ));
+          if (!alreadyTracked) {
+            applicationStore.add({
+              title: ctx.job?.title,
+              company: ctx.job?.company,
+              companyMark: ctx.job?.companyMark,
+              jobId: ctx.job?.id,
+              status: 'Applied',
+              stage: 'apply',
+              appliedViaExtension: true,
+              ...(ctx.hasMatchScore ? { matchScore: ctx.matchResult.score } : {}),
+              resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
+            });
+          }
           applyProgressStore.mark(jobId || ctx.job?.id, 'apply', {
             company: ctx.job?.company || '',
             title: ctx.job?.title || '',
@@ -1044,6 +1105,200 @@ ${firstName}`;
     window.addEventListener('message', onExtensionMessage);
     return () => window.removeEventListener('message', onExtensionMessage);
   }, [jobId]);
+
+  // Reattach to a task that survived a page reload or a browser reconnect.
+  useEffect(() => {
+    if (!extensionReady || !job) return undefined;
+    let alive = true;
+    const link = [job.applyLink, job.url, job.sourceUrl]
+      .map((value) => String(value || '').trim())
+      .find((value) => /^https?:\/\//i.test(value)) || '';
+    if (!link) return undefined;
+    api.getActiveApplicationTask()
+      .then((res) => {
+        if (!alive || !res?.task) return;
+        if (res.task.url !== link) return;
+        setAutoTask(res.task);
+        setShowAutoApplyModal(true);
+        setAutoApplying(!['submitted', 'failed', 'cancelled', 'waiting_for_user_input', 'waiting_for_approval', 'paused'].includes(res.task.status));
+      })
+      .catch(() => { });
+    return () => { alive = false; };
+  }, [extensionReady, jobId]);
+
+  // Automatic submission detection. The extension inspects any open tab for
+  // this job and records a real site confirmation, so the role becomes Applied
+  // without the candidate marking anything by hand.
+  useEffect(() => {
+    if (!extensionReady || !job || submitted) return undefined;
+    const link = [job.applyLink, job.url, job.sourceUrl]
+      .map((value) => String(value || '').trim())
+      .find((value) => /^https?:\/\//i.test(value)) || '';
+    if (!link) return undefined;
+    let alive = true;
+    let pendingTimer = null;
+
+    const check = () => {
+      if (!alive) return;
+      const requestId = `subcheck_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const onMsg = (event) => {
+        if (event.source !== window || event.data?.source !== 'hamzooh-extension'
+          || event.data.type !== 'HAMZOOH_SUBMISSION_CHECK_RESULT'
+          || event.data.requestId !== requestId) return;
+        window.removeEventListener('message', onMsg);
+        if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+        if (!alive || !event.data.ok) return;
+        if (event.data.task) setAutoTask(event.data.task);
+        setSubmitted(true);
+        setAutoApplyResult({
+          status: 'submitted',
+          message: event.data.task?.result?.message || 'Submission detected in the job tab.',
+          filledFields: [],
+          filledCount: event.data.task?.filledCount || 0,
+          emptyCount: 0,
+        });
+        applyProgressStore.mark(jobId || job?.id, 'apply', { company: job?.company || '', title: job?.title || '' });
+        reconcileSubmittedApplications({
+          jobId, jobUrl: link, jobTitle: job?.title || job?.role || '', jobCompany: job?.company || '',
+        }).catch(() => {});
+      };
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_CHECK_SUBMISSION', requestId, url: link }, '*');
+      pendingTimer = setTimeout(() => window.removeEventListener('message', onMsg), 10000);
+    };
+
+    const first = setTimeout(check, 1500);
+    const interval = setInterval(check, 20000);
+    const stop = setTimeout(() => clearInterval(interval), 5 * 60 * 1000);
+    window.addEventListener('focus', check);
+    return () => {
+      alive = false;
+      clearTimeout(first);
+      clearInterval(interval);
+      clearTimeout(stop);
+      if (pendingTimer) clearTimeout(pendingTimer);
+      window.removeEventListener('focus', check);
+    };
+  }, [extensionReady, jobId, job?.applyLink, job?.url, submitted]);
+
+  // Live task state — the modal and controls read genuine backend state.
+  useEffect(() => {
+    const taskId = autoTask?.id;
+    if (!taskId) return undefined;
+    let alive = true;
+    let timer = null;
+    const terminal = new Set(['submitted', 'failed', 'cancelled']);
+    const active = new Set(['initializing', 'connecting_browser', 'analyzing_job', 'preparing_application', 'filling_application', 'submitting']);
+
+    const applyTask = (task) => {
+      if (!alive || !task) return;
+      setAutoTask(task);
+      const steps = (task.steps || []).slice(-80).map((step) => ({
+        step: step.step,
+        message: step.message,
+        timestamp: step.at ? new Date(step.at).getTime() : Date.now(),
+      }));
+      if (steps.length) setAutoApplyProgress(steps);
+      setAutoApplying(active.has(task.status));
+      if (task.status === 'waiting_for_user_input') setAutoApplying(false);
+
+      if (!terminal.has(task.status)) return;
+      if (timer) { clearInterval(timer); timer = null; }
+      if (handledTaskTerminalRef.current === task.id) return;
+      handledTaskTerminalRef.current = task.id;
+      setAutoApplying(false);
+
+      if (task.status === 'submitted') {
+        setAutoApplyResult({
+          status: 'submitted',
+          message: task.result?.message || 'Application submitted and verified by the site.',
+          filledFields: [],
+          filledCount: task.filledCount || task.review?.filledCount || 0,
+          emptyCount: 0,
+        });
+        setSubmitted(true);
+        const ctx = applyContextRef.current;
+        const alreadyTracked = applicationStore.getAll().some((item) => (
+          (task.id && String(item?.taskId || '') === String(task.id))
+          || (item?.appliedViaExtension && String(item?.jobId || '') === String(ctx.job?.id || ''))
+        ));
+        if (!alreadyTracked) applicationStore.add({
+          title: ctx.job?.title,
+          company: ctx.job?.company,
+          companyMark: ctx.job?.companyMark,
+          jobId: ctx.job?.id,
+          status: 'Applied',
+          stage: 'apply',
+          appliedViaExtension: true,
+          taskId: task.id,
+          ...(ctx.hasMatchScore ? { matchScore: ctx.matchResult.score } : {}),
+          resumeUsed: task.selectedResume?.name || task.review?.resumeName || 'Tailored Resume (AI agent)',
+        });
+        applyProgressStore.mark(jobId || ctx.job?.id, 'apply', {
+          company: ctx.job?.company || '',
+          title: ctx.job?.title || '',
+        });
+      } else if (task.status === 'cancelled') {
+        setAutoApplyResult({ status: 'cancelled', message: task.result?.message || 'Application cancelled. Nothing was submitted.', filledFields: [] });
+      } else {
+        setAutoApplyResult({
+          status: 'failed',
+          message: task.result?.message || 'The automation stopped before submission. Review the activity log and try again.',
+          filledFields: [],
+        });
+        setNeedsUser({
+          reasonCode: task.result?.reasonCode || 'AUTOMATION_STOPPED',
+          message: task.result?.message || 'The automation needs your attention.',
+          question: task.result?.question || '',
+          runId: task.id,
+        });
+      }
+    };
+
+    const poll = async () => {
+      try {
+        const res = await api.getApplicationTask(taskId);
+        if (alive && res?.task) applyTask(res.task);
+      } catch (err) {
+        if (alive && (err.status === 404 || err.status === 401)) {
+          setAutoTaskError(err.message || 'Could not load this application task.');
+          if (timer) { clearInterval(timer); timer = null; }
+        }
+      }
+    };
+
+    poll();
+    timer = setInterval(poll, 2000);
+    return () => {
+      alive = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [autoTask?.id]);
+
+  // Low-latency updates from the backend's existing WebSocket channel; polling
+  // above remains the fallback if the socket is unavailable.
+  useEffect(() => {
+    const taskId = autoTask?.id;
+    if (!taskId) return undefined;
+    let socket = null;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${window.location.host}/linkedin-api`);
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload?.type === 'application_task' && payload.data?.taskId === taskId && payload.data?.task) {
+            setAutoTask(payload.data.task);
+          }
+        } catch { }
+      };
+    } catch {
+      socket = null;
+    }
+    return () => {
+      try { socket?.close(); } catch { }
+    };
+  }, [autoTask?.id]);
 
   // Handle Direct Apply — Extension-based auto-apply (opens new tab in same browser)
   const handleProceedDirectApply = async (isTrainMode = false) => {
@@ -1093,18 +1348,20 @@ ${firstName}`;
     // Push profile to extension and trigger job open in new tab
     const ANSWERS_KEY = 'hamzooh_apply_answers';
     let savedAnswers = {};
-    try { savedAnswers = JSON.parse(localStorage.getItem(ANSWERS_KEY) || '{}'); } catch {}
+    try { savedAnswers = JSON.parse(localStorage.getItem(ANSWERS_KEY) || '{}'); } catch { }
     try {
-      const serverVault = await fetch('http://localhost:3000/api/vault/answers').then((r) => r.json());
-      if (serverVault?.answers) {
-        savedAnswers = { ...serverVault.answers, ...savedAnswers };
+      const serverVault = await fetch('http://localhost:3000/api/vault/answers', { headers: authHeaders() })
+        .then((r) => (r.ok ? r.json() : null));
+      if (serverVault?.map) {
+        savedAnswers = { ...serverVault.map, ...savedAnswers };
       }
-    } catch {}
+    } catch { }
 
     // Ensure we have a valid PDF base64 for resume attachment.
     // Priority: just-tailored this session > resume saved for THIS job > global active.
     const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
-    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || '';
+    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64
+      || profile?.resume?.dataUrl || '';
     if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
     let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
 
@@ -1164,7 +1421,6 @@ ${firstName}`;
       requestId,
       url: link,
       trainMode: isTrainMode === true,
-      autoSubmit: isTrainMode ? false : fullAutoMode, // Don't auto-submit in train mode
       profile: {
         ...(profile || {}),
         jobLocation: job?.location || job?.filters?.location || '',
@@ -1247,10 +1503,11 @@ ${firstName}`;
   const loadApplyAnswers = async () => {
     let answers = {};
     try {
-      const r = await fetch('http://localhost:3000/api/vault/answers').then((res) => res.json());
-      answers = r.answers || {};
-    } catch {}
-    try { answers = { ...answers, ...JSON.parse(localStorage.getItem('hamzooh_apply_answers') || '{}') }; } catch {}
+      const r = await fetch('http://localhost:3000/api/vault/answers', { headers: authHeaders() })
+        .then((res) => (res.ok ? res.json() : null));
+      answers = r?.map || {};
+    } catch { }
+    try { answers = { ...answers, ...JSON.parse(localStorage.getItem('hamzooh_apply_answers') || '{}') }; } catch { }
     return answers;
   };
 
@@ -1324,73 +1581,312 @@ ${firstName}`;
     activePollsRef.current.push(poll);
   };
 
-  // Auto Apply: use a learned blueprint when available; otherwise live AI vision.
+  // Guarantee a real resume PDF before the autonomous run starts.
+  const ensureApplyResumePdf = async (link) => {
+    const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
+    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || '';
+    if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
+    let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name
+      || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
+
+    if (!pdfToAttach) {
+      const active = activeResume || resumes[0];
+      const result = await api.tailorExternalJob({
+        url: link,
+        profile: mapProfileForBackend(profile || {}),
+        resumeText: String(active?.text || '').trim() || String(profile?.resume?.text || '').trim(),
+        template: getSelectedTemplateId(),
+      });
+      const chosen = result.formats?.[0];
+      if (!chosen?.pdfBase64) throw new Error('No resume PDF could be prepared for this application.');
+      pdfToAttach = chosen.pdfBase64;
+      fileNameToAttach = `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-tailored-resume.pdf`;
+      resumeStore.add({
+        name: fileNameToAttach,
+        size: '1 page PDF',
+        type: 'application/pdf',
+        pdfBase64: pdfToAttach,
+        jobUrl: link,
+        jobId,
+        company: job?.company || '',
+        title: job?.title || '',
+      });
+      setTailoredPdfBase64(pdfToAttach);
+      setTailoredFileName(fileNameToAttach);
+    }
+    return { pdfToAttach, fileNameToAttach };
+  };
+
+  // Autonomous Auto Apply with AI.
+  // The Chrome extension executes in the candidate's own tab; the backend owns
+  // task state, answer memory and the approval gate.
   const handleAutoApply = async () => {
     const link = applyLink();
-    if (!link) { alert('This job has no application URL.'); return; }
+    if (!link) { alert('This job has no application URL. Add an Apply link on the job, then try again.'); return; }
+
+    if (autoTask?.id && !['submitted', 'failed', 'cancelled'].includes(autoTask.status)) {
+      setShowAutoApplyModal(true);
+      setAutoApplying(['initializing', 'connecting_browser', 'analyzing_job', 'preparing_application', 'filling_application', 'submitting'].includes(autoTask.status));
+      return;
+    }
+
+    if (!extensionReady) {
+      alert('Hamzooh Apply is not connected. Load the extension in chrome://extensions (Load unpacked → extension folder), then refresh this page.');
+      return;
+    }
+
+    const missingProfile = [];
+    if (!String(profile?.fullName || '').trim()) missingProfile.push('full name');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(profile?.email || '').trim())) missingProfile.push('email');
+    if (!String(profile?.phone || '').replace(/\D/g, '')) missingProfile.push('phone number');
+    if (missingProfile.length) {
+      alert(`Complete your profile before Auto Apply: ${missingProfile.join(', ')}.`);
+      navigate('/dashboard/profile');
+      return;
+    }
+
+    const hasAnyResume = Boolean(
+      tailoredPdfBase64
+      || jobResume?.pdfBase64 || jobResume?.base64
+      || activeResume?.pdfBase64 || activeResume?.base64
+      || profile?.resume?.dataUrl
+      || String(activeResume?.text || profile?.resume?.text || '').trim(),
+    );
+    if (!hasAnyResume) {
+      alert('Upload at least one resume before using Auto Apply with AI.');
+      navigate('/dashboard/resume');
+      return;
+    }
+
     beginBackendRun();
+    setAutoTask(null);
+    setAutoTaskError('');
+    setBlockingTask(null);
+    handledTaskTerminalRef.current = '';
+
     try {
+      const { pdfToAttach, fileNameToAttach } = await ensureApplyResumePdf(link);
       const answers = await loadApplyAnswers();
-      const payload = {
-        url: link,
-        profile: { ...(profile || {}), jobTitle: job?.title || job?.role || '', company: job?.company || '' },
-        answers,
-        resumeBase64: tailoredPdfBase64 || '',
-        resumeName: tailoredFileName || '',
-      };
-      let res = await fetch('http://localhost:3000/api/auto-apply-blueprint', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+      const currentResumeText = jobResume?.text || activeResume?.text || profile?.resume?.text || '';
+
+      const resumeFiles = new Map();
+      if (pdfToAttach) resumeFiles.set(fileNameToAttach, pdfToAttach);
+      (resumes || []).forEach((resume) => {
+        const bytes = resume?.pdfBase64 || resume?.base64 || resume?.dataUrl || '';
+        if (resume?.name && bytes) resumeFiles.set(resume.name, String(bytes).includes(',') ? String(bytes).split(',')[1] : bytes);
       });
-      let data = await res.json();
-      if (res.ok && data.ok) {
-        setAutoApplyProgress([{ step: 'blueprint_started', message: data.learnedNow
-          ? `🧠 First time on ${data.domain} — learning the flow, then filling with your details automatically…`
-          : `🧠 Using the learned playbook for ${data.domain} — filling with your details automatically…`, timestamp: Date.now() }]);
-        pollBackendRun(`http://localhost:3000/api/auto-apply-blueprint/${data.runId}`, 'replay');
+
+      const resumeCandidates = (resumes || [])
+        .filter((resume) => resume?.name && (resume.pdfBase64 || resume.base64 || resume.dataUrl))
+        .map((resume) => ({ name: resume.name || '', size: resume.size || '', text: String(resume.text || '').slice(0, 12000) }));
+      if (!resumeCandidates.some((resume) => resume.name === fileNameToAttach)) {
+        resumeCandidates.push({ name: fileNameToAttach, size: 'PDF', text: String(currentResumeText).slice(0, 12000) });
+      }
+      const explicitSelection = (tailoredPdfBase64 || jobResume)
+        ? { name: fileNameToAttach, text: String(currentResumeText).slice(0, 12000) }
+        : null;
+
+      const start = await api.startAutoApply({
+        url: link,
+        job: {
+          // The dashboard job id is what lets a completed task mark this exact
+          // role as applied in the Job Tracker.
+          id: job?.id || jobId || '',
+          title: job?.title || job?.role || '',
+          company: job?.company || '',
+          location: job?.location || job?.filters?.location || '',
+          url: job?.applyLink || job?.url || link,
+          description: job?.description || '',
+          source: job?.source || job?.sourceName || job?.provider || '',
+        },
+        profile: mapProfileForBackend(profile || {}),
+        resumes: resumeCandidates,
+        selectedResume: explicitSelection,
+        resumeBase64: pdfToAttach,
+        resumeName: fileNameToAttach,
+      });
+
+      const task = start.task;
+      setAutoTask(task);
+      try {
+        const beat = await api.extensionHeartbeat(task.id, start.token, { status: 'connecting_browser', url: link });
+        if (beat?.task) setAutoTask(beat.task);
+      } catch {}
+      setShowAutoApplyModal(true);
+      setAutoApplying(true);
+      setAutoApplyResult(null);
+      setAutoApplyProgress([{ step: 'task_started', message: `Autopilot task created for ${job?.title || 'this role'}. Connecting to your browser…`, timestamp: Date.now() }]);
+
+      const chosenName = task?.selectedResume?.name;
+      const chosenBase64 = resumeFiles.get(chosenName) || pdfToAttach;
+      const chosenFileName = chosenName || fileNameToAttach;
+
+      const requestId = `apply_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const readyPromise = new Promise((resolve) => {
+        const onMsg = (event) => {
+          if (event.source !== window || event.data?.source !== 'hamzooh-extension'
+            || event.data.type !== 'HAMZOOH_APPLY_READY' || event.data.requestId !== requestId) return;
+          window.removeEventListener('message', onMsg);
+          clearTimeout(timeout);
+          resolve(event.data);
+        };
+        const timeout = setTimeout(() => {
+          window.removeEventListener('message', onMsg);
+          resolve({ ok: false, error: 'Hamzooh Apply did not respond. Reload the extension, then refresh this page.' });
+        }, 20000);
+        window.addEventListener('message', onMsg);
+      });
+
+      window.postMessage({
+        source: 'hamzooh-app',
+        type: 'HAMZOOH_START_APPLY',
+        requestId,
+        taskId: task.id,
+        taskToken: start.token,
+        requireApproval: true,
+        url: link,
+        profile: {
+          ...(profile || {}),
+          jobLocation: job?.location || job?.filters?.location || '',
+          jobSource: job?.source || job?.sourceName || job?.provider || '',
+        },
+        answers,
+        resumeBase64: chosenBase64,
+        resumeName: chosenFileName,
+        resumeText: currentResumeText,
+        jobTitle: job?.title || '',
+        company: job?.company || '',
+      }, '*');
+
+      const ready = await readyPromise;
+      if (!ready.ok) {
+        await api.cancelApplicationTask(task.id, ready.error || 'The browser did not start.').catch(() => { });
+        setAutoApplying(false);
+        if (ready.stale) {
+          // The extension was updated mid-start. bridge.js refreshes this page
+          // and left a one-shot retry flag, so this run restarts automatically
+          // once the fresh extension reconnects.
+          try { sessionStorage.setItem('hamzooh_resume_apply', '1'); } catch {}
+          setAutoApplyProgress((previous) => [...previous, {
+            step: 'reconnecting',
+            message: '🔄 Extension updated — reconnecting and restarting automatically…',
+            timestamp: Date.now(),
+          }]);
+          return;
+        }
+        setAutoTaskError(ready.error || 'Could not open the job page in your browser.');
+        setAutoApplyResult({ status: 'failed', message: ready.error || 'Could not open the job page in your browser.', filledFields: [] });
         return;
       }
-      // No blueprint yet — fall back to the live vision agent.
-      setAutoApplyProgress([{ step: 'vision_started', message: '👁️ No saved playbook yet — Vision AI is filling the application live…', timestamp: Date.now() }]);
-      res = await fetch('http://localhost:3000/api/auto-apply-vision', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
-      });
-      data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Auto apply could not start.');
-      pollBackendRun(`http://localhost:3000/api/auto-apply-vision/${data.runId}`, 'vision');
+      setAutoApplyProgress((previous) => [...previous, {
+        step: 'browser_connected',
+        message: '🌐 Job tab opened. The agent is reading the page and filling your application…',
+        timestamp: Date.now(),
+      }]);
     } catch (err) {
+      if (err.code === 'TASK_ALREADY_RUNNING' && err.payload?.task) {
+        setAutoTask(err.payload.task);
+        setShowAutoApplyModal(true);
+        setAutoApplying(!['submitted', 'failed', 'cancelled', 'waiting_for_user_input', 'waiting_for_approval', 'paused'].includes(err.payload.task.status));
+        setAutoTaskError(err.message || 'An application is already running.');
+        if (String(err.payload.task.url || '') !== String(link || '')) setBlockingTask(err.payload.task);
+        return;
+      }
       setAutoApplying(false);
-      setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+      setAutoTaskError(err.message || 'Auto Apply could not start.');
+      setAutoApplyResult({ status: 'failed', message: err.message || 'Auto Apply could not start.', filledFields: [] });
     }
   };
+  handleAutoApplyRef.current = handleAutoApply;
 
-  // Train: walk this link once and remember the flow for future similar links.
-  const handleTrainLink = async () => {
-    const link = applyLink();
-    if (!link) { alert('This job has no application URL.'); return; }
-    beginBackendRun();
-    setTrainNotice('');
+  const handleTaskDraftChange = (questionId, value) => {
+    setTaskAnswerDrafts((previous) => ({ ...previous, [questionId]: value }));
+  };
+
+  const handleTaskConsentChange = (questionId, value) => {
+    setTaskAnswerConsent((previous) => ({ ...previous, [questionId]: value }));
+  };
+
+  const handleTaskAnswer = async (question) => {
+    if (!autoTask?.id || !question?.id) return;
+    const answer = String(taskAnswerDrafts[question.id] || '').trim();
+    if (!answer) return;
+    setTaskBusy(`answer:${question.id}`);
+    setAutoTaskError('');
     try {
-      const answers = await loadApplyAnswers();
-      const res = await fetch('http://localhost:3000/api/train-link', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          url: link,
-          profile: { ...(profile || {}), jobTitle: job?.title || job?.role || '', company: job?.company || '' },
-          answers,
-          resumeBase64: tailoredPdfBase64 || '',
-          resumeName: tailoredFileName || '',
-        }),
+      // Sensitive facts are saved only after an explicit checkbox opt-in.
+      const remember = question.sensitive
+        ? taskAnswerConsent[question.id] === true
+        : taskAnswerConsent[question.id] !== false;
+      const res = await api.answerApplicationQuestion(autoTask.id, question.id, {
+        answer,
+        remember,
+        consent: remember,
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Training could not start.');
-      setAutoApplyProgress([{ step: 'train_started', message: '🎓 AI is walking this application once to learn its flow…', timestamp: Date.now() }]);
-      pollBackendRun(`http://localhost:3000/api/train-link/${data.trainId}`, 'train');
+      if (res?.task) {
+        setAutoTask(res.task);
+        // Answering the last outstanding question resumes the run by itself. A
+        // candidate should never have to press Resume after answering.
+        if (res.task.status === 'filling_application') {
+          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action: 'resume', taskId: autoTask.id }, '*');
+        }
+      }
+      setTaskAnswerDrafts((previous) => ({ ...previous, [question.id]: '' }));
     } catch (err) {
-      setAutoApplying(false);
-      setAutoApplyResult({ status: 'failed', message: err.message, filledFields: [] });
+      setAutoTaskError(err.message || 'Could not save that answer.');
+    } finally {
+      setTaskBusy('');
     }
   };
 
+  const handleTaskControl = async (action) => {
+    if (!autoTask?.id) return;
+    setTaskBusy(action);
+    setAutoTaskError('');
+    try {
+      let res;
+      if (action === 'approve') res = await api.approveApplicationTask(autoTask.id);
+      else if (action === 'cancel') res = await api.cancelApplicationTask(autoTask.id, 'Cancelled by the candidate.');
+      else if (action === 'pause') res = await api.pauseApplicationTask(autoTask.id);
+      else if (action === 'resume') res = await api.resumeApplicationTask(autoTask.id);
+      if (res?.task) setAutoTask(res.task);
+      // A resume that still has an open question comes back as
+      // waiting_for_user_input, not an error: say what is needed instead of
+      // posting a control the agent would immediately stop on.
+      const waitingOnAnswer = action === 'resume' && res?.task?.status === 'waiting_for_user_input';
+      if (waitingOnAnswer) {
+        setAutoTaskError('Answer the question below and the application continues automatically.');
+      }
+      if (!waitingOnAnswer && (action === 'cancel' || action === 'pause' || action === 'resume' || action === 'approve')) {
+        window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action, taskId: autoTask.id }, '*');
+      }
+      if (action === 'approve') {
+        setAutoApplyProgress((previous) => [...previous, {
+          step: 'approved',
+          message: '✅ You approved submission. The agent is submitting and verifying the site response…',
+          timestamp: Date.now(),
+        }]);
+      }
+    } catch (err) {
+      setAutoTaskError(err.message || `Could not ${action} this application.`);
+    } finally {
+      setTaskBusy('');
+    }
+  };
+
+  const handleCancelPreviousAndStart = async () => {
+    if (!blockingTask?.id) return;
+    setTaskBusy('cancel-previous');
+    try {
+      await api.cancelApplicationTask(blockingTask.id, 'Cancelled to start a new application.');
+      window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action: 'cancel', taskId: blockingTask.id }, '*');
+    } catch { /* the stale-task sweep will clear it server-side anyway */ }
+    setBlockingTask(null);
+    setAutoTask(null);
+    setAutoTaskError('');
+    setTaskBusy('');
+    await handleAutoApply();
+  };
 
   // Request the structured Phase-0 log for this run and download it.
   const handleDownloadRunLog = () => {
@@ -1486,7 +1982,7 @@ ${firstName}`;
       </button>
 
       {/* Header Banner */}
-      <div 
+      <div
         style={{
           background: 'linear-gradient(135deg, #171817 0%, #2a2c2a 100%)',
           color: '#ffffff',
@@ -1503,14 +1999,14 @@ ${firstName}`;
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {Boolean(job.companyLogoUrl || job.logo || job.company) && (
-            <img 
-              src={job.companyLogoUrl || job.logo || `https://logo.clearbit.com/${(job.company||'').toLowerCase().replace(/[^a-z0-9]/g, '')}.com`} 
-              alt={job.company} 
+            <img
+              src={job.companyLogoUrl || job.logo || `https://logo.clearbit.com/${(job.company || '').toLowerCase().replace(/[^a-z0-9]/g, '')}.com`}
+              alt={job.company}
               onError={(e) => {
                 e.target.style.display = 'none';
                 if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
               }}
-              style={{ width: '56px', height: '56px', borderRadius: '14px', objectFit: 'contain', background: '#ffffff', padding: '6px' }} 
+              style={{ width: '56px', height: '56px', borderRadius: '14px', objectFit: 'contain', background: '#ffffff', padding: '6px' }}
             />
           )}
           <div style={{ width: '56px', height: '56px', borderRadius: '14px', background: '#445cf5', color: '#fff', display: (job.companyLogoUrl || job.logo) ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '22px' }}>
@@ -1575,25 +2071,25 @@ ${firstName}`;
       {/* TAB CONTENT 1: Referral Request via Email (EXACT MATCH TO REFERENCE IMAGE) */}
       {activeTab === 'referral' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
+
           {/* Main Email Composer Card */}
-          <div 
-            style={{ 
-              background: '#ffffff', 
-              border: '1px solid #e2e8f0', 
-              borderRadius: '16px', 
+          <div
+            style={{
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '16px',
               overflow: 'hidden',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.04)' 
+              boxShadow: '0 4px 20px rgba(0,0,0,0.04)'
             }}
           >
             {/* Header: Subject + From + Rewrite Message Button */}
-            <div 
-              style={{ 
-                background: '#f8fafc', 
-                borderBottom: '1px solid #e2e8f0', 
-                padding: '18px 24px', 
-                display: 'flex', 
-                alignItems: 'center', 
+            <div
+              style={{
+                background: '#f8fafc',
+                borderBottom: '1px solid #e2e8f0',
+                padding: '18px 24px',
+                display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
                 gap: '14px'
@@ -1601,7 +2097,7 @@ ${firstName}`;
             >
               <div style={{ flex: 1, minWidth: '280px' }}>
                 <div style={{ fontSize: '15px', fontWeight: '800', color: '#1a202c', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ color: '#00796b' }}>Subject:</span> 
+                  <span style={{ color: '#00796b' }}>Subject:</span>
                   <input
                     value={emailSubject}
                     onChange={e => setEmailSubject(e.target.value)}
@@ -1668,12 +2164,12 @@ ${firstName}`;
             </div>
 
             {/* Attached Resume Banner (Light Teal Box) */}
-            <div 
-              style={{ 
-                margin: '0 24px 24px', 
-                background: '#ecfdf5', 
-                border: '1px solid #a7f3d0', 
-                borderRadius: '14px', 
+            <div
+              style={{
+                margin: '0 24px 24px',
+                background: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                borderRadius: '14px',
                 padding: '16px 20px',
                 display: 'flex',
                 alignItems: 'center',
@@ -1860,44 +2356,44 @@ ${firstName}`;
                   );
                 }
                 return (
-                <div 
-                  key={emp.id}
-                  onClick={() => toggleEmployeeSelect(emp.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    border: emp.selected ? '2px solid #059669' : '1px solid #e2e8f0',
-                    background: emp.selected ? '#f0fdf4' : '#fafafa',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={emp.selected} 
-                      onChange={() => {}} 
-                      style={{ width: '16px', height: '16px', accentColor: '#059669', cursor: 'pointer' }} 
-                    />
-                    <div>
-                      <strong style={{ fontSize: '14px', color: '#1a202c', display: 'block' }}>{emp.name}</strong>
-                      <span style={{ fontSize: '12px', color: '#718096' }}>
-                        {emp.role} · <code style={{ color: '#047857' }}>{emp.email}</code>
-                        {emp.details && (
-                          <span style={{ marginLeft: '8px', fontSize: '10.5px', color: '#059669', background: '#d1fae5', padding: '1px 6px', borderRadius: '4px', fontWeight: '600' }}>
-                            {emp.details}
-                          </span>
-                        )}
-                      </span>
+                  <div
+                    key={emp.id}
+                    onClick={() => toggleEmployeeSelect(emp.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      border: emp.selected ? '2px solid #059669' : '1px solid #e2e8f0',
+                      background: emp.selected ? '#f0fdf4' : '#fafafa',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <input
+                        type="checkbox"
+                        checked={emp.selected}
+                        onChange={() => { }}
+                        style={{ width: '16px', height: '16px', accentColor: '#059669', cursor: 'pointer' }}
+                      />
+                      <div>
+                        <strong style={{ fontSize: '14px', color: '#1a202c', display: 'block' }}>{emp.name}</strong>
+                        <span style={{ fontSize: '12px', color: '#718096' }}>
+                          {emp.role} · <code style={{ color: '#047857' }}>{emp.email}</code>
+                          {emp.details && (
+                            <span style={{ marginLeft: '8px', fontSize: '10.5px', color: '#059669', background: '#d1fae5', padding: '1px 6px', borderRadius: '4px', fontWeight: '600' }}>
+                              {emp.details}
+                            </span>
+                          )}
+                        </span>
+                      </div>
                     </div>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: emp.selected ? '#047857' : '#9ca3af', background: emp.selected ? '#d1fae5' : '#f3f4f6', padding: '3px 10px', borderRadius: '12px' }}>
+                      {emp.selected ? 'Selected' : 'Skipped'}
+                    </span>
                   </div>
-                  <span style={{ fontSize: '11px', fontWeight: '800', color: emp.selected ? '#047857' : '#9ca3af', background: emp.selected ? '#d1fae5' : '#f3f4f6', padding: '3px 10px', borderRadius: '12px' }}>
-                    {emp.selected ? 'Selected' : 'Skipped'}
-                  </span>
-                </div>
                 );
               })}
 
@@ -1962,30 +2458,30 @@ ${firstName}`;
           </div>
 
           {/* Auto-Reply Checkbox Bar */}
-          <div 
-            style={{ 
-              background: '#ecfdf5', 
-              border: '1px solid #a7f3d0', 
-              borderRadius: '12px', 
-              padding: '14px 20px', 
-              display: 'flex', 
-              alignItems: 'center', 
+          <div
+            style={{
+              background: '#ecfdf5',
+              border: '1px solid #a7f3d0',
+              borderRadius: '12px',
+              padding: '14px 20px',
+              display: 'flex',
+              alignItems: 'center',
               justifyContent: 'space-between',
               flexWrap: 'wrap',
               gap: '10px'
             }}
           >
             <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13.5px', fontWeight: '700', color: '#064e3b', cursor: 'pointer' }}>
-              <input 
-                type="checkbox" 
-                checked={autoReplyEnabled} 
-                onChange={e => setAutoReplyEnabled(e.target.checked)} 
+              <input
+                type="checkbox"
+                checked={autoReplyEnabled}
+                onChange={e => setAutoReplyEnabled(e.target.checked)}
                 style={{ width: '17px', height: '17px', accentColor: '#059669', cursor: 'pointer' }}
               />
               <span>Let HAMZOOH automatically reply to referrer emails</span>
             </label>
 
-            <span 
+            <span
               onClick={() => navigate('/dashboard/mail')}
               style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', textDecoration: 'underline', cursor: 'pointer' }}
             >
@@ -2009,8 +2505,8 @@ ${firstName}`;
                   </div>
                 </div>
               </div>
-              <button 
-                className="btn-ghost" 
+              <button
+                className="btn-ghost"
                 onClick={() => navigate('/dashboard/mail')}
                 style={{ color: '#065f46', borderColor: '#059669', fontWeight: '800', fontSize: '12px' }}
               >
@@ -2998,60 +3494,39 @@ ${firstName}`;
                 {extensionReady ? 'Hamzooh Apply extension connected' : 'Extension not detected — load it in chrome://extensions'}
               </span>
             </div>
-            <span style={{ fontSize: '12.5px', color: '#064e3b', fontWeight: '600' }}>Final submission always requires your confirmation.</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setShowAnswersModal(true)}
+                style={{ background: '#fff', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '7px 12px', fontSize: '12px', fontWeight: 700, color: '#065f46', cursor: 'pointer' }}
+              >
+                Saved answers
+              </button>
+              <span style={{ fontSize: '12.5px', color: '#064e3b', fontWeight: '600' }}>Final submission always requires your confirmation.</span>
+            </div>
           </div>
 
           {/* Final Direct Apply CTA */}
           <div style={{ background: '#171817', color: '#ffffff', borderRadius: '14px', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
             <div>
               <h4 style={{ fontSize: '16px', fontWeight: '800', margin: '0 0 4px', color: '#fff' }}>
-                {submitted ? '✅ Application Submitted!' : 'Ready to Submit Direct Application?'}
+                {submitted ? '✅ Application Submitted and Verified' : 'Ready to let Hamzooh apply for you?'}
               </h4>
               <p style={{ fontSize: '12.5px', color: '#aaa', margin: 0 }}>
-                {submitted 
+                {submitted
                   ? `HAMZOOH auto-applied to ${job.company} successfully.`
-                  : `Opens the job in a new tab, fills the form, and asks you before submitting.`}
+                  : 'Opens the job in your own browser, fills it with your real profile and resume, asks only for missing facts, and never submits without your approval.'}
               </p>
             </div>
-
-            {trainNotice && (
-              <div style={{
-                width: '100%',
-                background: '#f0fdf4',
-                border: '1.5px solid #22c55e',
-                borderRadius: '12px',
-                padding: '14px 18px',
-                margin: '12px 0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                color: '#15803d',
-                fontSize: '13px',
-                fontWeight: '600'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '20px' }}>🎓</span>
-                  <span>{trainNotice}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setTrainNotice('')}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#15803d', fontSize: '18px', fontWeight: 'bold' }}
-                >
-                  ×
-                </button>
-              </div>
-            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <button
                 className="btn-accent"
                 onClick={handleAutoApply}
                 disabled={autoApplying || submitted}
-                style={{ 
-                  background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
-                  borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b', 
+                style={{
+                  background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
+                  borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
                   fontSize: '14px', padding: '12px 24px', gap: '8px',
                   opacity: autoApplying ? 0.7 : 1,
                   cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
@@ -3064,28 +3539,6 @@ ${firstName}`;
                 ) : (
                   <><Zap size={16} /> Auto Apply with AI</>
                 )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTrainLink}
-                disabled={autoApplying || submitted}
-                title="AI walks this application once, learns its fields and steps, then auto-fills future similar jobs with your details — no manual help."
-                style={{
-                  background: 'transparent',
-                  color: '#22a65b',
-                  border: '1.5px dashed #22a65b',
-                  borderRadius: '10px',
-                  padding: '11px 18px',
-                  fontSize: '13px',
-                  fontWeight: '700',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
-                }}
-              >
-                🎓 Train AI on this Link
               </button>
             </div>
           </div>
@@ -3104,6 +3557,8 @@ ${firstName}`;
         </div>
       )}
 
+      <SavedAnswersModal open={showAnswersModal} onClose={() => setShowAnswersModal(false)} />
+
       {/* ═══ AUTO-APPLY PROGRESS MODAL ═══ */}
       {showAutoApplyModal && (
         <div style={{
@@ -3113,16 +3568,16 @@ ${firstName}`;
           padding: '20px'
         }}>
           <div style={{
-            background: '#ffffff', borderRadius: '20px', width: '100%', maxWidth: '560px',
-            maxHeight: '80vh', overflow: 'hidden', boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
+            background: '#ffffff', borderRadius: '20px', width: '100%', maxWidth: autoTask ? '680px' : '560px',
+            maxHeight: '85vh', overflow: 'hidden', boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
             display: 'flex', flexDirection: 'column'
           }}>
             {/* Modal Header */}
             <div style={{
               background: autoApplyResult?.status === 'submitted' ? 'linear-gradient(135deg, #059669, #10b981)'
                 : autoApplyResult?.status === 'failed' ? 'linear-gradient(135deg, #dc2626, #ef4444)'
-                : autoApplyResult?.status === 'needs_attention' ? 'linear-gradient(135deg, #d97706, #f59e0b)'
-                : 'linear-gradient(135deg, #171817, #2a2c2a)',
+                  : autoApplyResult?.status === 'needs_attention' ? 'linear-gradient(135deg, #d97706, #f59e0b)'
+                    : 'linear-gradient(135deg, #171817, #2a2c2a)',
               padding: '24px 28px', color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between'
             }}>
@@ -3151,10 +3606,16 @@ ${firstName}`;
                 )}
                 <div>
                   <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>
-                    {autoApplying ? 'Auto-Applying...' 
-                      : autoApplyResult?.status === 'submitted' ? 'Application Submitted!' 
-                      : autoApplyResult?.status === 'needs_attention' ? 'Needs Your Attention'
-                      : 'Auto-Apply Failed'}
+                    {autoTask?.status === 'waiting_for_approval' ? 'Review & Approve Application'
+                      : autoTask?.status === 'waiting_for_user_input' ? 'Additional Information Required'
+                        : autoTask?.status === 'paused' ? 'Application Paused'
+                          : autoTask?.status === 'submitted' ? 'Application Submitted!'
+                            : autoTask?.status === 'cancelled' ? 'Application Cancelled'
+                              : autoTask?.status === 'failed' ? 'Auto-Apply Failed'
+                                : autoApplying ? 'Auto-Applying with AI...'
+                                  : autoApplyResult?.status === 'submitted' ? 'Application Submitted!'
+                                    : autoApplyResult?.status === 'needs_attention' ? 'Needs Your Attention'
+                                      : 'Auto-Apply Failed'}
                   </h3>
                   <p style={{ margin: '2px 0 0', fontSize: '12px', opacity: 0.85 }}>
                     {job?.title} at {job?.company}
@@ -3174,7 +3635,44 @@ ${firstName}`;
 
             {/* Progress Steps */}
             <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1 }}>
-              {autoApplying && (
+              {autoTask && (
+                <AutoApplyTaskPanel
+                  task={autoTask}
+                  busy={taskBusy}
+                  error={autoTaskError || (autoApplyResult && autoApplyResult.status !== 'submitted' ? autoApplyResult.message : '')}
+                  answerDrafts={taskAnswerDrafts}
+                  answerConsent={taskAnswerConsent}
+                  onDraftChange={handleTaskDraftChange}
+                  onConsentChange={handleTaskConsentChange}
+                  onAnswer={handleTaskAnswer}
+                  onApprove={() => handleTaskControl('approve')}
+                  onCancel={() => handleTaskControl('cancel')}
+                  onPause={() => handleTaskControl('pause')}
+                  onResume={() => handleTaskControl('resume')}
+                />
+              )}
+
+              {blockingTask && (
+                <div style={{ border: '1px solid #fecaca', background: '#fef2f2', borderRadius: '12px', padding: '14px', marginTop: '12px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
+                    Another application is already in progress
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#7f1d1d', marginBottom: '10px' }}>
+                    {blockingTask.job?.title || 'An application'}{blockingTask.job?.company ? ` at ${blockingTask.job.company}` : ''} is still open. Cancel it to start this one.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCancelPreviousAndStart}
+                    disabled={taskBusy === 'cancel-previous'}
+                    className="btn-accent"
+                    style={{ fontSize: '12.5px', padding: '9px 16px', background: '#dc2626', borderColor: '#dc2626' }}
+                  >
+                    {taskBusy === 'cancel-previous' ? 'Cancelling…' : 'Cancel previous & start this one'}
+                  </button>
+                </div>
+              )}
+
+              {autoApplying && !autoTask && (
                 <div style={{
                   width: '100%', height: '4px', background: '#e5e7eb', borderRadius: '2px',
                   marginBottom: '20px', overflow: 'hidden'
@@ -3188,7 +3686,7 @@ ${firstName}`;
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {!autoTask && (<div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {autoApplyProgress.map((step, i) => (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'flex-start', gap: '10px',
@@ -3199,17 +3697,17 @@ ${firstName}`;
                   }}>
                     <div style={{
                       width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0,
-                      background: step.step === 'error' ? '#fee2e2' 
+                      background: step.step === 'error' ? '#fee2e2'
                         : step.step === 'needs_attention' ? '#fef3c7'
-                        : step.step === 'submitted' ? '#d1fae5' 
-                        : '#e0f2fe',
+                          : step.step === 'submitted' ? '#d1fae5'
+                            : '#e0f2fe',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: '12px'
                     }}>
-                      {step.step === 'submitted' ? '✅' 
+                      {step.step === 'submitted' ? '✅'
                         : step.step === 'error' ? '❌'
-                        : step.step === 'needs_attention' ? '⚠️'
-                        : i === autoApplyProgress.length - 1 && autoApplying ? '⏳' : '✓'}
+                          : step.step === 'needs_attention' ? '⚠️'
+                            : i === autoApplyProgress.length - 1 && autoApplying ? '⏳' : '✓'}
                     </div>
                     <div>
                       <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#1a202c' }}>
@@ -3229,10 +3727,10 @@ ${firstName}`;
                     <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Hamzooh will fill the form directly in your browser!</p>
                   </div>
                 )}
-              </div>
+              </div>)}
 
               {/* Extension Info Note */}
-              {autoApplying && autoApplyProgress.length > 0 && (
+              {autoApplying && !autoTask && autoApplyProgress.length > 0 && (
                 <div style={{
                   marginTop: '12px', padding: '12px 16px', borderRadius: '10px',
                   background: '#f0fdf4', border: '1px solid #bbf7d0',
@@ -3243,7 +3741,7 @@ ${firstName}`;
               )}
 
               {/* NEEDS_USER pause banner */}
-              {needsUser && (
+              {needsUser && !autoTask && (
                 <div style={{
                   marginTop: '16px', padding: '14px 18px', borderRadius: '12px',
                   background: '#fffbeb', border: '1px solid #fde68a'
@@ -3266,15 +3764,15 @@ ${firstName}`;
               )}
 
               {/* Result Message */}
-              {autoApplyResult && (
+              {autoApplyResult && !autoTask && (
                 <div style={{
                   marginTop: '16px', padding: '16px 20px', borderRadius: '12px',
-                  background: autoApplyResult.status === 'submitted' ? '#ecfdf5' 
-                    : autoApplyResult.status === 'needs_attention' ? '#fffbeb' 
-                    : autoApplyResult.status === 'cancelled' ? '#f3f4f6' : '#fef2f2',
-                  border: `1px solid ${autoApplyResult.status === 'submitted' ? '#a7f3d0' 
-                    : autoApplyResult.status === 'needs_attention' ? '#fde68a' 
-                    : autoApplyResult.status === 'cancelled' ? '#d1d5db' : '#fecaca'}`
+                  background: autoApplyResult.status === 'submitted' ? '#ecfdf5'
+                    : autoApplyResult.status === 'needs_attention' ? '#fffbeb'
+                      : autoApplyResult.status === 'cancelled' ? '#f3f4f6' : '#fef2f2',
+                  border: `1px solid ${autoApplyResult.status === 'submitted' ? '#a7f3d0'
+                    : autoApplyResult.status === 'needs_attention' ? '#fde68a'
+                      : autoApplyResult.status === 'cancelled' ? '#d1d5db' : '#fecaca'}`
                 }}>
                   <p style={{ margin: 0, fontWeight: '700', fontSize: '14px', color: '#1a202c' }}>
                     {autoApplyResult.message}
@@ -3302,19 +3800,27 @@ ${firstName}`;
               padding: '16px 28px', borderTop: '1px solid #e5e7eb',
               display: 'flex', justifyContent: 'flex-end', gap: '10px'
             }}>
-              {autoApplyResult?.status === 'needs_attention' && (
+              {(autoApplyResult?.status === 'needs_attention'
+                || autoTask?.status === 'waiting_for_user_input'
+                || autoTask?.approval?.status === 'approved') && (
                 <button
                   onClick={() => {
-                    const link = job?.applyLink || autoApplyResult?.applyUrl;
+                    if (autoTask?.id) {
+                      // Let the extension reattach or recreate the correct job tab.
+                      // Opening the URL here would create an untracked duplicate.
+                      window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action: 'resume', taskId: autoTask.id }, '*');
+                      return;
+                    }
+                    const link = job?.applyLink || job?.url || autoApplyResult?.applyUrl;
                     if (link) window.open(link, '_blank');
                   }}
                   className="btn-accent"
                   style={{ background: '#d97706', borderColor: '#d97706', fontSize: '13px', padding: '10px 18px', gap: '6px' }}
                 >
-                  <Monitor size={14} /> Complete Manually
+                  <Monitor size={14} /> Open job tab
                 </button>
               )}
-              {needsUser && (
+              {needsUser && !autoTask && (
                 <button
                   onClick={handleResumeRun}
                   className="btn-accent"
@@ -3324,7 +3830,7 @@ ${firstName}`;
                   <RefreshCw size={14} /> Resume after fixing
                 </button>
               )}
-              {!autoApplying && (
+              {(!autoApplying || autoTask) && (
                 <button
                   onClick={handleCloseAutoApplyModal}
                   className="btn-ghost"

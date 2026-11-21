@@ -36,6 +36,9 @@ landing-page/build-*.txt
 landing-page/hamster-loader.mp4
 HAMZO*.html
 data/linkedin-company-slugs.json
+data/answer_memory.json
+data/application_tasks.json
+data/ai_usage.json
 MailMind AI/
 hamster-whirl-loader/
 landing-page/public/company-logos/*.pdf

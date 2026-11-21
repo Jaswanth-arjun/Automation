@@ -72,35 +72,47 @@
     return Promise.race([promise, sleep(ms).then(() => fallback)]);
   }
 
-  // In auto mode, prompting once is enough: if the user is not around to answer
-  // the first question, they will not answer the next five either. Prompt
-  // dismissal also has to remove the leftover card from the page.
-  let autoPromptMissed = false;
-
-  async function askOrSkip(question, index, total, options, reason, autoSubmit) {
+  async function askOrSkip(question, index, total, options, reason) {
     // Harness/dry-run never blocks waiting for a human. The question is
     // recorded (so the log shows what was unknowable) and the run continues.
     if (CURRENT_DRY_RUN) {
       runEvent('dry_run_skipped_question', { question: String(question || '').slice(0, 200), reason, options }, 'Dry run: question left unanswered');
       return null;
     }
-    if (!autoSubmit) return askHamzoohQuestion(question, index, total, options, reason);
-    // Auto mode already asked and nobody answered: asking again would just make
-    // the run sit on another prompt the user is clearly not watching.
-    if (autoPromptMissed) return null;
-    // Allow up to 90 seconds for user to answer questions via the Hamzooh overlay
-    const result = await withTimeout(askHamzoohQuestion(question, index, total, options, reason), 90000, null);
-    if (!result) {
-      autoPromptMissed = true;
-      removeHamzoohOverlays();
-    }
+    // One question never decides the fate of the next one. An earlier timeout
+    // must not turn every later question into a silent skip: that is how a run
+    // "finishes" with fields nobody answered. Each question is asked on its
+    // own, and in task mode the dashboard is an equal answering channel.
+    if (!taskMode()) return askHamzoohQuestion(question, index, total, options, reason);
+    let overlaySettled = false;
+    const overlay = askHamzoohQuestion(question, index, total, options, reason).then((value) => {
+      overlaySettled = true;
+      return value;
+    });
+    const dashboard = waitForDashboardAnswer(question, 180000).then((value) => {
+      if (value?.submitted || value?.cancelled) {
+        removeHamzoohOverlays();
+        return null;
+      }
+      if (!value?.answer) return new Promise(() => {}); // keep waiting for the card
+      if (!overlaySettled) removeHamzoohOverlays();
+      return value;
+    });
+    const result = await Promise.race([overlay, dashboard]);
+    overlaySettled = true;
     return result;
   }
 
+  // Stamped into every console line: when a tab still runs an older content
+  // script, the log shows it, instead of looking like a crash in current code.
+  const EXT_VERSION = (() => {
+    try { return chrome.runtime.getManifest?.().version || ''; } catch { return ''; }
+  })();
+
   function hamzoohLog(level, message, extra) {
-    const entry = { level, message, extra, t: Date.now(), href: location.href };
+    const entry = { level, message, extra, t: Date.now(), href: location.href, version: EXT_VERSION };
     logs.push(entry);
-    try { console[level === 'error' ? 'error' : 'log']('[Hamzooh Apply]', message, extra || ''); } catch {}
+    try { console[level === 'error' ? 'error' : 'log'](`[Hamzooh Apply ${EXT_VERSION || '?'}]`, message, extra || ''); } catch {}
   }
 
   function uniqueSkipped() {
@@ -111,6 +123,323 @@
       seen.add(key);
       return true;
     });
+  }
+
+  // Workday (and similar ATS pages) render progress navigation and hint text in
+  // the same markup as real questions and options. These patterns are never a
+  // real question or answer, so they must never reach the user as a prompt.
+  const NOISE_PROMPT_RE = /\balert\s*:|verify that the field|item selected|autofill with resume|press delete to (clear|remove)|type to add|\(suggested\)|\b(completed|current)\s+step\s+\d+\s+of\s+\d+\b|\bstep\s+\d+\s+of\s+\d+\b|primaryquestionnaire|questionnaire\s*--|[a-f0-9]{16,}|--[a-f0-9]{6,}|\b(?:pill|chip|token)[-_][a-z0-9_-]+/i;
+
+  // A control's own placeholder/value text ("Select One", "Required") is not a
+  // question. Asking it produced cards like "Select One Required" that the
+  // candidate could not make sense of.
+  const PLACEHOLDER_PROMPT_RE = /^(select( one)?( required)?|choose( an option| a value| one)?( required)?|required|optional|search|type to search|-+|\*)$/i;
+
+  // Workday/Angular render the selected pills as text inside the widget, so the
+  // scraped "question" becomes "Data Analysis, press delete to clear value. …
+  // pill-REMOTE_SKILL-1-31310". Strip that chrome and drop repeated fragments so
+  // only the human part (if any) survives.
+  function sanitizePromptText(text) {
+    const cleaned = String(text || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\bpress delete to (clear|remove)( the)? value\b/gi, ' ')
+      .replace(/\btype to add\b/gi, ' ')
+      .replace(/\(suggested\)/gi, ' ')
+      .replace(/\b\d+\s+items?\s+selected\b/gi, ' ')
+      .replace(/\b(?:pill|chip|token)[-_][A-Za-z0-9_-]+/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const parts = cleaned.split(/\s*\.\s+/)
+      .map((part) => part.replace(/^[,;.\s]+|[,;.\s]+$/g, '').trim())
+      .filter(Boolean);
+    const seen = new Set();
+    const unique = [];
+    for (const part of parts) {
+      const key = part.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(part);
+    }
+    return unique.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function isNoisePrompt(text) {
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return true;
+    const value = sanitizePromptText(raw);
+    if (!value) return true;
+    // Check the widget chrome on the raw text too: sanitising "Data Analysis,
+    // press delete to clear value" leaves a value, not a question.
+    if (NOISE_PROMPT_RE.test(raw)) return true;
+    if (PLACEHOLDER_PROMPT_RE.test(value)) return true;
+    if (!/[a-z]{3}/i.test(value)) return true;
+    return false;
+  }
+
+  function cleanOptions(list) {
+    const seen = new Set();
+    const out = [];
+    for (const raw of list || []) {
+      const value = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (!value || value.length > 80 || isNoisePrompt(value)) continue;
+      const key = value.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(value);
+      if (out.length >= 15) break;
+    }
+    return out;
+  }
+
+  // Some required dropdowns never textually match the profile value ("B.Tech"
+  // vs an option list of "Bachelor's Degree" / "1 - Beginner"). Map the intent
+  // onto the closest real option so the field is answered instead of blocking.
+  function semanticOptionText(question, optionTexts, profile) {
+    const q = String(question || '').toLowerCase();
+    const texts = (optionTexts || []).map((t) => String(t).trim()).filter(Boolean);
+    if (!texts.length) return '';
+    const find = (re) => texts.find((t) => re.test(t));
+    const degree = String(profile?.education?.[0]?.degree || profile?.degree || '').toLowerCase();
+
+    if (/degree|qualification|education/.test(q)) {
+      if (/ph\.?d|doctor/.test(degree)) return find(/doctor|ph\.?d/i) || find(/master|post.?grad/i) || '';
+      if (/master|m\.?tech|mba|m\.?sc|post.?grad/.test(degree)) return find(/master|m\.?tech|mba|m\.?sc|post.?grad/i) || find(/bachelor|b\.?tech|under.?grad/i) || '';
+      return find(/bachelor|b\.?tech|b\.?e\b|b\.?sc|under.?grad|graduation/i)
+        || find(/high school|diploma|secondary|associate/i) || '';
+    }
+    // Language self-assessment (Comprehension / Reading / Speaking / Writing /
+    // Overall / proficiency). Not a personal or legal fact.
+    if (/proficiency|comprehension|reading|speaking|writing|\boverall\b/.test(q)
+      || (/language/i.test(q) && texts.some((t) => /\d\s*-\s*(beginner|intermediate|advanced|fluent)/i.test(t)))) {
+      return find(/fluent|native|bilingual|5\s*-\s*fluent/i)
+        || find(/advanced|4\s*-/i) || find(/intermediate|3\s*-/i) || '';
+    }
+    // Language name picker: default to the candidate's language, else English.
+    if (/language|mother tongue|native language|spoken language/.test(q)) {
+      const known = Array.isArray(profile?.languages) ? profile.languages[0] : profile?.language;
+      if (known) {
+        const hit = find(new RegExp(String(known).replace(/[^a-z0-9]/gi, '.'), 'i'));
+        if (hit) return hit;
+      }
+      return find(/^english/i) || find(/english/i) || '';
+    }
+    return '';
+  }
+
+  const LOGISTICS_QUESTION_RE = /how (did|do) you (hear|find|learn)|hear about (us|our|the company|this|the role|the position)|where did you (see|find|hear)|how did you (come across|find out)|how were you (referred|introduced)|application source|referral source/i;
+  function isLogisticsQuestion(text) {
+    return LOGISTICS_QUESTION_RE.test(String(text || ''));
+  }
+
+  // Preference order for source questions; the first match wins. "LinkedIn"
+  // first because that is where most of this candidate's jobs come from.
+  const LOGISTICS_OPTION_PRIORITY = [
+    /linked.?in/i,
+    /job sites?|job boards?|indeed|glassdoor|ziprecruiter|naukri|wellfound/i,
+    /career (site|website)|company (site|website)|employer (site|website)|website/i,
+    /job alert|job notification|job posting/i,
+    /online|internet|web search|search engine|google/i,
+    /campus|campus campaign|university|college/i,
+    /referral/i,
+  ];
+
+  function sourcePatterns(source = '') {
+    const s = String(source || '').toLowerCase();
+    const priority = [...LOGISTICS_OPTION_PRIORITY];
+    if (/referral|employee/.test(s)) priority.unshift(/employee referral|referral/i);
+    if (/campus|university|college/.test(s)) priority.unshift(/campus campaign|campus/i);
+    if (/linkedin/.test(s)) priority.unshift(/linked.?in/i);
+    if (/job alert/.test(s)) priority.unshift(/job alert|job notification/i);
+    if (/career|company|website|portal|workday|greenhouse|lever|ashby/.test(s)) priority.unshift(/career websites?|career sites?|company website|employer website/i);
+    if (/indeed|naukri|glassdoor|job board|job site/.test(s)) priority.unshift(/job sites?|job boards?|indeed|naukri|glassdoor/i);
+    return priority;
+  }
+
+  function pickBestOption(nodes, profile = null) {
+    const items = (nodes || []).filter((node) => visible(node) && !isNoisePrompt(node.innerText || ''));
+    if (!items.length) return null;
+    const texts = items.map((node) => String(node.innerText || '').replace(/\s+/g, ' ').trim());
+    const patterns = profile ? sourcePatterns(profile.jobSource || profile.source || profile.jobProvider) : LOGISTICS_OPTION_PRIORITY;
+    for (const pattern of patterns) {
+      const index = texts.findIndex((text) => pattern.test(text));
+      if (index >= 0) return { node: items[index], text: texts[index] };
+    }
+    // Any answer is acceptable for these questions, so fall back to the first
+    // real option instead of interrupting the candidate.
+    return { node: items[0], text: texts[0] };
+  }
+
+  function widgetControl(widget) {
+    return widget?.matches?.('input, textarea') ? widget : widget?.querySelector?.('input, textarea');
+  }
+
+  // Did the chosen option actually commit to the widget? Workday keeps the
+  // value in an input, others render a chip/tag.
+  function widgetHasValue(widget) {
+    const input = widgetControl(widget);
+    const value = String(input?.value || widget?.getAttribute?.('aria-valuetext') || '').trim();
+    if (value && !/^search$|^select(\.\.\.)?$|^choose( an option)?$/i.test(value)) return true;
+    const chip = widget?.querySelector?.('[class*="pill"], [class*="chip"], [class*="tag"], [class*="selected"], [class*="value"]');
+    const chipText = String(chip?.innerText || '').trim();
+    return Boolean(chipText && !/^search$|^select/i.test(chipText));
+  }
+
+  // Workday marks required fields with a red asterisk span
+  // ([data-automation-id="requiredAsterisk"]) instead of the HTML `required`
+  // attribute. Checking only `input.required` silently treats them as optional,
+  // so the step gets submitted with empty required fields.
+  const REQUIRED_MARKER_SELECTOR = '[data-automation-id="requiredAsterisk"], [data-automation-id*="requiredAsterisk" i], [data-automation-id*="Required" i], abbr[title*="required" i], [aria-required="true"]';
+
+  function isRequiredField(el, question) {
+    if (!el) return false;
+    const q = question != null ? question : questionFor(el);
+    if (el.required || el.getAttribute?.('aria-required') === 'true' || /[*\u2217]/.test(String(q || ''))) return true;
+    let node = el;
+    for (let depth = 0; node && node !== document.body && depth < 6; depth += 1, node = node.parentElement) {
+      if (node.required || node.getAttribute?.('aria-required') === 'true') return true;
+      if (node.querySelector?.(REQUIRED_MARKER_SELECTOR)) return true;
+      const autoId = String(node.getAttribute?.('data-automation-id') || '').toLowerCase();
+      if (autoId.includes('formfield') || autoId.includes('question')) break;
+    }
+    return false;
+  }
+
+  const DROPDOWN_WIDGET_SELECTOR = '[data-automation-id*="select"], [data-automation-id*="dropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"]';
+
+  function dropdownControl(widget) {
+    if (!widget) return null;
+    if (widget.matches?.('button, input, textarea, [role="combobox"], [role="button"], [aria-haspopup="listbox"]')) return widget;
+    return widget.querySelector?.('button, input, textarea, [role="combobox"], [aria-haspopup="listbox"]') || widget;
+  }
+
+  // Workday keeps the committed value in the control's own text, not in an
+  // input value or a chip, so widgetHasValue alone reads a filled dropdown as
+  // empty.
+  function dropdownHasValue(widget) {
+    const control = dropdownControl(widget);
+    if (widgetHasValue(control)) return true;
+    const text = String(control?.innerText || control?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text) return false;
+    if (!control.matches?.('button, [role="combobox"], [role="button"], [aria-haspopup="listbox"]')) return false;
+    return !/^(select one|select(\.\.\.)?|choose( an option)?|search|-+|please select)$/i.test(text);
+  }
+
+  function dropdownWidgets() {
+    const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
+    if (/linkedin\.com/i.test(location.hostname) && !modal) return [];
+    const root = modal || document;
+    const nodes = queryAllDeep(DROPDOWN_WIDGET_SELECTOR, root).filter((el) => {
+      if (!visible(el) || el.tagName === 'SELECT' || el.disabled) return false;
+      if (el.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"], [class*="global-nav"]')) return false;
+      return true;
+    }).slice(0, 60);
+    // Workday nests a button inside the widget wrapper: only the outer element
+    // is the field.
+    return nodes.filter((el) => !nodes.some((other) => other !== el && other.contains(el)));
+  }
+
+  function emptyRequiredDropdowns() {
+    return dropdownWidgets().filter((widget) => {
+      const question = questionFor(widget);
+      if (isNoisePrompt(question)) return false;
+      // Voluntary demographic questions are never asked and never block a step.
+      if (isEeoQuestion(question)) return false;
+      if (dropdownHasValue(widget)) return false;
+      return isRequiredField(widget, question);
+    });
+  }
+
+  // Every required field on this step that still has no value: plain inputs,
+  // unchecked required radio/checkbox groups, and custom listbox dropdowns.
+  function requiredEmptyFields() {
+    const empty = collectInputs().filter((input) => {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['hidden', 'password', 'submit', 'button'].includes(type)) return false;
+      if (!isRequiredField(input, questionFor(input))) return false;
+      if (type === 'radio' || type === 'checkbox') return false;
+      return type === 'file' ? !input.files?.length : isPlaceholderValue(input);
+    });
+    requiredGroupsOf().forEach((group) => {
+      if (group.items.some((input) => input.checked)) return;
+      // EEO/demographic groups are answered with "decline" when offered and
+      // otherwise left for the candidate, never turned into a blocking prompt.
+      if (isEeoQuestion(group.question || '')) return;
+      if (isEeoQuestion(group.items.map((item) => optionTextFor(item)).join(' '))) return;
+      empty.push(group.items[0]);
+    });
+    emptyRequiredDropdowns().forEach((widget) => empty.push(widget));
+    return empty;
+  }
+
+  // Apply an answer to whatever the required field is: text box, native select,
+  // date group, or a custom Workday listbox.
+  async function answerRequiredField(el, question, answer, profile) {
+    const wanted = String(answer == null ? '' : answer).trim();
+    if (!wanted) return false;
+    // Choice answers are stored either way ("true" / "Yes", "false" / "No").
+    const choice = /^true$/i.test(wanted) ? 'yes' : /^false$/i.test(wanted) ? 'no' : wanted;
+    if (isJoiningDateQuestion(question)) return fillDateControl(el, joiningDateValue(profile));
+    if (el.tagName === 'SELECT') return applyChoice(el, choice);
+    if (dropdownWidgets().includes(el)) return selectCustomOption(el, choice);
+    return applyValue(el, wanted);
+  }
+
+  function fieldValueText(el) {
+    if (!el) return '';
+    if (el.tagName === 'SELECT') {
+      const chosen = el.options?.[el.selectedIndex];
+      return chosen && chosen.value ? String(chosen.text || chosen.value).trim() : '';
+    }
+    if (dropdownWidgets().includes(el)) {
+      const control = dropdownControl(el);
+      const text = String(control?.innerText || control?.textContent || '').replace(/\s+/g, ' ').trim();
+      return /^(select one|select(\.\.\.)?|choose( an option)?|-+|please select)$/i.test(text) ? '' : text;
+    }
+    if (el.isContentEditable) return String(el.textContent || '').trim();
+    return isPlaceholderValue(el) ? '' : String(el.value || '').trim();
+  }
+
+  // The candidate filled a reported field by hand instead of answering in the
+  // dashboard. Record it so the pending card clears and the task leaves
+  // waiting_for_user_input. It is never saved as a sensitive preference.
+  async function recordManualAnswers(unanswered) {
+    for (const item of unanswered) {
+      const value = fieldValueText(item.el);
+      if (!value) continue;
+      await taskCall('/api/applications/extension/question/answer', {
+        question: item.question,
+        answer: value,
+        remember: false,
+        consent: false,
+        options: [],
+      }).catch(() => null);
+    }
+  }
+
+  // Wait WITHOUT stopping the run. The candidate may answer in the Hamzooh
+  // dashboard or simply fill the field in the job tab; either one ends the wait
+  // and the automation carries on by itself.
+  async function waitForRequiredFields(unanswered) {
+    const labels = unanswered.map((item) => item.question);
+    sendProgress('asking_user', `🔑 ${String(labels[0] || '').slice(0, 70)}`);
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < TASK_INPUT_WAIT_MS) {
+      await sleep(2500);
+      const state = await taskState();
+      if (state && (state.status === 'cancelled' || state.status === 'failed')) return 'cancel';
+      if (state?.status === 'paused') return 'resume';
+      const answeredNow = state && (state.answers || []).some((item) => item?.answer
+        && labels.includes(item.question));
+      if (answeredNow) return 'resume';
+      const empty = requiredEmptyFields();
+      if (!empty.length) { await recordManualAnswers(unanswered); return 'resume'; }
+      const remaining = new Set(empty.map((el) => questionFor(el) || labelFor(el)));
+      if (!labels.some((label) => remaining.has(label))) {
+        await recordManualAnswers(unanswered);
+        return 'resume';
+      }
+    }
+    return 'timeout';
   }
 
   function sendProgress(step, message, details = {}) {
@@ -168,24 +497,281 @@
     try {
       const snap = await runtimeSend({ type: 'HAMZOOH_CAPTURE_SCREENSHOT' });
       if (!snap?.ok || !snap.dataUrl) return null;
-      const res = await fetch('http://localhost:3000/api/extension/vision-action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          screenshot: snap.dataUrl,
-          profile,
-          answers,
-          jobTitle: pending.jobTitle || '',
-          company: pending.company || '',
-          url: location.href,
-        }),
+      const res = await proxyFetch('/api/extension/vision-action', {
+        screenshot: snap.dataUrl,
+        profile,
+        answers,
+        jobTitle: pending.jobTitle || '',
+        company: pending.company || '',
+        url: location.href,
+        taskId: CURRENT_TASK_ID,
+        taskToken: CURRENT_TASK_TOKEN,
       });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.decision || null;
+      return res?.data?.decision || null;
     } catch {
       return null;
     }
+  }
+
+  // ── Task bridge: the backend is the source of truth, the dashboard approves submission ──
+  let CURRENT_TASK_ID = '';
+  let CURRENT_TASK_TOKEN = '';
+  let TASK_FINAL_REPORTED = false;
+  let LAST_VERIFICATION = null;
+  const TASK_APPROVAL_WAIT_MS = 20 * 60 * 1000;
+  const TASK_PAUSE_WAIT_MS = 15 * 60 * 1000;
+  const TASK_INPUT_WAIT_MS = 20 * 60 * 1000;
+
+  function taskMode() {
+    return Boolean(CURRENT_TASK_ID && CURRENT_TASK_TOKEN);
+  }
+
+  async function taskCall(path, body = {}) {
+    if (!taskMode()) return null;
+    const res = await proxyFetch(path, { taskId: CURRENT_TASK_ID, token: CURRENT_TASK_TOKEN, ...body });
+    return res?.data || null;
+  }
+
+  async function taskState() {
+    if (!taskMode()) return null;
+    const data = await taskCall('/api/applications/extension/state');
+    return data?.ok ? data : null;
+  }
+
+  async function waitForDashboardAnswer(question, timeoutMs = 180000) {
+    if (!taskMode()) return null;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      await sleep(2500);
+      const state = await taskState();
+      if (!state) continue;
+      if (state.status === 'cancelled' || state.status === 'failed') return { cancelled: true };
+      const answered = (state.answers || []).find((item) => item.question === question);
+      if (answered?.answer) return { answer: answered.answer, via: 'dashboard' };
+      // Tell the caller to stop asking instead of leaving it waiting forever on
+      // a card for an application that is already finished.
+      if (state.status === 'submitted') return { submitted: true };
+    }
+    return null;
+  }
+
+  async function taskCheckpoint(step, message, details = {}) {
+    if (!taskMode()) return;
+    sendProgress(step, message, details);
+    await taskCall('/api/applications/extension/checkpoint', {
+      step,
+      message,
+      url: location.href,
+      status: details.status || undefined,
+      filledCount: details.filledCount,
+      emptyCount: details.emptyCount,
+      resumeAttached: details.resumeAttached,
+      data: details.data,
+    }).catch(() => null);
+  }
+
+  function showTaskOverlay({ title, subtitle, body, tone = '#009688', actionLabel = '', onAction = null }) {
+    injectHamzoohStyles();
+    const existing = document.getElementById('hamzooh-task-panel');
+    if (existing) existing.remove();
+    const container = createOverlayContainer();
+    container.id = 'hamzooh-task-panel';
+    container.style.width = '400px';
+    container.innerHTML = `
+      <div class="hamzooh-card">
+        <div class="hamzooh-header" style="background:${tone}">
+          <div class="hamzooh-logo">AI</div>
+          <div><div class="hamzooh-title">${escapeHtml(title)}</div><div class="hamzooh-subtitle">${escapeHtml(subtitle || 'Hamzooh Apply')}</div></div>
+        </div>
+        <div class="hamzooh-body"><div class="hamzooh-question">${escapeHtml(body || '')}</div></div>
+        ${actionLabel ? `<div class="hamzooh-footer"><button class="hamzooh-btn hamzooh-btn-primary" id="hamzooh-task-action">${escapeHtml(actionLabel)}</button></div>` : ''}
+      </div>`;
+    document.body.appendChild(container);
+    if (actionLabel && onAction) {
+      container.querySelector('#hamzooh-task-action').addEventListener('click', () => {
+        container.remove();
+        onAction();
+      });
+    }
+    return container;
+  }
+
+  function hideTaskOverlay() {
+    document.getElementById('hamzooh-task-panel')?.remove();
+  }
+
+  async function handleTaskQuestion(question) {
+    if (!question?.question) return null;
+    const answer = await withTimeout(
+      askHamzoohQuestion(
+        question.question,
+        Number(question.index || 0),
+        Number(question.total || 1),
+        question.options || [],
+        question.reason || 'Hamzooh needs this detail before it can continue.',
+        question.sensitive === true,
+      ),
+      180000,
+      null,
+    );
+    if (!answer?.answer) return null;
+    const saved = await taskCall('/api/applications/extension/question/answer', {
+      question: question.question,
+      answer: answer.answer,
+      remember: question.sensitive ? false : answer.remember !== false,
+      consent: false,
+      options: question.options || [],
+    });
+    removeHamzoohOverlays();
+    return saved ? answer.answer : null;
+  }
+
+  async function taskGate() {
+    if (!taskMode()) return 'run';
+    const state = await taskState();
+    if (!state) return 'run';
+    if (state.status === 'cancelled' || state.status === 'failed') return 'cancel';
+    if (state.status === 'paused') {
+      showTaskOverlay({
+        title: 'Application paused',
+        subtitle: 'Your progress is saved',
+        body: 'Paused from the Hamzooh dashboard. Resume it there and this tab will continue automatically.',
+        tone: 'linear-gradient(135deg,#d97706,#f59e0b)',
+      });
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < TASK_PAUSE_WAIT_MS) {
+        await sleep(3000);
+        const next = await taskState();
+        if (!next) continue;
+        if (next.status === 'cancelled' || next.status === 'failed') { hideTaskOverlay(); return 'cancel'; }
+        if (next.status !== 'paused') { hideTaskOverlay(); return 'run'; }
+      }
+      hideTaskOverlay();
+      return 'paused_timeout';
+    }
+    if (state.status === 'waiting_for_user_input') {
+      const pending = (state.questions || []).find((item) => item.status === 'pending');
+      if (pending) await handleTaskQuestion(pending);
+    }
+    return 'run';
+  }
+
+  /**
+   * Submit the prepared application for dashboard review and wait for an
+   * explicit approval. This is the only path to submission for task runs.
+   */
+  async function waitForDashboardApproval(review) {
+    // If the candidate already approved this application and the tab had to be
+    // reopened, do not send a fresh review (that would reset approval). Go
+    // straight to the approved submission path.
+    const preflight = await taskState();
+    if (preflight?.approval?.status === 'approved' && preflight.status !== 'submitted') {
+      showTaskOverlay({
+        title: 'Approved — submitting',
+        subtitle: `${review.company || 'Application'} · ${review.title || 'Role'}`,
+        body: 'This application was already approved in the Hamzooh dashboard. Submitting and verifying the site response now.',
+        tone: 'linear-gradient(135deg,#2e7d32,#43a047)',
+      });
+      hideTaskOverlay();
+      return { decision: 'approve' };
+    }
+
+    const submitted = await taskCall('/api/applications/extension/review', review);
+    if (!submitted || submitted.ok !== true) {
+      const pending = Array.isArray(submitted?.questions) ? submitted.questions : [];
+      if (pending.length) {
+        // The review exposed required fields that still need a human answer.
+        // Ask the first one in-page (or wait for the dashboard answer), then
+        // resume filling instead of ending the run.
+        const answered = await handleTaskQuestion(pending[0]);
+        if (answered) {
+          return { decision: 'resume', message: 'Answer received. Continuing the application.' };
+        }
+      }
+      return {
+        decision: 'needs_user',
+        message: submitted?.error || 'Could not send this application to Hamzooh for review. Check the browser connection.',
+      };
+    }
+
+    showTaskOverlay({
+      title: 'Ready for your approval',
+      subtitle: `${review.company || 'Application'} · ${review.title || 'Role'}`,
+      body: `${review.filledCount || 0} field(s) filled · resume: ${review.resumeName || review.resume || 'selected'}. Open the Hamzooh dashboard and click Approve & Submit. Hamzooh will never submit without that click.`,
+      tone: 'linear-gradient(135deg,#2e7d32,#43a047)',
+    });
+
+    const startedAt = Date.now();
+    let handledQuestionId = '';
+    while (Date.now() - startedAt < TASK_APPROVAL_WAIT_MS) {
+      await sleep(2500);
+      const state = await taskState();
+      if (!state) continue;
+      if (state.status === 'cancelled' || state.approval?.status === 'cancelled') {
+        hideTaskOverlay();
+        return { decision: 'cancel', message: 'Cancelled from the Hamzooh dashboard.' };
+      }
+      if (state.status === 'submitted') {
+        hideTaskOverlay();
+        return { decision: 'already_submitted', result: state.result };
+      }
+      if (state.status === 'paused') {
+        hideTaskOverlay();
+        return { decision: 'needs_user', message: 'Paused from the Hamzooh dashboard. Resume when you are ready.' };
+      }
+      if (state.approval?.status === 'approved' || state.status === 'submitting') {
+        hideTaskOverlay();
+        return { decision: 'approve' };
+      }
+      if (state.status === 'filling_application') {
+        hideTaskOverlay();
+        return { decision: 'resume', message: 'Answer received. Continuing the application.' };
+      }
+      const pending = (state.questions || []).find((item) => item.status === 'pending');
+      if (pending && pending.id !== handledQuestionId) {
+        handledQuestionId = pending.id;
+        hideTaskOverlay();
+        const answer = await handleTaskQuestion(pending);
+        if (answer) return { decision: 'resume', message: 'Answer received. Continuing the application.' };
+        showTaskOverlay({
+          title: 'Waiting for your answer',
+          subtitle: 'Hamzooh dashboard',
+          body: `This application still needs: ${pending.question}`,
+          tone: 'linear-gradient(135deg,#d97706,#f59e0b)',
+        });
+      }
+    }
+    hideTaskOverlay();
+    return {
+      decision: 'timeout',
+      message: 'Waiting for approval timed out. The application stays prepared in the job tab — approve or cancel it from the Hamzooh dashboard.',
+    };
+  }
+
+  async function finishTaskRun(message, details = {}) {
+    if (!taskMode() || TASK_FINAL_REPORTED) return;
+    TASK_FINAL_REPORTED = true;
+    const status = details.status || 'needs_attention';
+    // A dashboard pause wins over an agent-side stop: keep the task paused so
+    // the candidate can resume it deliberately.
+    if (status === 'needs_attention') {
+      const state = await taskState();
+      if (state?.status === 'paused') return;
+    }
+    const verified = status === 'submitted' && Boolean(details.verified || LAST_VERIFICATION?.ok);
+    await taskCall('/api/applications/extension/complete', {
+      status,
+      message,
+      reasonCode: details.reasonCode || '',
+      question: details.question || '',
+      options: details.options || [],
+      filledCount: details.filledCount || 0,
+      emptyCount: details.emptyCount || 0,
+      verified,
+      confirmation: LAST_VERIFICATION?.reason || details.confirmation || '',
+      confirmationUrl: LAST_VERIFICATION?.url || location.href,
+      url: location.href,
+    }).catch(() => null);
   }
 
   let trainingRecorderActive = false;
@@ -363,6 +949,43 @@
     })[char]);
   }
 
+  // Workday/Angular ATS put the question in a sibling <label> or a
+  // [data-automation-id="formLabel"] block that is not tied to the control by
+  // `for`/`aria-labelledby`. Without walking up to the field wrapper, the only
+  // text available is the internal id ("primaryQuestionnaire--a2c6…"), so the
+  // question is never looked up and the field is left empty.
+  const LABEL_TEXT_SELECTOR = 'label, legend, [data-automation-id="formLabel"], [data-automation-id*="formLabel"], [data-automation-id*="questionLabel"], [class*="formLabel"], [class*="field-label"], [class*="question-label"], [class*="labelText"]';
+  const NOT_A_LABEL_SELECTOR = '[data-automation-id*="error" i], [data-automation-id*="help" i], [role="alert"], .error, [class*="error"], [class*="hint"], [class*="help"]';
+
+  function labelTextOf(node) {
+    if (!node) return '';
+    const text = String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 300) return '';
+    if (text.replace(/[*\s:]/g, '').length < 3) return '';
+    return text;
+  }
+
+  function nearestLabelText(el) {
+    let node = el;
+    for (let depth = 0; node && node !== document.body && depth < 8; depth += 1, node = node.parentElement) {
+      const explicit = el.id ? node.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
+      if (explicit && !explicit.closest(NOT_A_LABEL_SELECTOR)) {
+        const text = labelTextOf(explicit);
+        if (text) return text;
+      }
+      for (const candidate of node.querySelectorAll(LABEL_TEXT_SELECTOR)) {
+        if (candidate === el || candidate.contains(el)) continue;
+        if (candidate.closest(NOT_A_LABEL_SELECTOR)) continue;
+        if (candidate.querySelector('input, select, textarea')) continue;
+        const text = labelTextOf(candidate);
+        if (text) return text;
+      }
+      const autoId = String(node.getAttribute?.('data-automation-id') || '').toLowerCase();
+      if (autoId.includes('formfield') || autoId.includes('question')) break;
+    }
+    return '';
+  }
+
   function labelFor(input) {
     try {
       const id = input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
@@ -373,6 +996,11 @@
       const ownLabel = (id?.innerText || wrapping?.innerText || labelled?.innerText || '').replace(/\s+/g, ' ').trim();
       if (ownLabel) {
         return [ownLabel, input.getAttribute('placeholder') || '', input.name || '']
+          .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+      }
+      const nearest = nearestLabelText(input);
+      if (nearest) {
+        return [nearest, input.getAttribute('placeholder') || '', input.name || '']
           .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
       }
       const heading = input.closest('div, li, fieldset, section, td')?.querySelector('label, p, span, legend, h1, h2, h3, div')?.innerText || '';
@@ -458,7 +1086,94 @@
     return '';
   }
 
+  // Resolve the human question for a control. Internals sometimes expose an
+  // internal id ("primaryQuestionnaire--a2c6...") or the widget's own selected
+  // pills ("Data Analysis, press delete to clear value"); neither is a question,
+  // so fall back to the field's own label/aria, then to a readable automation id,
+  // and only then to '' rather than showing engine internals to the candidate.
+  const AUTOMATION_LABELS = [
+    { test: /remote.?skill|skills?/i, label: 'Which skills should be listed on this application?' },
+    { test: /language/i, label: 'Which languages do you speak?' },
+    { test: /source|hear.?about/i, label: 'How did you hear about us?' },
+    { test: /country/i, label: 'Country' },
+    { test: /degree|education|school|university/i, label: 'Education' },
+    { test: /website|portfolio|linkedin|github/i, label: 'Link' },
+    { test: /relocat|location/i, label: 'Location preference' },
+  ];
+
+  const GENERIC_ID_WORDS = new Set([
+    'form', 'field', 'formfield', 'input', 'select', 'dropdown', 'listbox', 'combobox', 'multi',
+    'multiselect', 'questionnaire', 'primary', 'required', 'options', 'option', 'value',
+    'container', 'wrapper', 'control', 'button', 'text', 'date', 'number', 'search', 'prompt',
+  ]);
+
+  // "formField-degree" / "languageSelect" -> "Degree" / "Language" so the
+  // candidate sees a labelled field instead of a raw automation id.
+  function humanizeAutomationId(tokens) {
+    return String(tokens || '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .split(/[^A-Za-z]+/)
+      .filter((word) => word && word.length > 2 && !GENERIC_ID_WORDS.has(word.toLowerCase()))
+      .slice(0, 4)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  function fieldLabelFromAutomationId(el) {
+    const own = [
+      el.getAttribute?.('data-automation-id'),
+      el.getAttribute?.('name'),
+      el.getAttribute?.('id'),
+    ].filter(Boolean).join(' ');
+    // Only the field's own wrapper counts: walking further up would label every
+    // field inside a section with that section's name.
+    const wrapper = el.closest?.('[data-automation-id*="formField"], [data-automation-id*="question"]');
+    const wrapperId = wrapper?.getAttribute('data-automation-id') || '';
+    const scoped = `${own} ${wrapperId}`.trim();
+    if (!scoped) return '';
+    const hit = AUTOMATION_LABELS.find((item) => item.test.test(scoped));
+    if (hit) return hit.label;
+    // Some widgets carry the meaningful id on an inner pill/tag, not the wrapper.
+    for (const node of el.querySelectorAll?.('[data-automation-id]') || []) {
+      const id = node.getAttribute('data-automation-id') || '';
+      const mapped = AUTOMATION_LABELS.find((item) => item.test.test(id));
+      if (mapped) return mapped.label;
+    }
+    const humanized = humanizeAutomationId(scoped);
+    return humanized.length >= 3 ? humanized : '';
+  }
+
   function questionFor(el) {
+    const originalRaw = questionForRaw(el);
+    const raw = sanitizePromptText(originalRaw);
+    if (raw && !isNoisePrompt(originalRaw)) return raw;
+    const labelledBy = el.getAttribute?.('aria-labelledby')
+      ? String(el.getAttribute('aria-labelledby')).split(/\s+/)
+        .map((id) => document.getElementById(id)?.innerText || '').join(' ')
+      : '';
+    const placeholder = el.getAttribute?.('placeholder') || '';
+    const candidates = [
+      el.getAttribute?.('aria-label') || '',
+      labelledBy,
+      /^(search|select|type|enter|choose)/i.test(placeholder) ? '' : placeholder,
+      promptBefore(el.closest('.field, .form-group, fieldset, li, div') || el),
+      nearestLabelText(el),
+      labelFor(el),
+    ];
+    for (const candidate of candidates) {
+      const value = sanitizePromptText(candidate);
+      if (value && !isNoisePrompt(candidate)) return value;
+    }
+    const derived = fieldLabelFromAutomationId(el);
+    if (derived) return derived;
+    // Last resort for a real dropdown with no label at all: still ask something
+    // a person can act on, with the options shown in the dashboard card.
+    const widgetTokens = `${el.getAttribute?.('data-automation-id') || ''} ${el.getAttribute?.('role') || ''} ${el.getAttribute?.('aria-haspopup') || ''}`;
+    if (/select|dropdown|listbox|combobox/i.test(widgetTokens)) return 'Which option should be selected for this required field?';
+    return '';
+  }
+
+  function questionForRaw(el) {
     const type = (el.getAttribute('type') || '').toLowerCase();
     const aria = (el.getAttribute('aria-label') || '').trim();
     const labelledBy = (el.getAttribute('aria-labelledby') || '');
@@ -491,11 +1206,12 @@
         if (earlier) return earlier;
       }
       const own = cleanPrompt(labelFor(el).replace(new RegExp(`\\b${el.name}\\b`, 'g'), ''));
-      if (own && own.length > 12) return own;
-      return labelText;
+      if (own && own.length > 12 && !isNoisePrompt(own)) return own;
+      return isNoisePrompt(labelText) ? '' : labelText;
     }
 
-    return cleanPrompt([legend, labelText].filter(Boolean).join(' '));
+    const merged = cleanPrompt([legend, labelText].filter(Boolean).join(' '));
+    return isNoisePrompt(merged) ? '' : merged;
   }
 
   function profileValue(profile, key, jobTitle, company) {
@@ -516,7 +1232,8 @@
     const projectUrl = projects.map((p) => p.link || p.url).find(Boolean)
       || profile.links?.github || profile.github || profile.links?.portfolio || '';
     const phoneDigits = String(profile.phone || '').replace(/\D/g, '');
-    const locParts = String(profile.location || '').split(',').map((p) => p.trim());
+    const locParts = String(profile.location || '').split(',').map((p) => p.trim()).filter(Boolean);
+    const firstPart = (value) => String(value || '').split(',')[0].trim();
     const map = {
       email: profile.email || '',
       phone: phoneDigits.length > 10 ? phoneDigits.slice(-10) : phoneDigits,
@@ -524,10 +1241,10 @@
       lastName: rest.join(' ') || '',
       fullName: name,
       address: profile.address || profile.street || '',
-      city: profile.city || locParts[0] || '',
-      state: profile.state || locParts[1] || '',
-      zip: profile.zip || profile.postalCode || '',
-      country: profile.country || locParts[2] || locParts[1] || '',
+      city: firstPart(profile.city) || firstPart(profile.town) || locParts[0] || '',
+      state: firstPart(profile.state) || firstPart(profile.province) || (locParts.length > 2 ? locParts[1] : '') || '',
+      zip: String(profile.zip || profile.postalCode || profile.pincode || '').trim(),
+      country: String(profile.country || '').trim() || locParts[locParts.length - 1] || '',
       location: profile.location || '',
       linkedin: profile.links?.linkedin || profile.linkedin || '',
       github: profile.links?.github || profile.github || '',
@@ -538,7 +1255,7 @@
       internship: intern || '',
       degree: [education.degree, education.branch].filter(Boolean).join(' ') || '',
       graduation: education.dates || education.graduationYear || profile.batch || '',
-      salary: profile.expectedSalary || profile.salary || '',
+      salary: salaryFromProfile(profile),
       experience_years: String(experienceYears || '0'),
       codechef: profile.codechef || profile.codechefRating || '',
       codeforces: profile.codeforces || profile.codeforcesRating || '',
@@ -549,8 +1266,81 @@
     return String(map[key] || '').trim();
   }
 
+  // Person-name fields must be properly capitalized ("NELLURU JASWANTH" ->
+  // "Nelluru Jaswanth"). Workday rejects/ warns about all-caps names.
+  function isPersonNameField(label) {
+    const text = String(label || '').toLowerCase();
+    if (/company|employer|university|college|school|institute|organization|organisation|project|reference|manager|contact|emergency|account|user.?name|file|document|country|city/.test(text)) return false;
+    return /first name|given name|last name|family name|surname|middle name|full name|legal name|preferred name|local first name|local primary|local last name|applicant name|candidate name|your name|^name$|^full ?name$/.test(text);
+  }
+
+  function titleCaseName(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return raw;
+    const letters = raw.replace(/[^A-Za-z]/g, '');
+    const isAllCaps = letters.length > 0 && letters === letters.toUpperCase();
+    const isAllLower = letters.length > 0 && letters === letters.toLowerCase();
+    // Preserve names that are already correctly mixed (e.g. "McDonald").
+    if (!isAllCaps && !isAllLower) return raw;
+    return raw.split(/\s+/).map((word) => word
+      .split(/([-'’])/).map((part) => (
+        part && !/[-'’]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : part
+      )).join('')).join(' ');
+  }
+
+  function normalizeValueForInput(input, value) {
+    if (!input || typeof value !== 'string' || input.tagName === 'SELECT') return value;
+    const label = `${labelFor(input)} ${input.getAttribute?.('name') || ''} ${input.getAttribute?.('placeholder') || ''} ${input.getAttribute?.('aria-label') || ''}`;
+    const normalized = isPersonNameField(label) ? titleCaseName(value) : value;
+    return normalizeNumericValue(input, label, normalized);
+  }
+
+  // A salary saved as "3LPA" / "₹30,000" must reach a numeric Workday input as
+  // digits, or the site rejects it. Only money labels are converted.
+  function normalizeNumericValue(input, label, value) {
+    const text = String(value || '').trim();
+    if (!text || !/\d/.test(text)) return value;
+    if (!/salary|compensation|\bctc\b|stipend|annual pay|expected pay|amount|remuneration/i.test(label)) return value;
+    const lpa = text.replace(/[,\s]/g, '').match(/^(\d+(?:\.\d+)?)(lpa|lakh|lakhs|lac|lacs)$/i);
+    if (lpa) return String(Math.round(Number(lpa[1]) * 100000));
+    const digits = text.replace(/^(?:inr|rs\.?|\u20b9)/i, '').replace(/[,\s\u20b9]/g, '');
+    return /^\d+(?:\.\d+)?$/.test(digits) ? digits : value;
+  }
+
+  function squashValue(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  // True only when the field already holds the value we would fill. An empty or
+  // WRONG value returns false so the caller corrects it ("Naidupeta, Tirupati
+  // District, ..." in a City field must be replaced with "Naidupeta").
+  function inputHasExpectedValue(input, expected) {
+    const exp = squashValue(expected);
+    if (!exp) return false;
+    const label = labelFor(input);
+    if (input.tagName === 'SELECT') {
+      const chosen = input.options?.[input.selectedIndex];
+      const text = squashValue(chosen?.text || '');
+      if (!text || /^(select|choose|pleaseselect)/.test(text)) return false;
+      return text === exp || text.includes(exp) || exp.includes(text);
+    }
+    if (isPlaceholderValue(input)) return false;
+    const current = squashValue(input.value);
+    if (!current) return false;
+    if (current === exp) return true;
+    // Phone numbers may carry formatting or a country code.
+    if (/(phone|mobile|\btel\b)/i.test(label)) return current.endsWith(exp) || exp.endsWith(current);
+    return false;
+  }
+
   function setNativeValue(input, value) {
     if (!input) return false;
+    value = normalizeValueForInput(input, value);
+    // A native <input type="date"> needs YYYY-MM-DD, not MM/DD/YYYY.
+    if (input.type === 'date' && /^\d{2}\/\d{2}\/\d{4}$/.test(String(value))) {
+      const [mm, dd, yyyy] = String(value).split('/');
+      value = `${yyyy}-${mm}-${dd}`;
+    }
     try {
       if (input.tagName === 'SELECT') {
         const wanted = String(value).trim().toLowerCase();
@@ -657,53 +1447,199 @@
   }
 
   function isSensitiveQuestion(question) {
-    return /authorized to work|work authorization|sponsorship|visa status|citizenship|ssn|social security|passport number|national id|aadhaar|convicted|felony|criminal|date of birth|\bdob\b|expected salary|compensation|notice period|currently employed/i.test(String(question || ''));
+    return /authori[sz]ed to work|authori[sz]ation to work|work authorization|sponsorship|assistance to obtain|visa status|citizenship|ssn|social security|passport number|national id|aadhaar|convicted|felony|criminal|date of birth|\bdob\b|desired (annual )?(salary|compensation)|expected salary|compensation|notice period|currently employed/i.test(String(question || ''));
   }
 
   function isEeoQuestion(question) {
-    return /gender|hispanic|race|ethnicity|veteran|disability|lgbt|sexual orientation/i.test(String(question || ''));
+    return /gender|non-?binary|pronoun|hispanic|latino|race|racial|ethnic|native american|alaska native|asian|african american|pacific islander|two or more races|caucasian|veteran|disability|lgbt|sexual orientation|position_specific_questions/i.test(String(question || ''));
   }
 
   // Only uses facts the user actually stored. Returns '' when unknown so the
   // caller asks the user instead of inventing an answer.
+  function startDateFromToken(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const lower = raw.toLowerCase();
+    let days = null;
+    if (/^(tomorrow|next[_\s-]?day)$/.test(lower)) days = 1;
+    else if (/^(immediate|immediately|today|asap)$/.test(lower)) days = 0;
+    else if (/^\+?\s*(\d+)\s*d(ays?)?$/.test(lower)) days = Number(lower.match(/(\d+)/)[1]);
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) { const [y, m, d] = raw.split('-'); return `${m}/${d}/${y}`; }
+    else return raw;
+    const date = new Date(Date.now() + days * 86400000);
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${mm}/${dd}/${date.getFullYear()}`;
+  }
+
+  // Workday (and several ATS) split a date into three controls — month, day,
+  // year. Typing "11/22/2026" into the month box is rejected, so the whole
+  // required field stays empty; the parts are detected and filled one by one.
+  function datePartText(input) {
+    return [
+      input.getAttribute?.('data-automation-id') || '',
+      input.getAttribute?.('aria-label') || '',
+      input.getAttribute?.('placeholder') || '',
+      input.name || '',
+      input.id || '',
+    ].join(' ').toLowerCase();
+  }
+
+  function datePartKind(input) {
+    const text = datePartText(input);
+    if (/year|yyyy/.test(text)) return 'year';
+    if (/month|\bmm\b/.test(text)) return 'month';
+    if (/day|\bdd\b/.test(text)) return 'day';
+    return '';
+  }
+
+  // The closest wrapper that holds at least two different date parts.
+  function dateGroupOf(input) {
+    let node = input;
+    for (let depth = 0; node && node !== document.body && depth < 4; depth += 1, node = node.parentElement) {
+      const controls = queryAllDeep('input, select', node).filter((el) => {
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        return !['hidden', 'file', 'button', 'submit', 'reset', 'radio', 'checkbox', 'password'].includes(type);
+      });
+      const parts = controls.map((el) => ({ el, kind: datePartKind(el) })).filter((part) => part.kind);
+      if (new Set(parts.map((part) => part.kind)).size >= 2) return { container: node, parts };
+      const autoId = String(node.getAttribute?.('data-automation-id') || '').toLowerCase();
+      if (autoId.includes('formfield') || autoId.includes('question')) break;
+    }
+    return null;
+  }
+
+  function datePartsFromValue(value) {
+    const text = String(value || '').trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) return { year: iso[1], month: iso[2], day: iso[3] };
+    const us = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (us) {
+      return {
+        month: us[1].padStart(2, '0'),
+        day: us[2].padStart(2, '0'),
+        year: us[3].length === 2 ? `20${us[3]}` : us[3],
+      };
+    }
+    return null;
+  }
+
+  function datePartValue(kind, values, el) {
+    if (kind !== 'year') return values[kind];
+    return String(el.getAttribute?.('maxlength') || '') === '2' ? values.year.slice(2) : values.year;
+  }
+
+  // Fills a date question whether the page wants one control or a
+  // month/day/year group. True only when every part holds its value.
+  async function fillDateControl(input, value) {
+    const values = datePartsFromValue(value);
+    if (!values) return setVerified(input, value);
+    const group = dateGroupOf(input);
+    if (!group) {
+      if (await setVerified(input, value)) return true;
+      // Workday's single date box inserts the separators itself, so it can
+      // reject a pasted "MM/DD/YYYY" but accept the same digits typed in.
+      const digits = String(value).replace(/\D/g, '');
+      if (!digits) return false;
+      const readDigits = () => String(input.value || '').replace(/\D/g, '');
+      setNativeValue(input, digits);
+      await sleep(80);
+      if (readDigits() !== digits) await typeWithCdp(input, digits);
+      if (readDigits() === digits) {
+        runEvent('date_typed', { question: labelFor(input).slice(0, 80), value }, 'Filled a date box with digits (site inserts separators)');
+        return true;
+      }
+      return false;
+    }
+    let filled = 0;
+    for (const part of group.parts) {
+      const expected = datePartValue(part.kind, values, part.el);
+      if (String(part.el.value || '').trim() === String(expected)) { filled += 1; continue; }
+      if (await setVerified(part.el, expected)) filled += 1;
+    }
+    return filled === group.parts.length;
+  }
+
+  // "Earliest available joining date" / "What date are you available to start?"
+  // are answered relative to the day the application runs: tomorrow by default
+  // (or the configured offset), never a stored stale date. A notice-period
+  // question is a different question.
+  function isJoiningDateQuestion(question) {
+    const q = String(question || '');
+    if (/notice period|period of notice|how much notice/i.test(q)) return false;
+    return /earliest (available )?(joining|start)|available to (start|join)|date (are|will|can) you (available|be able|start|join)|(start|joining|available|availability) date|when can you (start|join)|available (from|for joining)/i.test(q);
+  }
+
+  function joiningDateValue(profile) {
+    const raw = String(profile?.availableStart || profile?.startDate || '').trim().toLowerCase();
+    if (/^\+?\s*\d+\s*d/.test(raw) || /^(tomorrow|immediate|immediately|today|asap|next[_\s-]?day)$/.test(raw)) {
+      const resolved = startDateFromToken(raw);
+      if (resolved) return resolved;
+    }
+    return startDateFromToken('tomorrow');
+  }
+
+  // "3LPA" / "30k" / "₹3,00,000" reach a salary input as digits, never as text
+  // the site rejects.
+  function salaryDigits(value) {
+    const text = String(value == null ? '' : value).trim();
+    if (!text) return '';
+    const lpa = text.replace(/[,\s]/g, '').match(/^(\d+(?:\.\d+)?)(lpa|lakh|lakhs|lac|lacs)$/i);
+    if (lpa) return String(Math.round(Number(lpa[1]) * 100000));
+    const k = text.replace(/[,\s]/g, '').match(/^(\d+(?:\.\d+)?)k$/i);
+    if (k) return String(Math.round(Number(k[1]) * 1000));
+    const digits = text.replace(/^(?:inr|rs\.?|₹)/i, '').replace(/[,\s₹]/g, '');
+    return /^\d+(?:\.\d+)?$/.test(digits) ? digits : text;
+  }
+
+  // The desired salary comes from the candidate's own profile: an explicit
+  // expected salary, or the range saved in Job Profile. INR profiles store that
+  // range as a monthly figure, so it is annualised instead of typing the
+  // monthly floor into an annual field.
+  function salaryFromProfile(profile) {
+    const p = profile || {};
+    const explicit = p.expectedSalary ?? p.salary ?? p.salaryExpectation;
+    const explicitDigits = salaryDigits(explicit);
+    if (/^\d+(?:\.\d+)?$/.test(explicitDigits)) return explicitDigits;
+    if (String(explicit || '').trim()) return String(explicit).trim();
+    const prefs = p.jobPreferences || p.preferences || {};
+    const min = Number(salaryDigits(prefs.salaryMin));
+    const max = Number(salaryDigits(prefs.salaryMax));
+    const monthly = min || max;
+    if (!Number.isFinite(monthly) || monthly <= 0) return '';
+    return String(Math.round(monthly < 100000 ? monthly * 12 : monthly));
+  }
+
   function sensitiveProfileAnswer(question, profile) {
     const q = String(question || '').toLowerCase();
     const p = profile || {};
-    if (/authorized to work|work authorization|legally (eligible|authorized)|right to work|eligible to work/.test(q)) {
-      const flag = p.workAuthorized ?? p.authorizedToWork ?? p.workAuth;
-      if (flag === true || /^(yes|true)$/i.test(String(flag || ''))) return 'Yes';
-      if (flag === false || /^(no|false)$/i.test(String(flag || ''))) return 'No';
-      // Applying to a role in the user's own country/region is not a
-      // sponsorship question — "authorized to work in India" for someone based
-      // in India is a fact we can state without guessing.
-      const country = String(p.country || String(p.location || '').split(',').pop() || '').trim().toLowerCase();
-      const asked = (q.match(/authorized to work in ([a-z ]+)/) || [])[1];
-      if (country && asked && (country.includes(asked.trim()) || asked.trim().includes(country))) return 'Yes';
+    if (/authori[sz]ed to work|authori[sz]ation to work|work authorization|legally (eligible|authori[sz]ed)|right to work|eligible to work/.test(q)) {
+      const flag = p.workAuthorized ?? p.authorizedToWork ?? p.workAuth
+        ?? p.jobPreferences?.workAuthorized ?? p.preferences?.workAuthorized;
+      if (flag === true || /^(yes|true|y|1)$/i.test(String(flag || ''))) return 'Yes';
+      if (flag === false || /^(no|false|n|0)$/i.test(String(flag || ''))) return 'No';
     }
-    if (/require .*sponsorship|need .*sponsorship|sponsorship/.test(q)) {
-      const flag = p.requireSponsorship ?? p.sponsorshipRequired;
-      if (flag === true) return 'Yes';
-      if (flag === false) return 'No';
+    if (/(require|need) (company )?(assistance|sponsorship)|require sponsorship|need sponsorship|visa sponsorship|immigration (support|assistance)|assistance to obtain (work )?authori[sz]ation/.test(q)) {
+      const flag = p.requireSponsorship ?? p.sponsorshipRequired
+        ?? p.jobPreferences?.requireSponsorship ?? p.preferences?.requireSponsorship;
+      if (flag === true || /^(yes|true|y|1)$/i.test(String(flag || ''))) return 'Yes';
+      if (flag === false || /^(no|false|n|0)$/i.test(String(flag || ''))) return 'No';
     }
-    // Derive enrolment from the user's real education dates rather than
-    // guessing: a graduation year still in the future means still studying.
+    if (/notice period|joining time/.test(q)) {
+      if (p.noticePeriod) return String(p.noticePeriod);
+    }
+    if (isJoiningDateQuestion(q)) {
+      // Always relative to today (or the candidate's configured offset).
+      return joiningDateValue(p);
+    }
     if (/currently (enrolled|studying|pursuing)|still (in|at) (college|university|school)|are you a student|pursuing a (bachelor|master|degree)/.test(q)) {
       const explicit = p.currentlyEnrolled ?? p.isStudent;
       if (explicit === true) return 'Yes';
       if (explicit === false) return 'No';
-      const years = (p.education || [])
-        .map((item) => parseInt(item?.graduationYear || item?.endYear || item?.year || '', 10))
-        .filter((n) => Number.isFinite(n));
-      if (years.length) {
-        const latest = Math.max(...years);
-        const thisYear = new Date().getFullYear();
-        if (latest >= thisYear) return 'Yes';
-        return 'No';
-      }
     }
-    if (/expected (salary|ctc|compensation)|salary expectation/.test(q)) {
-      const salary = p.expectedSalary || p.salary;
-      if (salary) return String(salary);
+    if (/desired (annual )?(salary|compensation)|expected (salary|ctc|compensation)|salary expectation|salary requirement|target salary|current (salary|ctc)/.test(q)) {
+      const salary = salaryFromProfile(p);
+      if (salary) return salary;
     }
     return '';
   }
@@ -714,6 +1650,10 @@
     if (known) return known;
     if (/privacy|acknowledge|agree|consent|terms|i understand|i certify/.test(q) && !isSensitiveQuestion(q)) return 'yes';
     if (isEeoQuestion(q)) return 'decline';
+    // Safe, non-personal field defaults common across ATS forms. These are
+    // preferences, not personal/legal facts, so the agent answers them itself.
+    if (/phone (device )?type|device type|phone type|telephone type/i.test(q)) return 'Mobile';
+    if (/preferred (first )?name|nickname|known as|goes by/i.test(q)) return 'No';
     const experienceList = Array.isArray(profile.experience) ? profile.experience : [];
     const internshipsList = Array.isArray(profile.internships) ? profile.internships : [];
     const workedHere = [...experienceList, ...internshipsList].some((item) => {
@@ -735,9 +1675,25 @@
     if (!texts.length) return '';
     const find = (re) => texts.find((t) => re.test(t));
     if (/how did you hear|referral source|source of application|where did you (find|hear)/.test(q)) {
-      const source = String(profile?.jobSource || '').toLowerCase();
-      const fromSource = source && (find(new RegExp(source.replace(/[^a-z0-9]/g, '.'), 'i')) || '');
-      return fromSource || find(/linkedin/i) || find(/company website|careers/i) || find(/job board|naukri|indeed/i) || '';
+      const source = String(profile?.jobSource || profile?.source || profile?.jobProvider || '').toLowerCase();
+      const patterns = [];
+      if (/referral|employee/.test(source)) patterns.push(/employee referral|referral/i);
+      if (/campus|university|college/.test(source)) patterns.push(/campus campaign|campus/i);
+      if (/linkedin/.test(source)) patterns.push(/linked.?in/i, /job sites?|career websites?/i);
+      if (/indeed|naukri|glassdoor|job board|job site/.test(source)) patterns.push(/job sites?|job boards?|naukri|indeed|glassdoor/i);
+      if (/company|career|website|portal|workday|greenhouse|lever|ashby/i.test(source)) patterns.push(/career websites?|career sites?|company website|employer website/i);
+      if (/alert/.test(source)) patterns.push(/job alert|job notification/i);
+      // These are logistics, not personal facts: any real option is a valid
+      // answer, so finish with a permissive fallback instead of stalling.
+      patterns.push(/job sites?|career websites?|linked.?in|job alert|employee referral/i, /./);
+      for (const re of patterns) {
+        const hit = find(re);
+        if (hit) return hit;
+      }
+      return '';
+    }
+    if (/phone (device )?type|device type|phone type|telephone type/i.test(q)) {
+      return find(/mobile|cell|smart ?phone/i) || 'Mobile';
     }
     if (/gender|hispanic|race|ethnicity|veteran|disability|sexual orientation/.test(q)) {
       return find(/decline|prefer not|do not wish/i) || '';
@@ -831,7 +1787,7 @@
     return false;
   }
 
-  async function fillCustomDropdowns(wantedByQuestion, answers, profile, company) {
+  async function fillCustomDropdowns(wantedByQuestion, answers, profile, company, pending = null) {
     // If an apply modal is open, search ONLY inside the modal!
     const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
     if (/linkedin\.com/i.test(location.hostname) && !modal) {
@@ -846,23 +1802,188 @@
       });
     for (const widget of widgets.slice(0, 20)) {
       const question = questionFor(widget);
-      let wanted = findBestAnswer(question, answers) || chooseFromProfile(question, profile, company) || wantedByQuestion.get(question);
+      // Already answered correctly in an earlier pass: never touch it again.
+      if (dropdownHasValue(widget)) continue;
+      // A sensitive question is decided by its own category, never by a generic
+      // field hint: "...authorization to work in the job location?" would
+      // otherwise be answered with the candidate's city.
+      const hint = isSensitiveQuestion(question) ? null : FIELD_HINTS.find((item) => item.test.test(question));
+      let wanted = (taskMode() ? null : findBestAnswer(question, answers))
+        || chooseFromProfile(question, profile, company)
+        || (hint ? profileValue(profile, hint.key, pending.jobTitle || '', company) : '')
+        || wantedByQuestion.get(question);
       try {
         widget.click();
         await sleep(250);
-        const options = queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [class*="option"], li').filter((o) => visible(o) && (o.innerText || '').trim());
-        if (!options.length) continue;
-        if (!wanted) wanted = heuristicChoice(question, options.map((o) => o.innerText.trim()), profile);
+        // Only look inside a real opened popup. Scanning the whole document on
+        // Workday picks up the step navigation ("step 2 of 7") as fake options.
+        const popup = queryAllDeep('[role="listbox"], [role="menu"], [data-automation-id="menu"], [class*="dropdown-menu"], [class*="menu-list"]')
+          .find((node) => visible(node));
+        const optionRoot = popup || root;
+        const readOptions = () => {
+          // Scan every visible dropdown/menu container so nested submenus
+          // (Workday "Job Sites" -> "LinkedIn") are included, while page
+          // navigation and step lists are excluded.
+          const containers = queryAllDeep('[role="listbox"], [role="menu"], [class*="dropdown"], [class*="menu"]').filter((node) => visible(node));
+          const scopes = containers.length ? containers : [optionRoot];
+          const seen = new Set();
+          const out = [];
+          for (const scope of scopes) {
+            queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [role="menuitem"], [class*="option"], li', scope)
+              .forEach((node) => {
+                if (seen.has(node) || !visible(node) || isNoisePrompt(node.innerText || '')) return;
+                if (node.closest('nav, [role="navigation"], header')) return;
+                seen.add(node);
+                out.push(node);
+              });
+          }
+          return out;
+        };
+
+        let options = readOptions();
+        let optTexts = cleanOptions(options.map((o) => (o.innerText || '').trim()));
+
+        // Searchable combobox (Workday "How did you hear about us?" etc.): the
+        // list stays empty until text is typed. Decide the answer ourselves and
+        // pick it from the filtered list instead of asking the candidate.
+        if ((!options.length || !optTexts.length) && !isNoisePrompt(question)
+          && !(taskMode() && isSensitiveQuestion(question))) {
+          const searchInput = widget.matches?.('input, textarea') ? widget : widget.querySelector?.('input, textarea');
+          if (searchInput && visible(searchInput)) {
+            let guess = wanted || '';
+            if (!guess) {
+              const ai = await inferAnswerWithAI(question, [], profile, pending.jobTitle, pending.company, pending.resumeText, pending);
+              guess = ai?.answer || '';
+            }
+            if (guess) {
+              try { setNativeValue(searchInput, guess); } catch {
+                try {
+                  searchInput.value = guess;
+                  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                } catch {}
+              }
+              await sleep(900);
+              options = readOptions();
+              optTexts = cleanOptions(options.map((o) => (o.innerText || '').trim()));
+              const wantedLower = String(guess).toLowerCase();
+              const hit = options.find((o) => {
+                const text = String(o.innerText || '').trim().toLowerCase();
+                return text === wantedLower || text.includes(wantedLower) || wantedLower.includes(text)
+                  || (wantedLower.length > 3 && text.includes(wantedLower.slice(0, 4)))
+                  || (wantedLower === 'mobile' && /mobile|cell/.test(text));
+              });
+              if (hit) {
+                try { hit.click(); } catch {}
+                hamzoohLog('log', 'searchable dropdown filled', question.slice(0, 80));
+                await sleep(150);
+                continue;
+              }
+              if (!isSensitiveQuestion(question)) {
+                // No exact match: clear the search and pick a real option from
+                // the unfiltered list so required logistics fields are never
+                // left empty.
+                try { setNativeValue(searchInput, ''); } catch {}
+                await sleep(350);
+                const fresh = readOptions();
+                const fallback = pickBestOption(fresh)?.node || fresh[0];
+                if (fallback) {
+                  try { fallback.click(); } catch {}
+                  hamzoohLog('log', 'searchable dropdown fallback', question.slice(0, 80));
+                  await sleep(150);
+                  continue;
+                }
+              }
+            }
+          }
+        }
+
+        if (!options.length || !optTexts.length || isNoisePrompt(question)) {
+          document.body.click();
+          await sleep(100);
+          if (isNoisePrompt(question)) skipped.push({ field: 'custom dropdown', reason: 'The page did not expose a real question for this control.' });
+          continue;
+        }
+
+        // Source questions ("How did you hear about us?") accept any option, so
+        // the agent clicks the most plausible one (LinkedIn / Job sites / ...)
+        // and follows one submenu level if the option opens a nested list.
+        if (!isSensitiveQuestion(question) && isLogisticsQuestion(question)) {
+          const before = options.slice();
+          const picked = pickBestOption(options, profile);
+          if (picked) {
+            try { picked.node.click(); } catch {}
+            await sleep(600);
+            const more = readOptions().filter((node) => !before.includes(node));
+            const leaf = more.length ? pickBestOption(more, profile) : null;
+            if (leaf) { try { leaf.node.click(); } catch {} await sleep(300); }
+          }
+          // Workday search comboboxes only commit when the chosen leaf is in
+          // the filtered list — use the decision we just made, never a
+          // hardcoded answer that may not exist among the options.
+          const searchInput = widgetControl(widget);
+          const preferred = String(picked?.text || wanted || '').trim();
+          if (searchInput && !widgetHasValue(widget) && preferred) {
+            try { setNativeValue(searchInput, preferred); } catch {}
+            await sleep(700);
+            const listed = readOptions();
+            const hit = listed.find((node) => {
+              const t = String(node.innerText || '').trim().toLowerCase();
+              const p = preferred.toLowerCase();
+              return t === p || t.includes(p) || p.includes(t);
+            }) || pickBestOption(listed, profile)?.node;
+            if (hit) { try { hit.click(); } catch {} await sleep(250); }
+          }
+          if (!widgetHasValue(widget) && picked) {
+            try { picked.node.click(); } catch {}
+            await sleep(200);
+          }
+          hamzoohLog('log', 'logistics question answered', `${question.slice(0, 50)} -> ${preferred || 'first option'}`);
+          await sleep(150);
+          continue;
+        }
+        if (!wanted && !(taskMode() && isSensitiveQuestion(question))) {
+          wanted = heuristicChoice(question, optTexts, profile);
+        }
+        if (!wanted && !(taskMode() && isSensitiveQuestion(question))) {
+          wanted = semanticOptionText(question, optTexts, profile);
+        }
+        // A known value that matches no visible option must be mapped onto one.
+        if (wanted) {
+          const w = String(wanted).toLowerCase();
+          const hasMatch = optTexts.some((t) => {
+            const tt = t.toLowerCase();
+            return tt === w || tt.includes(w) || w.includes(tt);
+          });
+          if (!hasMatch) {
+            const alt = semanticOptionText(question, optTexts, profile);
+            if (alt) wanted = alt;
+          }
+        }
         if (!wanted) {
-          const optTexts = options.map((o) => o.innerText.trim()).filter(Boolean);
-          const ai = await inferAnswerWithAI(question, optTexts, profile, '', company, '');
-          if (ai?.answer) {
-            wanted = ai.answer;
-          } else {
+          if (taskMode()) {
+            const memory = await taskCall('/api/applications/extension/answer-lookup', { question, options: optTexts });
+            wanted = memory?.match?.answer || '';
+          }
+          if (!wanted && !(taskMode() && isSensitiveQuestion(question))) {
+            const ai = await inferAnswerWithAI(question, optTexts, profile, '', company, '', pending);
+            if (ai?.answer) wanted = ai.answer;
+          }
+          if (!wanted) {
+            const ai = await inferAnswerWithAI(question, optTexts, profile, '', company, '', pending);
+            if (ai?.answer) wanted = ai.answer;
+          }
+          if (!wanted && taskMode()) {
+            const reported = await taskCall('/api/applications/extension/question', {
+              question, options: optTexts, required: true,
+              reason: 'This dropdown value is not in your profile or saved answers.',
+            });
+            wanted = reported?.answer || '';
+          }
+          if (!wanted) {
             const promptResult = await askOrSkip(question, 0, 1, optTexts, 'Choose the option for this question (saved to Vault)', true);
             if (promptResult?.answer) {
               wanted = promptResult.answer;
-              if (promptResult.remember) await rememberAnswer(answers, question, wanted);
+              if (promptResult.remember) await rememberAnswer(answers, question, wanted, optTexts);
             }
           }
         }
@@ -878,7 +1999,22 @@
           return t === w || t.includes(w) || w.includes(t) || (w === 'yes' && /^(yes|y)\b/.test(t)) || (w === 'no' && /^(no|n)\b/.test(t)) || (w === 'decline' && /decline|prefer not/.test(t));
         });
         if (hit) {
-          hit.click();
+          // Click the option, and if it opens a submenu ("Job Sites >") follow
+          // it down until the value actually commits.
+          const beforeClick = options.slice();
+          try { hit.click(); } catch {}
+          await sleep(500);
+          for (let depth = 0; depth < 3 && !widgetHasValue(widget); depth += 1) {
+            const nested = readOptions().filter((node) => !beforeClick.includes(node));
+            if (!nested.length) break;
+            const nestedHit = nested.find((o) => {
+              const t = o.innerText.trim().toLowerCase();
+              const w = String(wanted).toLowerCase();
+              return t === w || t.includes(w) || w.includes(t) || (w === 'decline' && /decline|prefer not/.test(t));
+            }) || nested[0];
+            try { nestedHit.click(); } catch {}
+            await sleep(450);
+          }
           hamzoohLog('log', 'custom dropdown filled', question.slice(0, 80));
         } else {
           document.body.click();
@@ -892,6 +2028,78 @@
   // Radios that omit a `name` attribute would all collapse onto the same key,
   // so later groups were silently skipped. Group by name when present, else by
   // the question the options belong to.
+  // Visible option nodes of an opened custom dropdown (Workday listbox, search
+  // combobox, ...). Only visible containers are scanned so step navigation and
+  // the page menu never show up as choices.
+  function dropdownOptions() {
+    const containers = queryAllDeep('[role="listbox"], [role="menu"], [data-automation-id="menu"], [class*="dropdown"], [class*="menu"]')
+      .filter((node) => visible(node));
+    const scopes = containers.length ? containers : [document];
+    const seen = new Set();
+    const out = [];
+    for (const scope of scopes) {
+      queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [role="menuitem"], [class*="option"], li', scope)
+        .forEach((node) => {
+          if (seen.has(node) || !visible(node) || isNoisePrompt(node.innerText || '')) return;
+          if (node.closest('nav, [role="navigation"], header')) return;
+          seen.add(node);
+          out.push(node);
+        });
+    }
+    return out;
+  }
+
+  function matchDropdownOption(nodes, wanted) {
+    const w = String(wanted || '').trim().toLowerCase();
+    if (!w) return null;
+    return nodes.find((node) => {
+      const t = String(node.innerText || '').trim().toLowerCase();
+      return t === w || t.includes(w) || w.includes(t)
+        || (w === 'yes' && /^(yes|y)\b/.test(t))
+        || (w === 'no' && /^(no|n)\b/.test(t))
+        || (w === 'decline' && /decline|prefer not|do not wish/.test(t));
+    }) || null;
+  }
+
+  // Commit a value into a custom (non-<select>) dropdown. An answer given in the
+  // dashboard must actually set the field, otherwise the same required question
+  // is reported again on the next pass and the step never moves on.
+  async function selectCustomOption(widget, wanted) {
+    const target = String(wanted || '').trim();
+    if (!widget || !target) return false;
+    const trigger = dropdownControl(widget) || widget;
+    try { widget.scrollIntoView({ block: 'center' }); } catch {}
+    try { trigger.click(); } catch {}
+    await sleep(350);
+    let hit = matchDropdownOption(dropdownOptions(), target);
+    if (!hit) {
+      const searchInput = widget.matches?.('input, textarea') ? widget : widget.querySelector?.('input, textarea');
+      if (searchInput && visible(searchInput)) {
+        setNativeValue(searchInput, target);
+        await sleep(800);
+        hit = matchDropdownOption(dropdownOptions(), target);
+      }
+    }
+    if (!hit) {
+      try { document.body.click(); } catch {}
+      return false;
+    }
+    try { hit.click(); } catch {}
+    await sleep(450);
+    for (let depth = 0; depth < 3 && !dropdownHasValue(widget); depth += 1) {
+      const nested = dropdownOptions().filter((node) => node !== hit);
+      if (!nested.length) break;
+      const leaf = matchDropdownOption(nested, target) || nested[0];
+      try { leaf.click(); } catch {}
+      await sleep(400);
+    }
+    if (!dropdownHasValue(widget)) {
+      try { document.body.click(); } catch {}
+      return false;
+    }
+    return true;
+  }
+
   function radioGroupKey(input, question, type = 'radio') {
     return `${type}:${input.name || question || input.id || ''}`;
   }
@@ -922,10 +2130,33 @@
       const question = questionFor(input);
       const key = question.toLowerCase().slice(0, 180);
       const savedAnswer = findBestAnswer(question, answers);
-      let wanted = savedAnswer || chooseFromProfile(question, profile, company);
-      if (!wanted && type !== 'radio' && type !== 'checkbox') {
+      const hint = FIELD_HINTS.find((item) => item.test.test(question));
+      let wanted = savedAnswer || (hint ? profileValue(profile, hint.key, '', company) : '') || chooseFromProfile(question, profile, company);
+      if (!wanted && type !== 'radio' && type !== 'checkbox'
+        && !(taskMode() && isSensitiveQuestion(question))) {
         wanted = heuristicChoice(question, optionList(input).map((o) => o.text.trim()), profile);
       }
+      if (!wanted && type !== 'radio' && type !== 'checkbox'
+        && !(taskMode() && isSensitiveQuestion(question))) {
+        wanted = semanticOptionText(question, optionList(input).map((o) => o.text.trim()), profile);
+      }
+      // A known value that matches no option ("B.Tech Computer Science" vs
+      // "Bachelor's Degree") must be mapped onto a real option, not dropped.
+      if (input.tagName === 'SELECT' && wanted) {
+        const optionTexts = optionList(input).map((o) => o.text.trim());
+        const matches = optionTexts.some((t) => {
+          const tt = t.toLowerCase();
+          const w = String(wanted).toLowerCase();
+          return tt === w || tt.includes(w) || w.includes(tt);
+        });
+        if (!matches) {
+          wanted = semanticOptionText(question, optionTexts, profile)
+            || heuristicChoice(question, optionTexts, profile) || wanted;
+        }
+      }
+      // A select that already holds the right answer is left alone; a wrong or
+      // empty one falls through and is corrected below.
+      if (input.tagName === 'SELECT' && wanted && inputHasExpectedValue(input, wanted)) return;
       if (type === 'radio') {
         const groupKey = radioGroupKey(input, question);
         if (seenGroups.has(groupKey)) return;
@@ -948,6 +2179,13 @@
           filledCount += 1;
         }
         return;
+      }
+      // Native select source question: any listed option is acceptable, so pick
+      // the most plausible one instead of asking the candidate.
+      if (!wanted && input.tagName === 'SELECT' && !isSensitiveQuestion(question) && isLogisticsQuestion(question)) {
+        const opts = optionList(input);
+        const pick = opts.find((option) => LOGISTICS_OPTION_PRIORITY.some((pattern) => pattern.test(option.text))) || opts[0];
+        if (pick) wanted = pick.value || pick.text;
       }
       if (wanted && applyChoice(input, wanted)) {
         answers[key] = wanted;
@@ -996,7 +2234,10 @@
     for (const el of nodes) {
       if (!visible(el)) continue;
       const text = String(el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
-      if (text && text.length < 300 && !out.includes(text)) out.push(text);
+      // Workday renders informational hints as [role="alert"] ("Alert: Verify
+      // that the field ... is correctly capitalized"). They are not errors.
+      if (!text || text.length >= 300 || /^alert\s*:/i.test(text) || isNoisePrompt(text)) continue;
+      if (!out.includes(text)) out.push(text);
     }
     const body = String(document.body?.innerText || '').slice(0, 4000);
     const match = body.match(/(?:please|must) (?:fill|complete|enter|select|answer)[^\n.]{0,120}/gi);
@@ -1162,7 +2403,17 @@
     return container;
   }
 
-  function askHamzoohQuestion(question, fieldIndex, totalFields, options = [], reason = '') {
+  function askHamzoohQuestion(question, fieldIndex, totalFields, options = [], reason = '', sensitive = false) {
+    const safeQuestion = String(question || '').replace(/\s+/g, ' ').trim();
+    const safeOptions = cleanOptions(options);
+    // Never surface ATS chrome (progress steps, hint text, stray values) as a
+    // question. Asking the user about it would be confusing and unanswerable.
+    if (isNoisePrompt(safeQuestion) && safeOptions.length === 0) {
+      runEvent('question_suppressed', { question: safeQuestion.slice(0, 200), reason }, 'Suppressed a non-question prompt (page chrome, not a real field).');
+      return Promise.resolve(null);
+    }
+    question = safeQuestion;
+    options = safeOptions;
     return new Promise((resolve) => {
       injectHamzoohStyles();
       removeHamzoohOverlays();
@@ -1178,14 +2429,14 @@
           <div class="hamzooh-progress">${fieldIndex + 1} of ${totalFields} missing fields</div>
           <div class="hamzooh-header"><div class="hamzooh-logo">AI</div><div>
             <div class="hamzooh-title">Hamzooh needs one detail</div>
-            <div class="hamzooh-subtitle">${escapeHtml(reason || 'Saved to Vault — reused next time')}</div>
+            <div class="hamzooh-subtitle">${escapeHtml(sensitive ? 'Used for this application only — not saved automatically' : (reason || 'Saved to Vault — reused next time'))}</div>
           </div></div>
           <div class="hamzooh-body">
             <div class="hamzooh-question">"${escapeHtml(question.length > 140 ? question.slice(0, 137) + '…' : question)}"</div>
             ${optHtml}
             <input class="hamzooh-input" id="hamzooh-answer-input" type="text" placeholder="Your answer…" />
             <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#475569;">
-              <input type="checkbox" id="hamzooh-remember-check" checked /> Save to Vault (never ask again)
+              <input type="checkbox" id="hamzooh-remember-check" ${sensitive ? 'disabled' : 'checked'} /> ${sensitive ? 'Sensitive answer — saving requires consent in the dashboard' : 'Save to Vault (never ask again)'}
             </label>
           </div>
           <div class="hamzooh-footer">
@@ -1263,7 +2514,16 @@
   }
 
   async function syncAnswerToServer(question, answer, approved) {
-    await proxyFetch('/api/vault/answers', { question, answer, approved });
+    // The vault is per-user now, so the request carries either the dashboard
+    // session or the task token. `approved` is only true when the candidate
+    // typed or confirmed the answer themselves.
+    await proxyFetch('/api/vault/answers', {
+      question,
+      answer,
+      approved: approved === true,
+      taskId: CURRENT_TASK_ID,
+      taskToken: CURRENT_TASK_TOKEN,
+    });
   }
 
   async function queryServerVaultMatch(question) {
@@ -1271,11 +2531,37 @@
     return res?.data?.match?.answer || null;
   }
 
-  async function inferAnswerWithAI(question, options, profile, jobTitle, company, resumeText) {
-    const res = await proxyFetch('/api/vault/infer-answer', { question, options, profile, jobTitle, company, resumeText });
+  // Cache AI answers per question so the 10 req/min free tier is never spammed
+  // by the same field being questioned again on a later step.
+  const inferCache = new Map();
+  const INFER_CACHE_MS = 10 * 60 * 1000;
+
+  async function inferAnswerWithAI(question, options, profile, jobTitle, company, resumeText, pending = null) {
+    if (!question || isNoisePrompt(question)) return { answer: null, reason: 'unanswerable-question' };
+    const cacheKey = `${String(question).toLowerCase()}|${(options || []).join('|').toLowerCase()}`;
+    const cached = inferCache.get(cacheKey);
+    if (cached && (Date.now() - cached.at) < INFER_CACHE_MS) return cached.value;
+
+    const finish = (value) => {
+      inferCache.set(cacheKey, { value, at: Date.now() });
+      return value;
+    };
+
+    const res = await proxyFetch('/api/vault/infer-answer', {
+      question,
+      options,
+      profile,
+      jobTitle,
+      company,
+      resumeText,
+      jobSource: pending?.jobSource || profile?.jobSource || profile?.source || '',
+      url: pending?.url || location.href,
+      taskId: pending?.taskId || '',
+      taskToken: pending?.taskToken || '',
+    });
     const data = res?.data;
-    if (data?.canInfer !== false && data?.answer) return { answer: data.answer, source: data.source || 'ai-inference' };
-    return { answer: null, reason: data?.reason || data?.message || 'unanswered' };
+    if (data?.canInfer !== false && data?.answer) return finish({ answer: data.answer, source: data.source || 'ai-inference' });
+    return finish({ answer: null, reason: data?.reason || data?.message || 'unanswered' });
   }
 
   // Google Careers renders its actions as MDC buttons: a <div class="VfPpkd-LgbsSe">
@@ -1422,6 +2708,29 @@
     return out.map((o) => o.el);
   }
 
+  // After the first Apply click a portal may open its own menu (Wipro's green
+  // "Apply now ▾" → "Apply Now" item). A retry must click that item, not the
+  // toggle that just opened it, or the run toggles the menu forever.
+  function pickApplyCandidate(buttons, retry = false) {
+    if (!retry || buttons.length < 2) return buttons[0];
+    const inOpenMenu = (el) => Boolean(el.closest(
+      '[role="menu"], [role="listbox"], .dropdown-menu, [class*="dropdown"][class*="open"], [class*="menu"][class*="open"], [class*="Menu"]',
+    ));
+    const isToggle = (el) => el.hasAttribute?.('aria-haspopup') || el.hasAttribute?.('aria-expanded')
+      || /[▾⌄▼]$/.test(String(el.innerText || '').trim())
+      || /dropdown[-_]?toggle/i.test(el.className || '');
+    const ranked = buttons.map((el, index) => {
+      let score = 100 - index;
+      if (inOpenMenu(el)) score += 60;
+      if (!isToggle(el)) score += 25;
+      const href = el.getAttribute?.('href') || '';
+      if (href && !/^#|^javascript:/i.test(href)) score += 15;
+      return { el, score };
+    });
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked[0]?.el || buttons[0];
+  }
+
   // MDC renders a button as a <div> whose real navigation lives in a stretched
   // <a href> overlay inside it. Dispatching on the div never reaches that
   // anchor, so resolve to the anchor when one exists.
@@ -1501,11 +2810,30 @@
     return collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'password').length >= 1;
   }
 
+  // Portals that gate the application behind their own account (Wipro, Workday
+  // tenants, Taleo) say "Please sign into your application" / "Sign in or Sign
+  // up" before showing a single field. That is the candidate's step, not a
+  // failure: the run parks, tells them, and continues once they are signed in.
+  const SIGNIN_GATE_RE = new RegExp([
+    'please sign ?in to (your )?application',
+    'please sign ?into (your )?application',
+    'sign ?in to (your )?application',
+    'sign ?into (your )?application',
+    'sign ?in or sign ?up',
+    'sign ?in or create an account',
+    '(sign|log) ?in to (continue|complete|start) (your )?application',
+    'please (sign|log) ?in to (continue|apply)',
+    'sign ?in to apply',
+    'log ?in to apply',
+    'please (log ?in|login) to continue',
+    'create an account to apply',
+  ].join('|'), 'i');
+
   function detectLoginWall() {
     try {
       if (queryAllDeep('input[type="password"]').some(visible)) return true;
       const body = (document.body?.innerText || '').slice(0, 3500);
-      return /sign in to apply|log in to apply|please login to continue|create an account to apply/i.test(body);
+      return SIGNIN_GATE_RE.test(body);
     } catch { return false; }
   }
 
@@ -1526,6 +2854,8 @@
 
   function detectAuthGate() {
     try {
+      const gateText = String(document.body?.innerText || '').slice(0, 2500);
+      if (SIGNIN_GATE_RE.test(gateText)) return true;
       const host = location.hostname;
       if (host && AUTH_HOST_RE.test(host)) return true;
       if (AUTH_PATH_RE.test(location.pathname)) {
@@ -1614,6 +2944,12 @@
     const pwInput = queryAllDeep('input[type="password"]').find(visible);
     if (!pwInput) return false;
 
+    // For autonomous task runs, never type saved passwords, create accounts, or
+    // touch OTP/MFA. Sign-in belongs to the candidate in their own tab.
+    // Task runs never type saved passwords or create accounts; the caller parks
+    // the run on the sign-in screen instead.
+    if (taskMode()) return false;
+
     const emailInput = queryAllDeep('input[type="email"], [data-automation-id="email"], input[name*="email"], input[id*="email"], input[type="text"]').find((el) => {
       if (!visible(el)) return false;
       const idOrName = `${el.id} ${el.name} ${el.placeholder} ${labelFor(el)}`.toLowerCase();
@@ -1654,6 +2990,26 @@
     return false;
   }
 
+  // Signing in on a portal is the candidate's own step. The run must not end
+  // here: this tab keeps watching, so the application is filled and reviewed
+  // the moment they finish signing in — no Resume click in the dashboard.
+  let SIGNIN_WAIT_HOST = '';
+  async function waitForCandidateSignIn(company) {
+    const label = company || location.hostname;
+    showTaskOverlay({
+      title: 'Sign in to continue',
+      subtitle: label,
+      body: 'Please sign into your application in this tab ("Sign in or Sign up"). Hamzooh continues automatically the moment the application form appears — nothing to click here.',
+      tone: 'linear-gradient(135deg,#4f46e5,#6366f1)',
+    });
+    if (SIGNIN_WAIT_HOST !== location.hostname) {
+      SIGNIN_WAIT_HOST = location.hostname;
+      sendProgress('login_required', `🔐 Please sign into your application for ${label}. Hamzooh will continue automatically after you sign in.`);
+      await taskCheckpoint('login_required', 'Please sign into your application — automation continues automatically afterwards.', {});
+    }
+    await updatePending({ awaitingManualApply: true, loginHost: location.hostname, done: false });
+  }
+
   function buttonText(el) {
     return (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
   }
@@ -1691,6 +3047,13 @@
     if (/submit application|submit my application/i.test(aria)) return true;
     const text = buttonText(el);
     if (!text || /sign in|log in|contact sales|attach file|paste|next|continue/i.test(text)) return false;
+    // "Apply now" on a job description is the ENTRY control, not Submit.
+    // Clicking it as a submit control crashed the Wipro run after the approval.
+    if (/apply/i.test(text) && !/submit/i.test(text)) {
+      const inApplication = Boolean(el.closest?.('form, fieldset, [data-automation-id*="formField"], [data-automation-id*="question"]'))
+        || hasResumeDropzone();
+      if (!inApplication) return false;
+    }
     return /submit application|^submit$|^apply$|apply now|send application|submit my application|finish application/i.test(text);
   }
 
@@ -1750,6 +3113,8 @@
   // Submission is only reported once multiple success signals agree. If they
   // disagree, a cheap LLM call classifies the post-submit page.
   async function submitAndVerify(submitBtn) {
+    SUBMIT_IN_PROGRESS = true;
+    setTimeout(() => { SUBMIT_IN_PROGRESS = false; }, 30000);
     const beforeUrl = location.href;
     const beforeText = pageBodyText();
     const beforeSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
@@ -1757,6 +3122,11 @@
 
     const startedAt = Date.now();
     let signals = {};
+    // Declared outside the loop: they are read after it to classify an
+    // ambiguous post-submit page. Block-scoped consts inside the loop caused a
+    // "formGone is not defined" crash right after the approved Submit.
+    let formGone = false;
+    let emailSent = false;
     while (Date.now() - startedAt < 25000) {
       await sleep(800);
 
@@ -1765,8 +3135,8 @@
       const successUrl = location.href !== beforeUrl
         && /\/(thank|thanks|confirmation|success|submitted|complete|applied)|\/apply\/(status|confirm)/i.test(location.href);
       const currentSnapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-      const formGone = currentSnapshot !== beforeSnapshot && collectInputs().length === 0 && !findSubmitButton();
-      const emailSent = /confirmation email|we('| a)?ve emailed you|check your (inbox|email)/i.test(text);
+      formGone = currentSnapshot !== beforeSnapshot && collectInputs().length === 0 && !findSubmitButton();
+      emailSent = /confirmation email|we('| a)?ve emailed you|check your (inbox|email)/i.test(text);
       const negative = /something went wrong|submission failed|there was an error|please try again/i.test(text)
         || VALIDATION_PATTERNS.some((re) => re.test(text) && !beforeText.match(re));
 
@@ -1777,11 +3147,17 @@
       };
       if (negative && !successPattern && !successUrl) {
         runEvent('submit_signals', signals, 'Submission showed a negative signal');
+        LAST_VERIFICATION = { ok: false, reason: 'the form reported an error after Submit', url: location.href };
         return { ok: false, reason: 'the form reported an error after Submit' };
       }
       if (successPattern || successUrl) {
         runEvent('submit_signals', signals, `Submission verified: ${successPattern || 'confirmation URL'}`);
-        return { ok: true, reason: successPattern ? 'confirmation message shown' : `redirected to ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}` };
+        LAST_VERIFICATION = {
+          ok: true,
+          reason: successPattern ? 'confirmation message shown' : `redirected to ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}`,
+          url: location.href,
+        };
+        return { ok: true, reason: LAST_VERIFICATION.reason };
       }
       if (formGone || emailSent) break;
     }
@@ -1801,15 +3177,89 @@
         verdict = response?.data?.verdict || 'unclear';
       } catch { verdict = 'unclear'; }
       runEvent('submit_signals', { ...signals, verdict, classified: true }, `Submission classified as ${verdict}`);
-      return {
+      LAST_VERIFICATION = {
         ok: verdict === 'submitted',
         reason: verdict === 'submitted' ? 'LLM classified the post-submit page as success'
           : `submission could not be verified (${verdict})`,
+        url: location.href,
       };
+      return { ok: LAST_VERIFICATION.ok, reason: LAST_VERIFICATION.reason };
     }
 
     runEvent('submit_signals', signals, 'No confirmation within 25s');
-    return { ok: false, reason: 'no confirmation appeared within 25s' };
+    LAST_VERIFICATION = { ok: false, reason: 'no confirmation appeared within 25s', url: location.href };
+    return { ok: false, reason: LAST_VERIFICATION.reason };
+  }
+
+  // The candidate may finish the application by hand in the job tab (after the
+  // automation stopped, or because the site only allows a manual submit). A real
+  // confirmation is the candidate's own explicit action, so it is recorded as a
+  // verified manual submission — the automation itself never clicks Submit.
+  let SUBMIT_IN_PROGRESS = false;
+  let MANUAL_SUBMISSION_REPORTED = false;
+  const MANUAL_CONFIRM_URL_RE = /\/(thank|thanks|confirmation|success|submitted|applied)\b|\/apply\/(status|confirm)/i;
+
+  // Stronger than the submit-time signals: "thank you for your interest" in a
+  // job description is not a confirmation, and a visible form means the
+  // application is not done yet.
+  const CONFIRMATION_PATTERNS = [
+    /application (has been |was )?(submitted|received|complete|sent)/i,
+    /thank you for (applying|your application)/i,
+    /we('| a)?ve received your application/i,
+    /your application (is|has been) (in|under) review/i,
+    /successfully (applied|submitted)/i,
+    /application confirmation/i,
+  ];
+
+  function submissionConfirmationNow() {
+    if (window.top !== window) return null;
+    const text = pageBodyText();
+    const pattern = CONFIRMATION_PATTERNS.find((re) => re.test(text));
+    const urlHit = MANUAL_CONFIRM_URL_RE.test(location.href);
+    if (!pattern && !urlHit) return null;
+    const modalHit = queryAllDeep('.artdeco-modal, [role="dialog"]')
+      .some((modal) => visible(modal) && CONFIRMATION_PATTERNS.some((re) => re.test(modal.innerText || '')));
+    // A page that still shows the application form is not a confirmation.
+    // Header search boxes do not count — only real form fields.
+    const formInputs = collectInputs().filter((input) => input.closest(
+      'form, fieldset, [data-automation-id*="formField"], [data-automation-id*="question"]',
+    ));
+    if (!modalHit && (formInputs.length > 0 || findSubmitButton())) return null;
+    return {
+      confirmation: pattern
+        ? 'confirmation message shown in the job tab'
+        : `confirmation page ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}`,
+      url: location.href,
+    };
+  }
+
+  async function reportManualSubmission() {
+    if (MANUAL_SUBMISSION_REPORTED || SUBMIT_IN_PROGRESS || !extensionAlive()) return;
+    // Always check the task's own URL: the dashboard page also contains
+    // "applications submitted" copy and must never settle a job task.
+    const stored = await chrome.storage.local.get('pendingApply').catch(() => ({}));
+    const pendingApply = stored?.pendingApply || {};
+    const taskId = CURRENT_TASK_ID || pendingApply.taskId || '';
+    const taskToken = CURRENT_TASK_TOKEN || pendingApply.taskToken || '';
+    if (!taskId || !taskToken) return;
+    try {
+      if (pendingApply.url && new URL(pendingApply.url).hostname !== location.hostname) return;
+    } catch { return; }
+    const hit = submissionConfirmationNow();
+    if (!hit) return;
+    MANUAL_SUBMISSION_REPORTED = true;
+    runEvent('manual_submission', hit, 'Application submitted in the job tab — recording it');
+    await taskCall('/api/applications/extension/complete', {
+      status: 'submitted',
+      message: `✅ Your application was submitted in the browser tab (${hit.confirmation}).`,
+      verified: true,
+      manual: true,
+      confirmation: hit.confirmation,
+      confirmationUrl: hit.url,
+      url: hit.url,
+    }).catch(() => null);
+    sendProgress('submitted', '✅ Application submitted — recorded in Hamzooh.');
+    return markPendingDone();
   }
 
   // Phase 1c: wait until the DOM has stopped mutating before deciding a step
@@ -1882,16 +3332,25 @@
   // Phase 1g: always read the value back. If a framework rejected the
   // synthetic input event, fall back to trusted CDP text insertion.
   async function setVerified(input, value) {
-    if (!setNativeValue(input, value)) return false;
+    const target = normalizeValueForInput(input, value);
+    if (!setNativeValue(input, target)) return false;
     await sleep(80);
-    if (String(input.value) === String(value)) return true;
-    const recovered = await typeWithCdp(input, value);
+    if (String(input.value) === String(target)) return true;
+    const recovered = await typeWithCdp(input, target);
     if (recovered) {
-      runEvent('cdp_type', { tag: input.tagName, name: input.name || '', value: String(value).slice(0, 80) }, 'Recovered a rejected fill with CDP typing');
+      runEvent('cdp_type', { tag: input.tagName, name: input.name || '', value: String(target).slice(0, 80) }, 'Recovered a rejected fill with CDP typing');
     } else {
-      runEvent('fill_rejected', { tag: input.tagName, name: input.name || '', value: String(value).slice(0, 80) }, 'Field did not keep the typed value');
+      runEvent('fill_rejected', { tag: input.tagName, name: input.name || '', value: String(target).slice(0, 80) }, 'Field did not keep the typed value');
     }
     return recovered;
+  }
+
+  // Applies a value and reports whether the page actually kept it. A
+  // contentEditable has no .value to read back, so it keeps the direct set.
+  async function applyValue(input, value) {
+    if (!input) return false;
+    if (input.isContentEditable) return setNativeValue(input, value);
+    return setVerified(input, value);
   }
 
   function updatePending(patch) {
@@ -1910,27 +3369,50 @@
     return updatePending({ done: true });
   }
 
-  async function rememberAnswer(answers, question, answer) {
+  async function rememberAnswer(answers, question, answer, options = []) {
     answers[question.toLowerCase()] = answer;
     const normKey = normalizeQuestion(question);
     if (normKey) answers[normKey] = answer;
     try { if (extensionAlive()) await chrome.storage.local.set({ answers }); } catch {}
+    if (taskMode()) {
+      await taskCall('/api/applications/extension/question/answer', {
+        question,
+        answer,
+        remember: !isSensitiveQuestion(question) && !isEeoQuestion(question),
+        consent: false,
+        options,
+      }).catch(() => null);
+      return;
+    }
     await syncAnswerToServer(question, answer, true);
   }
 
   async function fillUnknownField(input, question, options, answers, profile, pending, index, total) {
+    // Joining-date questions are always relative to today, never a saved date.
+    if (isJoiningDateQuestion(question)) {
+      const nextDay = joiningDateValue(profile);
+      if (await fillDateControl(input, nextDay)) {
+        sendProgress('auto_filled_ai', `📅 ${question.slice(0, 40)} → ${nextDay}`);
+        return true;
+      }
+    }
     let savedAnswer = findBestAnswer(question, answers);
-    if (!savedAnswer) savedAnswer = await queryServerVaultMatch(question);
-    if (savedAnswer) {
-      setNativeValue(input, savedAnswer);
-      sendProgress('auto_filled_saved', `✅ Vault: "${question.slice(0, 45)}"`);
+    if (!savedAnswer && !taskMode()) savedAnswer = await queryServerVaultMatch(question);
+    if (!savedAnswer && taskMode()) {
+      const memory = await taskCall('/api/applications/extension/answer-lookup', { question, options });
+      savedAnswer = memory?.match?.answer || null;
+    }
+    if (savedAnswer && await applyValue(input, savedAnswer)) {
+      sendProgress('auto_filled_saved', `✅ Saved answer: "${question.slice(0, 45)}"`);
       return true;
     }
 
+    let aiResult = null;
+    // The backend is the guard: it only answers sensitive questions from the
+    // candidate's own stored answer or configured policy, never from the model.
     sendProgress('ai_inferring', `🧠 Analyzing: "${question.slice(0, 50)}"`);
-    const aiResult = await inferAnswerWithAI(question, options, profile, pending.jobTitle, pending.company, pending.resumeText);
-    if (aiResult?.answer) {
-      setNativeValue(input, aiResult.answer);
+    aiResult = await inferAnswerWithAI(question, options, profile, pending.jobTitle, pending.company, pending.resumeText, pending);
+    if (aiResult?.answer && await applyValue(input, aiResult.answer)) {
       sendProgress('auto_filled_ai', `✨ ${question.slice(0, 40)} → ${String(aiResult.answer).slice(0, 30)}`);
       return true;
     }
@@ -1938,20 +3420,108 @@
     const reason = isSensitiveQuestion(question)
       ? 'This is personal / legal information and is not in your profile.'
       : (aiResult?.reason || 'Could not infer this from your profile or resume.');
+
+    // Tell the backend/dashboard so the candidate can answer from Hamzooh.
+    if (taskMode() && !isNoisePrompt(question)) {
+      const reported = await taskCall('/api/applications/extension/question', {
+        question, options, required: true, reason, index, total,
+      });
+      if (reported?.answer && await applyValue(input, reported.answer)) {
+        sendProgress('auto_filled_saved', `✅ Saved answer: "${question.slice(0, 45)}"`);
+        return true;
+      }
+    }
+
     sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
     try { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
     await sleep(250);
     const origBorder = input.style.border;
     input.style.border = '2px solid #009688';
-    const result = await askOrSkip(question, index, total, options, reason, pending.autoSubmit === true);
+    let overlaySettled = false;
+    const overlayPromise = askOrSkip(question, index, total, options, reason, false).then((value) => {
+      overlaySettled = true;
+      return value;
+    });
+    const dashboardPromise = taskMode()
+      ? waitForDashboardAnswer(question, 180000).then((value) => {
+        if (!overlaySettled) removeHamzoohOverlays();
+        return value;
+      })
+      : Promise.resolve(null);
+    const result = await Promise.race([overlayPromise, dashboardPromise]);
+    overlaySettled = true;
     input.style.border = origBorder;
-    if (result?.answer) {
-      setNativeValue(input, result.answer);
-      if (result.remember) await rememberAnswer(answers, question, result.answer);
+    if (result?.answer && await applyValue(input, result.answer)) {
+      if (taskMode()) {
+        await taskCall('/api/applications/extension/question/answer', {
+          question,
+          answer: result.answer,
+          remember: isSensitiveQuestion(question) ? false : result.remember !== false,
+          consent: false,
+          options,
+        }).catch(() => null);
+        answers[question.toLowerCase()] = result.answer;
+      } else if (result.remember) {
+        await rememberAnswer(answers, question, result.answer);
+      }
+      sendProgress('user_answered', `✅ You answered: "${question.slice(0, 45)}"`);
       return true;
     }
     skipped.push({ field: question.slice(0, 80), reason });
     return false;
+  }
+
+  // The page tells us exactly what it rejected ("The field Degree is required
+  // and must have a value."). Use those messages to target and fix the fields
+  // the agent missed, then let the caller click Next again.
+  async function refillErrorFields(errorTexts, profile, answers, pending) {
+    const names = [];
+    for (const text of errorTexts || []) {
+      const match = String(text).match(/the field\s+(.+?)\s+is required/i)
+        || String(text).match(/^error\s*[-–:]\s*(.+)$/i);
+      if (match && match[1]) names.push(match[1].replace(/\s+/g, ' ').trim());
+    }
+    let fixed = 0;
+    let aiCalls = 0;
+    const seen = new Set();
+    for (const name of names) {
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const input = collectInputs().find((el) => {
+        const label = labelFor(el);
+        return label && label.toLowerCase().includes(key);
+      });
+      if (!input) continue;
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) continue;
+      const question = labelFor(input) || name;
+      const options = input.tagName === 'SELECT' ? optionList(input).map((o) => o.text.trim()).filter(Boolean) : [];
+      if (isJoiningDateQuestion(question)) {
+        const nextDay = joiningDateValue(profile);
+        if (await fillDateControl(input, nextDay)) {
+          fixed += 1;
+          runEvent('joining_date_set', { question: question.slice(0, 80), value: nextDay }, `Set start date to ${nextDay} (next day after applying)`);
+          continue;
+        }
+      }
+      let value = '';
+      const hint = FIELD_HINTS.find((item) => item.test.test(question));
+      if (hint) value = profileValue(profile, hint.key, pending.jobTitle || '', pending.company || '');
+      if (!value) value = chooseFromProfile(question, profile, pending.company || '');
+      if (!value) value = heuristicChoice(question, options, profile);
+      if (!value) value = semanticOptionText(question, options, profile);
+      if (!value && aiCalls < 4 && !(taskMode() && isSensitiveQuestion(question))) {
+        aiCalls += 1;
+        const ai = await inferAnswerWithAI(question, options, profile, pending.jobTitle, pending.company, pending.resumeText, pending);
+        value = ai?.answer || '';
+      }
+      if (value && await setVerified(input, value)) {
+        fixed += 1;
+        runEvent('error_field_fixed', { question: question.slice(0, 80), value: String(value).slice(0, 60) }, `Fixed rejected field "${question.slice(0, 60)}"`);
+      }
+    }
+    return fixed;
   }
 
   async function fillFormPhase(profile, answers, pending) {
@@ -1964,6 +3534,12 @@
     const captchaType = detectCaptchaOrMFA();
     if (captchaType) {
       sendProgress('captcha_detected', '⚠️ Verification detected — waiting for you.');
+      if (taskMode()) {
+        await taskCheckpoint('verification_required', 'CAPTCHA or verification code detected. Complete it in the job tab; Hamzooh will never solve or bypass it.', {
+          status: 'waiting_for_user_input',
+          data: { type: captchaType },
+        });
+      }
       if (!CURRENT_DRY_RUN) await showCaptchaPauseOverlay(captchaType);
     }
 
@@ -1972,12 +3548,38 @@
     for (const input of inputs) {
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (type === 'file' || type === 'password' || type === 'checkbox' || type === 'radio') continue;
-      if (input.tagName !== 'SELECT' && !isPlaceholderValue(input) && input.value) continue;
       const label = labelFor(input);
       const hint = FIELD_HINTS.find((item) => item.test.test(label));
       if (!hint) continue;
       const value = profileValue(profile, hint.key, jobTitle, company);
-      if (value && await setVerified(input, value)) filledCount += 1;
+      if (!value) continue;
+      // Leave an already-correct value untouched; fix an empty OR wrong one.
+      if (inputHasExpectedValue(input, value)) continue;
+      if (await setVerified(input, value)) filledCount += 1;
+    }
+
+    // Start-date / availability fields are always relative to the day AFTER the
+    // application runs, so they are computed here at fill time. A date split
+    // into month/day/year controls is handled as one field, not three.
+    const nextStartDate = joiningDateValue(profile);
+    const handledDateGroups = new Set();
+    for (const input of collectInputs()) {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) continue;
+      const group = dateGroupOf(input);
+      let label = labelFor(input);
+      if (group) {
+        if (handledDateGroups.has(group.container)) continue;
+        handledDateGroups.add(group.container);
+        // The question usually labels the group, not each mm/dd/yyyy box.
+        if (!isJoiningDateQuestion(label)) label = nearestLabelText(group.container) || label;
+      }
+      if (!isJoiningDateQuestion(label)) continue;
+      if (!group && inputHasExpectedValue(input, nextStartDate)) continue;
+      if (await fillDateControl(input, nextStartDate)) {
+        filledCount += 1;
+        runEvent('joining_date_set', { question: label.slice(0, 80), value: nextStartDate }, `Set start date to ${nextStartDate} (next day after applying)`);
+      }
     }
 
     let resumeOk = await selectLinkedInResume(pending);
@@ -1988,7 +3590,7 @@
     }
 
     filledCount += fillChoices(profile, answers, company);
-    await fillCustomDropdowns(new Map(), answers, profile, company);
+    await fillCustomDropdowns(new Map(), answers, profile, company, pending);
 
     const unknown = [];
     for (const input of collectInputs()) {
@@ -2004,7 +3606,7 @@
           continue;
         }
       }
-      const isRequired = input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(label);
+      const isRequired = isRequiredField(input, label);
       if (!isRequired) {
         // Optional fields never block the flow: record why instead of asking.
         if (label) skipped.push({ field: label.slice(0, 80), reason: 'Optional field — no value in your profile or saved answers.' });
@@ -2024,16 +3626,7 @@
 
     filledCount += await resolveRequiredGroups(answers, pending, profile);
 
-    const stillEmpty = collectInputs().filter((input) => {
-      const type = (input.getAttribute('type') || '').toLowerCase();
-      if (['hidden', 'password', 'submit', 'button'].includes(type)) return false;
-      if (!(input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(questionFor(input)))) return false;
-      if (type === 'radio' || type === 'checkbox') return false;
-      return type === 'file' ? !input.files?.length : isPlaceholderValue(input);
-    });
-    requiredGroupsOf().forEach((group) => {
-      if (!group.items.some((input) => input.checked)) stillEmpty.push(group.items[0]);
-    });
+    const stillEmpty = requiredEmptyFields();
 
     runEvent('form_filled', {
       url: location.href,
@@ -2045,13 +3638,23 @@
       missing: stillEmpty.map((input) => labelFor(input).slice(0, 90)).filter(Boolean),
     }, `Form filled: ${filledCount}/${fieldsDetected} fields, ${stillEmpty.length} required still empty`);
 
+    if (taskMode()) {
+      await taskCheckpoint('form_filled', `Filled ${filledCount} field(s) on this step${stillEmpty.length ? `; ${stillEmpty.length} required field(s) still need you` : ''}.`, {
+        status: 'filling_application',
+        filledCount,
+        emptyCount: stillEmpty.length,
+        resumeAttached: RESUME_ATTACHED,
+        data: { url: location.href, fieldsDetected, missing: stillEmpty.map((input) => labelFor(input).slice(0, 90)).filter(Boolean) },
+      });
+    }
+
     return { filledCount, stillEmpty, fieldsDetected };
   }
 
   // Required can be declared on the group wrapper (aria-required on
   // mat-radio-group / role=radiogroup) rather than on each option.
   function groupIsRequired(input, question) {
-    if (input.required || input.getAttribute('aria-required') === 'true' || /\*/.test(question)) return true;
+    if (isRequiredField(input, question)) return true;
     const wrapper = input.closest(
       'mat-radio-group, mat-checkbox-group, [role="radiogroup"], [role="group"], [data-automation-id*="formField"], [data-automation-id*="question"], fieldset, .field, .form-group',
     );
@@ -2082,17 +3685,36 @@
       const group = groups[g];
       if (group.items.some((input) => input.checked)) continue;
       const question = group.question || '';
+      const optionTexts = group.items.map((item) => (optionTextFor(item) || item.value || '').slice(0, 60));
       if (group.type === 'checkbox' && /privacy|acknowledge|agree|terms|consent/i.test(question)) {
         if (applyChoice(group.items[0], 'yes')) resolved += 1;
         continue;
       }
-      let wanted = findBestAnswer(question, answers) || chooseFromProfile(question, profile, pending.company || '');
-      const optionTexts = group.items.map((item) => (optionTextFor(item) || item.value || '').slice(0, 60));
-      if (!wanted) wanted = heuristicChoice(question, optionTexts, profile);
-      if (!wanted) wanted = await queryServerVaultMatch(question);
+      // Voluntary demographic / EEO questions are never asked. Pick a
+      // "decline to answer" option when offered, otherwise leave them blank.
+      if (isEeoQuestion(question) || isEeoQuestion(optionTexts.join(' '))) {
+        const decline = group.items.find((input) => /decline|prefer not|do not wish|not to (say|answer|disclose)|i don'?t wish/i.test(optionTextFor(input) || ''));
+        if (decline && (clickChoice(decline) || applyChoice(decline, 'decline'))) resolved += 1;
+        else skipped.push({ field: (question || 'Voluntary disclosure').slice(0, 80), reason: 'Voluntary/EEO question — left for you to answer if you wish.' });
+        continue;
+      }
+      let wanted = (taskMode() ? null : findBestAnswer(question, answers)) || chooseFromProfile(question, profile, pending.company || '');
+      if (!wanted && !(taskMode() && isSensitiveQuestion(question))) {
+        wanted = heuristicChoice(question, optionTexts, profile);
+      }
+      if (!wanted && !taskMode()) wanted = await queryServerVaultMatch(question);
       if (!wanted) {
-        const ai = await inferAnswerWithAI(question, optionTexts.filter(Boolean), profile, pending.jobTitle, pending.company, pending.resumeText);
+        // Backend safely answers sensitive questions from the stored answer or
+        // configured policy; it never guesses.
+        const ai = await inferAnswerWithAI(question, optionTexts.filter(Boolean), profile, pending.jobTitle, pending.company, pending.resumeText, pending);
         wanted = ai?.answer || '';
+      }
+      if (!wanted && taskMode() && !isNoisePrompt(question)) {
+        const reported = await taskCall('/api/applications/extension/question', {
+          question, options: optionTexts.filter(Boolean), required: true,
+          reason: 'This required choice is not in your profile or saved answers.',
+        });
+        wanted = reported?.answer || '';
       }
       if (!wanted) {
         sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
@@ -2100,11 +3722,10 @@
           optionTexts.filter(Boolean),
           isSensitiveQuestion(question)
             ? 'This is personal / legal information and is not in your profile.'
-            : 'This required choice is not in your profile.',
-          pending.autoSubmit === true);
+            : 'This required choice is not in your profile.');
         if (result?.answer) {
           wanted = result.answer;
-          if (result.remember) await rememberAnswer(answers, question, wanted);
+          if (result.remember) await rememberAnswer(answers, question, wanted, optionTexts.filter(Boolean));
         }
       }
       if (!wanted) {
@@ -2122,6 +3743,92 @@
     return resolved;
   }
 
+  /**
+   * Single approval gate for every task run, whether the form was finished by
+   * the deterministic filler or by the AI agent. The browser never submits
+   * until the dashboard explicitly approves, then verifies the site response.
+   */
+  async function taskReviewAndSubmit({
+    profile, answers, pending, depth = 0,
+    submitBtn = null, filledCount = 0, stillEmpty = [], advanceBlocked = false,
+  }) {
+    if (!taskMode()) return;
+    if (!submitBtn) {
+      await finish('⚠️ Stopped before approval — no submit control was found on this step.', {
+        status: 'needs_attention', reasonCode: 'NO_SUBMIT_BUTTON', filledCount, emptyCount: stillEmpty.length,
+      });
+      return;
+    }
+    const reviewAnswers = Object.entries(answers || {})
+      .filter(([key]) => key.length < 200 && String(key).includes(' '))
+      .slice(-20)
+      .map(([question, answer]) => ({ question: String(question).slice(0, 160), answer: String(answer).slice(0, 240), source: 'saved-answer' }));
+    const reviewPayload = {
+      company: pending.company || '',
+      title: pending.jobTitle || '',
+      url: location.href,
+      resumeName: pending.resumeName || '',
+      resumeAttached: RESUME_ATTACHED,
+      filledCount,
+      emptyCount: stillEmpty.length,
+      missing: stillEmpty.map((el) => (questionFor(el) || labelFor(el)).slice(0, 120)).filter(Boolean),
+      warnings: advanceBlocked ? ['The Next button did not advance on the previous step.'] : [],
+      answers: reviewAnswers,
+    };
+    await taskCheckpoint('review_ready', 'Application prepared. Waiting for your approval in the Hamzooh dashboard.', {
+      status: 'waiting_for_approval',
+      filledCount,
+      emptyCount: stillEmpty.length,
+      resumeAttached: RESUME_ATTACHED,
+      data: { company: pending.company || '', title: pending.jobTitle || '' },
+    });
+    const approval = await waitForDashboardApproval(reviewPayload);
+    if (approval.decision === 'resume') {
+      await sleep(700);
+      await fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
+      return;
+    }
+    if (approval.decision === 'cancel') {
+      await finish(approval.message || '✗ Application cancelled from the Hamzooh dashboard.', { status: 'cancelled', reasonCode: 'USER_CANCELLED' });
+      return;
+    }
+    if (approval.decision === 'already_submitted') {
+      await finish('✅ This application was already submitted and verified by Hamzooh.', {
+        status: 'submitted', verified: true, filledCount, emptyCount: 0,
+      });
+      return;
+    }
+    if (approval.decision === 'approve') {
+      // Server-side approval gate immediately before the click. If this call
+      // is rejected, no browser click happens.
+      const attempt = await taskCall('/api/applications/extension/submission-attempt', { url: location.href });
+      if (!attempt?.ok) {
+        await finish(attempt?.error || 'Submission was not approved by Hamzooh. Open the dashboard and approve it before submitting.', {
+          status: 'needs_attention', reasonCode: 'APPROVAL_REQUIRED', filledCount, emptyCount: stillEmpty.length,
+        });
+        return;
+      }
+      await taskCheckpoint('submitting', 'Approved. Submitting the application and verifying the site response.', {
+        status: 'submitting', filledCount, emptyCount: stillEmpty.length,
+      });
+      const verified = await submitAndVerify(submitBtn);
+      if (verified.ok) {
+        handleLinkedInDoneModal();
+        await finish(`✅ Application submitted — ${verified.reason}. ${filledCount} fields filled.`, {
+          status: 'submitted', verified: true, confirmation: verified.reason, filledCount, emptyCount: 0,
+        });
+      } else {
+        await finish(`⚠️ Submit was clicked but the site did not confirm success (${verified.reason}). Check the job tab — Hamzooh did not mark this as submitted.`, {
+          status: 'needs_attention', reasonCode: 'SUBMISSION_UNVERIFIED', verified: false, filledCount, emptyCount: 0,
+        });
+      }
+      return;
+    }
+    await finish(approval.message || 'Waiting for approval timed out. The application remains prepared in this tab.', {
+      status: 'needs_attention', reasonCode: 'APPROVAL_TIMEOUT', filledCount, emptyCount: stillEmpty.length,
+    });
+  }
+
   // Phase 2: hand the current page to the AI agent when deterministic logic
   // stalls. The agent only receives facts from the profile/vault and executes
   // through the same verified input helpers as the deterministic path.
@@ -2135,7 +3842,18 @@
     runEvent('agent_start', { reason, url: location.href }, `Agent fallback: ${reason}`);
     try {
       return await api.run({ profile, answers, pending, reason }, {
-        click: async (el) => { await realClick(el); return true; },
+        click: async (el) => {
+          await realClick(el);
+          // After an Apply / Autofill choice the form arrives asynchronously.
+          // Wait for it here so the next OBSERVE sees the real fields instead
+          // of prematurely declaring "done" on the loading page.
+          const text = buttonText(el);
+          if (/apply|autofill|continue|next|start application|begin/i.test(text)) {
+            await waitForDomStable();
+            await waitForForm();
+          }
+          return true;
+        },
         fill: async (el, value) => setVerified(el, value),
         select: async (el, option) => {
           const wanted = String(option || '').trim().toLowerCase();
@@ -2165,6 +3883,39 @@
         },
         wait: (ms) => sleep(ms),
         finish: async (message, details) => finish(message, details),
+        requestReview: async (details = {}) => {
+          runEvent('agent_review', { reason: details.reason || '', url: location.href }, 'Agent prepared the form — routing to the approval gate');
+          const inputs = collectInputs();
+          const filledCount = inputs.filter((el) => String(el.value || '').trim()).length;
+          const stillEmpty = inputs.filter((el) => el.required && !String(el.value || '').trim());
+          const submit = findSubmitButton();
+          // Do not present an approval gate while required fields are still
+          // empty. Let the deterministic filler / agent keep working.
+          if (stillEmpty.length > 0) {
+            runEvent('agent_review_deferred', { stillEmpty: stillEmpty.length }, `Agent said done but ${stillEmpty.length} required field(s) are empty — continuing.`);
+            return;
+          }
+          // Multi-step forms have a Next/Continue button before Submit.
+          const advance = findAdvanceButton();
+          if (!submit && advance) {
+            runEvent('agent_review_advance', {}, 'No submit button yet — advancing to the next form step.');
+            await realClick(advance);
+            await sleep(1500);
+            return;
+          }
+          if (taskMode() && submit) {
+            await taskReviewAndSubmit({
+              profile, answers, pending, depth: 0,
+              submitBtn: submit, filledCount, stillEmpty, advanceBlocked: false,
+            });
+          } else {
+            await finish('✅ The AI agent prepared this application. Review and approve submission in Hamzooh.', {
+              status: 'needs_attention',
+              reasonCode: submit ? 'REVIEW_READY' : 'NO_SUBMIT_BUTTON',
+              reviewReady: Boolean(submit), filledCount, emptyCount: stillEmpty.length,
+            });
+          }
+        },
         log: (step, data, message) => runEvent(step, data, message),
       });
     } catch (err) {
@@ -2182,6 +3933,23 @@
       window.__HAMZOOH_TRAIN_MODE__ = true;
       if (window.top === window) initTrainModeRecorder(location.hostname, pending || {});
       return;
+    }
+
+    if (taskMode()) {
+      const gate = await taskGate();
+      if (gate === 'cancel') {
+        await finish('✗ Application cancelled in the Hamzooh dashboard.', { status: 'cancelled', reasonCode: 'USER_CANCELLED' });
+        return;
+      }
+      if (gate === 'paused_timeout') {
+        await finish('⏸ Still paused in the Hamzooh dashboard. Your place is saved — resume from the dashboard to continue.', {
+          status: 'needs_attention', reasonCode: 'PAUSED_TIMEOUT', filledCount: 0, emptyCount: 0,
+        });
+        return;
+      }
+      await taskCheckpoint('page_ready', `Autopilot is working on ${location.hostname}${location.pathname}`.slice(0, 240), {
+        status: 'filling_application', data: { title: document.title }, url: location.href,
+      });
     }
 
     // Progress-based loop (Phase 1d): keep going only while the page state
@@ -2203,7 +3971,7 @@
     if (STEP_COUNT > 40 || NO_PROGRESS_STEPS >= 3) {
       if (NO_PROGRESS_STEPS === 2) {
         const agentResult = await runAgentFallback(profile, answers, pending, 'The deterministic filler made no progress.');
-        if (agentResult === 'terminal') return;
+        if (agentResult === 'terminal' || agentResult === 'review') return;
         if (agentResult === true) return fillPage(profile, answers, { ...pending }, depth + 1);
       }
       await finish(NO_PROGRESS_STEPS >= 3
@@ -2247,6 +4015,11 @@
       if (loggedIn) {
         return fillPage(profile, answers, pending, depth + 1);
       }
+      if (taskMode()) {
+        // The candidate signs in; the watcher resumes by itself afterwards.
+        await waitForCandidateSignIn(pending.company);
+        return;
+      }
       if (pending.awaitingManualApply && pending.loginHost === location.hostname) {
         await finish('🔐 Waiting for you to sign in. Use Resume after signing in.', {
           status: 'needs_attention', reasonCode: 'LOGIN_REQUIRED',
@@ -2286,8 +4059,11 @@
     const isLinkedIn = /linkedin\.com/i.test(location.hostname);
     let linkedInModal = isLinkedIn ? findLinkedInModal() : null;
 
-    // ─── GPT-6 Luna Vision Inspection in New Tab ───
-    if (!pending.done && depth < 12) {
+    // ─── GPT-6 Luna Vision Inspection — fallback only ───
+    // DOM/accessibility is the primary interface. Screenshots are reserved for
+    // pages where the DOM exposes neither a form nor an apply control.
+    const visionFallback = !pageHasForm() && collectInputs().length === 0 && earlyApplyButtons.length === 0;
+    if (visionFallback && !pending.done && depth < 12) {
       sendProgress('vision_inspect', '👁️ GPT-6 Luna inspecting screen in this tab…');
       const visionDecision = await requestVisionDecision(profile, answers, pending);
       if (visionDecision) {
@@ -2313,9 +4089,20 @@
         }
 
         if (visionDecision.action === 'done' || visionDecision.screenState === 'application_submitted') {
-          handleLinkedInDoneModal();
-          sendProgress('submitted', '🎉 Application submitted successfully via GPT-6 Luna Vision!');
-          return finish('✅ Application submitted successfully!', { status: 'submitted', filledCount: 1, emptyCount: 0 });
+          if (taskMode()) {
+            // Never let a visual model convert a task run into a submission.
+            // If the page really is a confirmation, the candidate confirms it.
+            if (visionDecision.screenState === 'application_submitted') {
+              await finish('⚠️ The page looks like a confirmation. Confirm it in the Hamzooh dashboard before it is recorded as submitted.', {
+                status: 'needs_attention', reasonCode: 'ALREADY_SUBMITTED',
+              });
+              return;
+            }
+          } else {
+            handleLinkedInDoneModal();
+            sendProgress('submitted', '🎉 Application submitted successfully via GPT-6 Luna Vision!');
+            return finish('✅ Application submitted successfully!', { status: 'submitted', filledCount: 1, emptyCount: 0 });
+          }
         }
       }
     }
@@ -2324,9 +4111,16 @@
     // RULE: If pending.applyClicked is true, NEVER click Easy Apply again!
     // Also, if the modal is already open, NEVER click Easy Apply!
     const earlyInputs = collectInputs().filter((input) => !['file', 'password'].includes(input.getAttribute('type') || ''));
-    let applyBtns = (!pending.applyClicked && !linkedInModal && earlyInputs.length < 2)
-      ? earlyApplyButtons
-      : [];
+    // Many portals need two clicks to reach the application: "Apply now" opens
+    // a menu, then "Apply Now" inside it navigates. Retry while the real
+    // application step is not on screen, capped at three clicks so one toggle
+    // can never loop. Counting inputs is unreliable (job pages have search
+    // boxes), so the real test is a resume dropzone or an application Submit.
+    const applyClicks = Number(pending.applyClicks || 0);
+    const inApplicationStep = hasResumeDropzone() || Boolean(findSubmitButton());
+    const applyAllowed = !linkedInModal && !inApplicationStep
+      && earlyApplyButtons.length > 0 && applyClicks < 3;
+    let applyBtns = applyAllowed ? earlyApplyButtons : [];
 
     // Polling wait for SPA buttons (e.g. LinkedIn Ember top card)
     if (isLinkedIn && !pending.applyClicked && !linkedInModal && applyBtns.length === 0) {
@@ -2344,11 +4138,12 @@
     }
 
     if (applyBtns.length) {
+      const chosenApply = pickApplyCandidate(applyBtns, Boolean(pending.applyClicked));
       sendProgress('apply_opening', isLinkedIn ? '💼 LinkedIn Easy Apply detected — clicking Easy Apply…' : '📄 Job page detected — clicking Apply…');
       const beforeUrl = location.href;
-      runEvent('apply_click', { label: buttonText(applyBtns[0]), href: location.href }, `Clicking apply: ${buttonText(applyBtns[0])}`.slice(0, 160));
-      await realClick(applyBtns[0]);
-      await updatePending({ url: location.href, applyClicked: true });
+      runEvent('apply_click', { label: buttonText(chosenApply), href: location.href, attempt: applyClicks + 1 }, `Clicking apply: ${buttonText(chosenApply)}`.slice(0, 160));
+      await realClick(chosenApply);
+      await updatePending({ url: location.href, applyClicked: true, applyClicks: applyClicks + 1 });
 
       if (isLinkedIn) {
         sendProgress('modal_loading', '⏳ Waiting for LinkedIn Easy Apply form to load…');
@@ -2368,6 +4163,15 @@
         if (location.href !== beforeUrl || pageHasForm()) { changed = true; break; }
       }
       if (!changed) {
+        const nextApplyClicks = applyClicks + 1;
+        const retryButtons = findDescriptionApplyButtons();
+        if (nextApplyClicks < 3 && retryButtons.length && !detectCaptchaOrMFA() && !detectLoginWall()) {
+          sendProgress('apply_opening', '📄 Another Apply step appeared — clicking it…');
+          await sleep(900);
+          return fillPage(profile, answers, {
+            ...pending, url: location.href, applyClicked: true, applyClicks: nextApplyClicks,
+          }, depth + 1);
+        }
         const captchaNow = detectCaptchaOrMFA();
         const blockedReason = captchaNow ? 'CAPTCHA'
           : detectLoginWall() ? 'LOGIN_REQUIRED' : 'APPLY_BUTTON_NOT_FOUND';
@@ -2402,6 +4206,10 @@
     }
 
     if (!pageHasForm() && detectLoginWall()) {
+      if (taskMode()) {
+        await waitForCandidateSignIn(pending.company);
+        return;
+      }
       await updatePending({ awaitingManualApply: true });
       sendProgress('login_required', '🔐 Please sign in. Hamzooh will resume when the form appears.');
       await finish('🔐 Sign-in is required before the application form is available.', {
@@ -2411,7 +4219,7 @@
     }
 
     const snapshot = collectInputs().map((i) => `${i.name}:${i.id}:${i.type}`).join('|');
-    const { filledCount, stillEmpty, fieldsDetected } = await fillFormPhase(profile, answers, pending);
+    let { filledCount, stillEmpty, fieldsDetected } = await fillFormPhase(profile, answers, pending);
 
     // No fillable HTML fields but an actionable control is visible: this is a
     // widget/modal-only step (LinkedIn resume picker, custom ATS step, etc.).
@@ -2422,12 +4230,56 @@
       if (hasControl) {
         sendProgress('agent_start', '🤖 No fillable fields found — asking the AI agent to drive this step…');
         const agentResult = await runAgentFallback(profile, answers, pending, 'No fillable HTML fields; the page is driven by widgets or a resume picker.');
-        if (agentResult === 'terminal') return;
+        if (agentResult === 'terminal' || agentResult === 'review') return;
         if (agentResult === true) {
           await sleep(600);
           return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
         }
       }
+    }
+
+    // A required field that is still empty means the site WILL reject this step
+    // ("The field … is required and must have a value"). Report it and wait for
+    // the candidate instead of clicking Continue into a validation error.
+    if (taskMode() && stillEmpty.length > 0) {
+      const unanswered = [];
+      for (const el of stillEmpty.slice(0, 8)) {
+        const question = questionFor(el) || labelFor(el);
+        if (!question || isNoisePrompt(question)) continue;
+        const options = el.tagName === 'SELECT' ? optionList(el).map((option) => option.text.trim()).filter(Boolean) : [];
+        const reply = await taskCall('/api/applications/extension/question', {
+          question, options, required: true,
+          reason: 'This required field is empty and no saved answer applies.',
+        });
+        const answer = reply?.answer || '';
+        if (!answer) { unanswered.push({ el, question }); continue; }
+        // Apply the answer to whatever the field is — including Workday's custom
+        // listbox, which used to be skipped and re-asked forever.
+        if (!(await answerRequiredField(el, question, answer, profile))) unanswered.push({ el, question });
+      }
+      if (!unanswered.length) {
+        // Every answer was applied: re-read the step before advancing.
+        return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
+      }
+      // Never stop the automation for a missing answer: ask, then keep the tab
+      // alive. When the candidate answers in Hamzooh or fills the field by hand,
+      // the step continues on its own.
+      const outcome = await waitForRequiredFields(unanswered);
+      if (outcome === 'cancel') {
+        await finish('✗ Application cancelled in the Hamzooh dashboard.', { status: 'cancelled', reasonCode: 'USER_CANCELLED' });
+        return;
+      }
+      if (outcome === 'timeout') {
+        await finish(`⏸ ${unanswered.length} required field(s) still need your answer. Answer in Hamzooh or fill them in the job tab, then click Resume.`, {
+          status: 'needs_attention',
+          reasonCode: 'WAITING_FOR_USER_INPUT',
+          filledCount,
+          emptyCount: unanswered.length,
+          question: unanswered[0].question,
+        });
+        return;
+      }
+      return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
     }
 
     const advance = findAdvanceButton();
@@ -2440,11 +4292,15 @@
       sendProgress('page_advancing', '➡️ Continuing to the next section…');
       const beforeUrl = location.href;
       let progressed = false;
-      for (let attempt = 0; attempt < 3 && !progressed; attempt += 1) {
+      for (let attempt = 0; attempt < 4 && !progressed; attempt += 1) {
         const errors = detectValidationErrors();
         if (errors.length) {
           runEvent('validation_errors', { attempt, errors }, `Validation errors: ${errors.slice(0, 3).join(' | ')}`);
           await fillFormPhase(profile, answers, pending);
+          // Re-target the exact fields the page rejected.
+          const fixed = await refillErrorFields(errors, profile, answers, pending);
+          if (fixed) runEvent('validation_refill', { attempt, fixed }, `Auto-fixed ${fixed} rejected field(s) before retrying`);
+          await sleep(300);
         }
         NEXT_CLICKS += 1;
         runEvent('next_click', { count: NEXT_CLICKS, attempt, label: buttonText(advance), url: location.href, errors }, `Next click #${NEXT_CLICKS}: ${buttonText(advance)}`);
@@ -2483,14 +4339,23 @@
     // AI agent one chance to find a control before declaring failure.
     if (!collectInputs().length && !submitBtn && !advance && !pageHasForm() && !detectLoginWall()) {
       const agentResult = await runAgentFallback(profile, answers, pending, 'No recognisable form or apply control on this page.');
-      if (agentResult === 'terminal') return;
+      if (agentResult === 'terminal' || agentResult === 'review') return;
       if (agentResult === true) return fillPage(profile, answers, { ...pending }, depth + 1);
     }
 
     sendProgress('confirming', '✅ Form prepared. Waiting for your review…');
-    const canSubmitCleanly = Boolean(submitBtn) && stillEmpty.length === 0;
-    const autoSubmit = pending.autoSubmit === true;
-    const missingLabels = stillEmpty.map((el) => labelFor(el).slice(0, 60)).filter(Boolean);
+    // One more self-correction pass against whatever the page still rejects
+    // before we present the review or ask anything.
+    try {
+      const preErrors = detectValidationErrors();
+      if (preErrors.length) {
+        const fixed = await refillErrorFields(preErrors, profile, answers, pending);
+        if (fixed) runEvent('validation_refill', { phase: 'review', fixed }, `Auto-fixed ${fixed} rejected field(s) before review`);
+        stillEmpty = requiredEmptyFields();
+      }
+    } catch {}
+
+    const missingLabels = stillEmpty.map((el) => (questionFor(el) || labelFor(el)).slice(0, 120)).filter(Boolean);
 
     runEvent('review_check', {
       url: location.href,
@@ -2525,19 +4390,30 @@
       return;
     }
 
-    // Auto-apply never blocks on the review overlay: an unattended run must end
-    // with a clear report instead of stalling behind a dialog nobody clicks.
-    if (autoSubmit && !canSubmitCleanly) {
-      const details = advanceBlocked
-        ? 'the Next button did not advance the form — the page likely rejected a required answer'
-        : `required field(s) could not be answered automatically${missingLabels.length ? `: ${missingLabels.join(', ')}` : ''}`;
-      await finish(`⚠️ Stopped before submitting — ${details}.`, {
-        status: 'needs_attention', filledCount, emptyCount: stillEmpty.length,
+    // Task runs ALWAYS go through the dashboard approval gate. The browser
+    // never submits because a checkbox on the page says so.
+    if (taskMode()) {
+      if (!submitBtn) {
+        await finish(advanceBlocked
+          ? '⚠️ Stopped before approval — the Next button did not advance, so the final review step was not reached.'
+          : '⚠️ Stopped before approval — no submit control was found on this step.', {
+          status: 'needs_attention',
+          reasonCode: advanceBlocked ? 'VALIDATION_BLOCKED' : 'NO_SUBMIT_BUTTON',
+          filledCount, emptyCount: stillEmpty.length,
+        });
+        return;
+      }
+
+      await taskReviewAndSubmit({
+        profile, answers, pending, depth,
+        submitBtn, filledCount, stillEmpty, advanceBlocked,
       });
       return;
     }
 
-    const decision = autoSubmit && canSubmitCleanly ? 'submit' : await showSubmitConfirmation(filledCount, skipped.concat(
+    // There is no unattended submit path. Every run shows the review card and
+    // submits only after an explicit click; task runs use the dashboard gate.
+    const decision = await showSubmitConfirmation(filledCount, skipped.concat(
       stillEmpty.map((el) => ({ field: labelFor(el).slice(0, 80), reason: 'Still empty / required.' }))
     ));
     if (decision === 'submit' && submitBtn && stillEmpty.length === 0) {
@@ -2596,6 +4472,9 @@
     };
     runEvent('complete', payload, message);
     sendProgress('complete', message, { ...payload, skipped: uniqueSkipped() });
+    if (taskMode()) {
+      finishTaskRun(message, payload).catch(() => null);
+    }
     try { if (extensionAlive()) chrome.runtime.sendMessage({ type: 'HAMZOOH_CDP_INPUT', action: 'detach' }); } catch {}
     return markPendingDone();
   }
@@ -2619,12 +4498,41 @@
     return false;
   }
 
+  // Workday (and similar ATS) land on an "Autofill with Resume / Apply Manually"
+  // chooser right after sign-in. It has buttons but no <form>, so it must count
+  // as an actionable step or the run parks there forever.
+  function hasApplyChoiceControl() {
+    try {
+      return queryAllDeep('button, [role="button"], a[href]').some((el) => {
+        if (!visible(el) || el.disabled) return false;
+        const autoId = el.getAttribute('data-automation-id') || '';
+        const text = buttonText(el);
+        return /autofillWithResume/i.test(autoId)
+          || /autofill with resume|apply with resume|apply manually|use my last application|start application|continue application|resume application/i.test(text);
+      });
+    } catch { return false; }
+  }
+
   function frameLooksActionable() {
-    return pageHasForm() || findDescriptionApplyButtons().length > 0 || allFileInputs().length > 0;
+    return pageHasForm()
+      || findDescriptionApplyButtons().length > 0
+      || allFileInputs().length > 0
+      || hasApplyChoiceControl();
   }
 
   async function runPending(stored) {
-    const pending = stored?.pendingApply;
+    let pending = stored?.pendingApply;
+    CURRENT_TASK_ID = pending?.taskId || '';
+    CURRENT_TASK_TOKEN = pending?.taskToken || '';
+    TASK_FINAL_REPORTED = false;
+    LAST_VERIFICATION = null;
+    if (taskMode()) {
+      // Approval by the candidate is mandatory for task runs.
+      pending = { ...pending, requireApproval: true };
+      await taskCall('/api/applications/extension/heartbeat', {
+        status: 'filling_application', url: location.href, extensionVersion: chrome.runtime.getManifest?.().version || '',
+      }).catch(() => null);
+    }
     const { hamzoohTrainMode } = await chrome.storage.local.get('hamzoohTrainMode').catch(() => ({}));
     const isTrain = Boolean(
       pending?.trainMode === true ||
@@ -2652,8 +4560,9 @@
     LAST_SIGNATURE = '';
     TERMINAL_REPORTED = false;
     const isTop = window.top === window;
+    const runAnswers = taskMode() ? {} : (stored.answers || {});
     let actionable = frameLooksActionable();
-    const loginWall = detectLoginWall();
+    const loginWall = detectLoginWall() || detectAuthGate();
     // Tracking/preload iframes contain navigation links (and sometimes
     // "apply"-ish aria-labels) but no form. They must never enter the fill
     // pipeline: that is what stalled the Carousell LinkedIn run.
@@ -2687,9 +4596,8 @@
 
     filling = true;
     window.__HAMZOOH_FILLER_BUSY__ = true;
-    autoPromptMissed = false;
     try {
-      await fillPage(stored.profile || {}, stored.answers || {}, pending);
+      await fillPage(stored.profile || {}, runAnswers, pending);
     } catch (err) {
       hamzoohLog('error', 'fill pipeline crashed', err.message);
       runEvent('error', { error: err.message, stack: String(err.stack || '').slice(0, 2000) }, 'Fill pipeline crashed');
@@ -2717,6 +4625,9 @@
 
   bootApply();
   if (extensionAlive()) {
+    // Keep watching after the filler stops: a manual submit in this tab must
+    // still be detected and recorded against the task.
+    setInterval(() => { reportManualSubmission(); }, 6000);
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'HAMZOOH_INIT_TRAIN') {
         window.__HAMZOOH_TRAIN_MODE__ = true;
@@ -2729,6 +4640,28 @@
       }
       if (message?.type === 'HAMZOOH_FORCE_TERMINAL') {
         try { window.__HAMZOOH_FORCE_TERMINAL__(message.reason || ''); } catch {}
+      }
+      if (message?.type === 'HAMZOOH_TASK_CONTROL') {
+        const action = String(message.action || '');
+        if (action === 'cancel') {
+          removeHamzoohOverlays();
+          finish('✗ Application cancelled from the Hamzooh dashboard.', { status: 'cancelled', reasonCode: 'USER_CANCELLED' });
+          return;
+        }
+        if (action === 'pause') {
+          removeHamzoohOverlays();
+          showTaskOverlay({
+            title: 'Paused',
+            subtitle: 'Hamzooh Apply',
+            body: 'Paused from the Hamzooh dashboard. Resume there and this tab will continue automatically.',
+            tone: 'linear-gradient(135deg,#d97706,#f59e0b)',
+          });
+          return;
+        }
+        if (action === 'resume') {
+          hideTaskOverlay();
+          bootApply();
+        }
       }
     });
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -2752,11 +4685,21 @@
       if (window.__HAMZOOH_TRAIN_MODE__ || filling || !extensionAlive()) return;
       chrome.storage.local.get(['pendingApply'], (stored) => {
         const p = stored?.pendingApply;
-        if (!p?.url || p.done || !p.awaitingManualApply || p.trainMode) return;
-        // Stay parked while a sign-in screen is showing; resume after it closes.
-        if (detectAuthGate()) return;
-        if (pageHasForm()) {
-          sendProgress('form_found', '📄 Form detected — filling now…');
+        if (!p?.url || !p?.taskId || !p?.taskToken || p.done || p.trainMode) return;
+        // Stay parked while a sign-in screen is showing; resume as soon as the
+        // real application step is back. Workday's step right after sign-in is
+        // usually the "Autofill with Resume" chooser (buttons, no <form>), so
+        // accept any actionable step, not only a form.
+        if (detectAuthGate() || detectLoginWall()) return;
+        if (!(pageHasForm() || frameLooksActionable())) return;
+        // Throttle so a mis-detected page cannot loop the filler (and its AI).
+        const now = Date.now();
+        if (now - Number(window.__HAMZOOH_AUTO_RESUME_AT__ || 0) < 10000) return;
+        window.__HAMZOOH_AUTO_RESUME_AT__ = now;
+        {
+          hideTaskOverlay();
+          SIGNIN_WAIT_HOST = '';
+          sendProgress('form_found', '📄 Signed in — continuing the application automatically…');
           updatePending({ awaitingManualApply: false, loginHost: '' }).then(() => bootApply());
         }
       });
@@ -2765,7 +4708,7 @@
 
   window.__HAMZOOH_TEST_RUN__ = (profile, answers, pending) => fillPage(profile, answers || {}, pending || { url: location.href });
   window.__HAMZOOH_DEBUG__ = {
-    questionFor, labelFor, chooseFromProfile, heuristicChoice, applyChoice,
+    questionFor, labelFor, sanitizePromptText, isNoisePrompt, fieldLabelFromAutomationId, submissionConfirmationNow, chooseFromProfile, heuristicChoice, applyChoice,
     profileValue, collectInputs, SUCCESS_PATTERNS, VALIDATION_PATTERNS,
     detectValidationErrors, findDescriptionApplyButtons, scoreApplyCandidate,
   };

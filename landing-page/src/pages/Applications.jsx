@@ -6,11 +6,11 @@ import {
 } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
 import {
-  buildTrackerEntries, fetchTrackerSources, matchesTrackerFilter,
+  buildTrackerEntries, fetchTrackerSources, applyEmailStatusUpdates, matchesTrackerFilter,
   TRACKER_FILTERS, TRACKER_STATUS_META, STAGE_ORDER, STAGE_LABELS,
 } from '../lib/jobTracker';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore } from '../lib/api';
+import { profileStore, reconcileSubmittedApplications } from '../lib/api';
 import { DEMO_JOBS } from '../lib/mockData';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
@@ -82,7 +82,13 @@ export default function Applications() {
 
   const loadSources = useCallback(async () => {
     setSourcesLoading(true);
+    // Pull in applications the backend verified as submitted (including manual
+    // submits in the job tab) before building the tracker.
+    await reconcileSubmittedApplications().catch(() => false);
     const sources = await fetchTrackerSources();
+    // Application-status emails from the company/ATS update the stored
+    // application (applied, shortlisted, interview, offer, rejected).
+    applyEmailStatusUpdates(sources.received);
     sourcesRef.current = sources;
     setEntries(buildTrackerEntries(sources));
     setSourceErrors(sources.errors || []);

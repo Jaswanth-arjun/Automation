@@ -150,6 +150,104 @@ export async function fetchTrackerSources() {
   return { sent, linkedin, received, errors };
 }
 
+const EMAIL_STATUS_RANK = { Applied: 1, Shortlisted: 2, Assessment: 2, Interview: 3, Offer: 4, Rejected: 5 };
+const squash = (value) => norm(value).replace(/[^a-z0-9]/g, '');
+
+function mailText(mail) {
+  return norm(`${mail.company || ''} ${mail.subject || ''} ${mail.snippet || ''} ${mail.senderName || ''} ${mail.senderEmail || ''}`);
+}
+
+// ATS mail often comes from a no-reply/workday address, so the company can be
+// missing or generic; fall back to the company name appearing in the mail.
+function mailIsFromCompany(mail, company) {
+  if (!company) return false;
+  if (mail.company && companyMatches(mail.company, company)) return true;
+  const wanted = squash(company);
+  if (wanted.length < 4) return false;
+  return squash(mailText(mail)).includes(wanted);
+}
+
+/**
+ * Apply application-status emails (application received, shortlisted, interview,
+ * assessment, offer, rejection) to the stored application records.
+ * Statuses only move forward, and only for the matching company + role.
+ * Returns how many application records changed.
+ */
+export function applyEmailStatusUpdates(received = []) {
+  const mails = (Array.isArray(received) ? received : [])
+    .filter((mail) => mail?.isJobRelated && SIGNAL_STATUS[mail.signal])
+    .sort((a, b) => time(b.receivedAt || b.sentAt) - time(a.receivedAt || a.sentAt));
+  if (!mails.length) return 0;
+
+  const apps = applicationStore.getAll();
+  const resumes = resumeStore.getAll();
+  const updates = new Map();
+  let created = 0;
+
+  for (const mail of mails) {
+    const status = SIGNAL_STATUS[mail.signal];
+    if (!status) continue;
+    const haystack = `${mail.subject || ''} ${mail.snippet || ''}`;
+    const at = mail.receivedAt || mail.sentAt || '';
+
+    const companyApps = apps.filter((app) => mailIsFromCompany(mail, app.company));
+    let target = companyApps.find((app) => app.title && roleMatches(haystack, app.title)) || null;
+    if (!target && companyApps.length === 1) target = companyApps[0];
+
+    // No application record yet: an "application received" mail for a role the
+    // candidate tailored a resume for is a real application — record it.
+    if (!target) {
+      if (mail.signal !== 'APPLIED') continue;
+      const seeds = resumes.filter((resume) => resume.company && mailIsFromCompany(mail, resume.company)
+        && (!resume.title || roleMatches(haystack, resume.title)));
+      const seed = seeds.length === 1 ? seeds[0] : seeds.find((resume) => roleMatches(haystack, resume.title));
+      if (!seed) continue;
+      applicationStore.add({
+        title: seed.title || '',
+        company: seed.company || '',
+        companyMark: seed.companyMark,
+        jobId: seed.jobId || undefined,
+        jobUrl: seed.jobUrl || '',
+        status,
+        stage: 'apply',
+        appliedViaEmail: true,
+        appliedAt: at || new Date().toISOString(),
+        statusSource: 'email',
+        emailSignal: mail.signal,
+        emailSubject: mail.subject || '',
+        ...(seed.matchScore ? { matchScore: seed.matchScore } : {}),
+      });
+      created += 1;
+      continue;
+    }
+
+    const currentStatus = target.status || 'Applied';
+    const currentRank = EMAIL_STATUS_RANK[currentStatus] || 0;
+    const nextRank = EMAIL_STATUS_RANK[status] || 0;
+    if (nextRank < currentRank) continue;
+    // Compare with the last email-derived update, not the application date: a
+    // status mail can arrive later than the record was created but still be
+    // the newest status evidence.
+    const lastKnown = time(target.emailReceivedAt || target.lastActivity);
+    if (at && lastKnown && time(at) < lastKnown && status !== 'Rejected') continue;
+    if (status === currentStatus && at && lastKnown && time(at) <= lastKnown) continue;
+
+    updates.set(target.id, {
+      status,
+      statusSource: 'email',
+      emailSignal: mail.signal,
+      emailSubject: mail.subject || '',
+      emailReceivedAt: at,
+      lastActivity: at || new Date().toISOString(),
+    });
+  }
+
+  for (const [id, patch] of updates) {
+    applicationStore.update(id, patch);
+  }
+  return created + updates.size;
+}
+
 function ensureEntry(map, seed) {
   const company = String(seed.company || '').trim();
   const title = String(seed.title || '').trim();
