@@ -1,0 +1,10 @@
+<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<body style="margin:0;font:16px system-ui"><div style="height:1800px;padding:20px"><button id=b onclick="window.clicked=(window.clicked||0)+1" style="position:fixed;left:20px;bottom:20px;z-index:1">page button under the hamster lane</button><p>site content</p></div>
+<script type=module>
+import { HamsterEngine } from '../src/HamsterEngine.js';
+import { createManifest } from '../src/sprites.manifest.js';
+const e=new HamsterEngine(document.body,{manifest:createManifest('/public/hamster/'),debug:true});
+window.__e=e; const log=window.__log=[];
+(function poll(){const s=e.getState();log.push([performance.now()|0,s.anim,s.frame,Math.round(s.x*10)/10,s.facing,s.hold]);requestAnimationFrame(poll)})();
+e.start().then(()=>window.__ready=true);
+</script>

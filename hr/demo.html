@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Hamster RAG demo</title></head><body><style>
+:root{--bg:#fff7ee;--fg:#3b2a1e;--card:#fff;--bd:#f0dcc6;box-sizing:border-box}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#1c1713;--fg:#f3e6d8;--card:#27201a;--bd:#46372b}}
+:root[data-theme="dark"]{--bg:#1c1713;--fg:#f3e6d8;--card:#27201a;--bd:#46372b}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:620px;margin:0 auto;padding:20px 18px 200px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px 16px;margin:12px 0}
+label{display:flex;gap:8px;align-items:center;cursor:pointer}
+</style>
+<main>
+<h1>Hamster RAG Assistant</h1>
+<p>Click the hamster in the bottom-right corner. It picks up its book and the chat opens to its left. Type, send a question, and watch it search.</p>
+<div class="card"><strong>Demo backend (mock)</strong>
+<p style="margin:.4em 0">This page uses a fake <code>onAsk</code> that waits about 2.6 seconds. In your site you pass your real RAG call instead.</p>
+<label><input type="checkbox" id="fail"> Simulate a backend error</label></div>
+<div class="card"><button id="btn">A normal page button (never covered)</button></div>
+<div class="card" style="height:80vh">Scroll area: the hamster stays fixed at the bottom-right.</div>
+</main>
+
+<script type=module>
+import { HamsterRAGAssistant } from './src/HamsterRAGAssistant.js';
+const assets={"idle_body": "./rig/idle_body.png", "idle_head": "./rig/idle_head.png", "idle_earL": "./rig/idle_earL.png", "idle_earR": "./rig/idle_earR.png", "idle_eyeL": "./rig/idle_eyeL.png", "idle_eyeR": "./rig/idle_eyeR.png", "idle_armL": "./rig/idle_armL.png", "idle_armR": "./rig/idle_armR.png", "hold_base": "./rig/hold_base.png", "hold_eyeL": "./rig/hold_eyeL.png", "hold_eyeR": "./rig/hold_eyeR.png", "book_closed": "./rig/book_closed.png", "happy": "./poses/happy.png", "confused": "./poses/confused.png"};
+
+const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
+async function mockAsk(q,{onStage}){
+  onStage('retrieving'); await sleep(1500);
+  onStage('generating'); await sleep(1500);
+  if(document.getElementById('fail').checked) throw new Error('The knowledge service returned 500.');
+  return 'Here is a mock answer to: "'+q+'". Connect your real RAG function as onAsk to get real answers.';
+}
+
+window.h=new HamsterRAGAssistant({assets,onAsk:mockAsk}); h.mount();
+</script></body></html>

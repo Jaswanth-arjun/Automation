@@ -135,6 +135,22 @@
   // candidate could not make sense of.
   const PLACEHOLDER_PROMPT_RE = /^(select( one)?( required)?|choose( an option| a value| one)?( required)?|required|optional|search|type to search|-+|\*)$/i;
 
+  // A dropdown that is still showing its own placeholder ("No Selection",
+  // "None Selected", "-- Select --") is empty. Reading that text as a committed
+  // value made the run skip the field entirely and click Next with every
+  // required question unanswered.
+  const EMPTY_CHOICE_RE = /^(?:no selections?|none selected|nothing selected|not selected|no value|no answer|select one|select(?:\.\.\.|…)?|please select|choose(?: an option| a value| one)?|search|type to search|none|-+|—+|\*|required|optional)$/i;
+
+  function isEmptyChoiceText(text) {
+    const value = String(text || '')
+      .replace(/\s+/g, ' ')
+      .replace(/^[-–—:•\s]+|[-–—:•\s]+$/g, '')
+      .replace(/\s*\(required\)$/i, '')
+      .trim();
+    if (!value) return true;
+    return EMPTY_CHOICE_RE.test(value);
+  }
+
   // Workday/Angular render the selected pills as text inside the widget, so the
   // scraped "question" becomes "Data Analysis, press delete to clear value. …
   // pill-REMOTE_SKILL-1-31310". Strip that chrome and drop repeated fragments so
@@ -172,6 +188,8 @@
     // press delete to clear value" leaves a value, not a question.
     if (NOISE_PROMPT_RE.test(raw)) return true;
     if (PLACEHOLDER_PROMPT_RE.test(value)) return true;
+    // A dropdown's own empty-state label is not a question and not an option.
+    if (isEmptyChoiceText(raw)) return true;
     if (!/[a-z]{3}/i.test(value)) return true;
     return false;
   }
@@ -278,10 +296,10 @@
   function widgetHasValue(widget) {
     const input = widgetControl(widget);
     const value = String(input?.value || widget?.getAttribute?.('aria-valuetext') || '').trim();
-    if (value && !/^search$|^select(\.\.\.)?$|^choose( an option)?$/i.test(value)) return true;
+    if (value && !isEmptyChoiceText(value)) return true;
     const chip = widget?.querySelector?.('[class*="pill"], [class*="chip"], [class*="tag"], [class*="selected"], [class*="value"]');
     const chipText = String(chip?.innerText || '').trim();
-    return Boolean(chipText && !/^search$|^select/i.test(chipText));
+    return Boolean(chipText && !isEmptyChoiceText(chipText) && !/^select/i.test(chipText));
   }
 
   // Workday marks required fields with a red asterisk span
@@ -321,7 +339,7 @@
     const text = String(control?.innerText || control?.textContent || '').replace(/\s+/g, ' ').trim();
     if (!text) return false;
     if (!control.matches?.('button, [role="combobox"], [role="button"], [aria-haspopup="listbox"]')) return false;
-    return !/^(select one|select(\.\.\.)?|choose( an option)?|search|-+|please select)$/i.test(text);
+    return !isEmptyChoiceText(text);
   }
 
   function dropdownWidgets() {
@@ -393,7 +411,7 @@
     if (dropdownWidgets().includes(el)) {
       const control = dropdownControl(el);
       const text = String(control?.innerText || control?.textContent || '').replace(/\s+/g, ' ').trim();
-      return /^(select one|select(\.\.\.)?|choose( an option)?|-+|please select)$/i.test(text) ? '' : text;
+      return isEmptyChoiceText(text) ? '' : text;
     }
     if (el.isContentEditable) return String(el.textContent || '').trim();
     return isPlaceholderValue(el) ? '' : String(el.value || '').trim();
@@ -1381,14 +1399,14 @@
     if (input.tagName === 'SELECT') {
       const selected = input.options[input.selectedIndex];
       const text = (selected?.text || input.value || '').trim();
-      return !text || /please select|^select$|^-+$|choose/i.test(text);
+      return !text || isEmptyChoiceText(text) || /choose/i.test(text);
     }
     if (type === 'radio' || type === 'checkbox') return !input.checked;
     return !String(input.value || '').trim();
   }
 
   function optionList(select) {
-    return [...select.options].filter((item) => item.value !== '' && !/please select|^select$|^-+$|choose/i.test(item.text.trim()));
+    return [...select.options].filter((item) => item.value !== '' && !isEmptyChoiceText(item.text) && !/choose/i.test(item.text.trim()));
   }
 
   function collectInputs() {
@@ -1613,7 +1631,14 @@
   function sensitiveProfileAnswer(question, profile) {
     const q = String(question || '').toLowerCase();
     const p = profile || {};
-    if (/authori[sz]ed to work|authori[sz]ation to work|work authorization|legally (eligible|authori[sz]ed)|right to work|eligible to work/.test(q)) {
+    // "Work Authorization Country" / "Citizenship" contain the work-auth wording
+    // but expect a country, not Yes/No. A yes/no sentence that merely mentions
+    // the country ("Are you legally authorized to work in the country/region of
+    // the job?") must still be answered Yes/No, so the phrasing decides.
+    const yesNoPhrasing = /^(are|do|does|did|will|would|have|has|is|was|were|can|could|should|may)\b/i.test(q.trim())
+      || q.includes('?');
+    const asksForPlace = !yesNoPhrasing && /country|nation|citizenship|territory|nationality/.test(q);
+    if (!asksForPlace && /authori[sz]ed to work|authori[sz]ation to work|work authorization|legally (eligible|authori[sz]ed)|right to work|eligible to work/.test(q)) {
       const flag = p.workAuthorized ?? p.authorizedToWork ?? p.workAuth
         ?? p.jobPreferences?.workAuthorized ?? p.preferences?.workAuthorized;
       if (flag === true || /^(yes|true|y|1)$/i.test(String(flag || ''))) return 'Yes';
@@ -1627,6 +1652,13 @@
     }
     if (/notice period|joining time/.test(q)) {
       if (p.noticePeriod) return String(p.noticePeriod);
+    }
+    if (asksForPlace) {
+      // Country / citizenship dropdowns expect a country name. Use the
+      // candidate's own country; never invent one.
+      const country = String(p.country || '').trim()
+        || (String(p.location || '').split(',').pop() || '').trim();
+      if (country) return country;
     }
     if (isJoiningDateQuestion(q)) {
       // Always relative to today (or the candidate's configured offset).
@@ -1968,10 +2000,6 @@
             const ai = await inferAnswerWithAI(question, optTexts, profile, '', company, '', pending);
             if (ai?.answer) wanted = ai.answer;
           }
-          if (!wanted) {
-            const ai = await inferAnswerWithAI(question, optTexts, profile, '', company, '', pending);
-            if (ai?.answer) wanted = ai.answer;
-          }
           if (!wanted && taskMode()) {
             const reported = await taskCall('/api/applications/extension/question', {
               question, options: optTexts, required: true,
@@ -2015,9 +2043,50 @@
             try { nestedHit.click(); } catch {}
             await sleep(450);
           }
-          hamzoohLog('log', 'custom dropdown filled', question.slice(0, 80));
+          if (widgetHasValue(widget)) {
+            hamzoohLog('log', 'custom dropdown filled', question.slice(0, 80));
+          } else {
+            // The click landed but the widget never committed a value. Reporting
+            // it as filled hid a required field that the page then rejected.
+            document.body.click();
+            await sleep(100);
+            skipped.push({ field: (question || 'Custom dropdown').slice(0, 80), reason: `Picked "${wanted}" but this dropdown did not keep the value.` });
+          }
         } else {
+          // A profile value that is not one of this dropdown's options ("India"
+          // in a country list written differently, "Yes" in a country list) must
+          // not be dropped silently — that leaves a required field empty and the
+          // page rejects Next. Ask the candidate to pick from the real options.
           document.body.click();
+          await sleep(100);
+          let chosen = '';
+          if (taskMode()) {
+            const reported = await taskCall('/api/applications/extension/question', {
+              question, options: optTexts, required: true,
+              reason: `Your profile value "${wanted}" is not one of this dropdown's options.`,
+            });
+            chosen = reported?.answer || '';
+          }
+          if (!chosen) {
+            const promptResult = await askOrSkip(question, 0, 1, optTexts, `Your saved value "${wanted}" is not an option here — pick one.`, true);
+            chosen = promptResult?.answer || '';
+            if (chosen && promptResult?.remember) await rememberAnswer(answers, question, chosen, optTexts);
+          }
+          if (chosen) {
+            try { widget.click(); } catch {}
+            await sleep(350);
+            const fresh = readOptions();
+            const retry = matchDropdownOption(fresh, chosen);
+            if (retry) {
+              try { retry.click(); } catch {}
+              await sleep(400);
+              if (widgetHasValue(widget)) {
+                hamzoohLog('log', 'custom dropdown filled after asking', question.slice(0, 80));
+                await sleep(150);
+                continue;
+              }
+            }
+          }
           skipped.push({ field: (question || 'Custom dropdown').slice(0, 80), reason: `The value "${wanted}" is not an option in this dropdown.` });
         }
         await sleep(150);

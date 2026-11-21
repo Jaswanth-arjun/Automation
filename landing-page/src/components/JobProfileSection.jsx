@@ -27,6 +27,9 @@ const QUESTION_GROUPS = [
     questions: [
       { label: 'Are you legally authorized to work in the country where this job is located?', type: 'yesno', required: true },
       { label: 'Do you require visa sponsorship?', type: 'yesno', required: true },
+      { label: 'Work authorization country', type: 'text', placeholder: 'Country you are authorized to work in' },
+      { label: 'Citizenship', type: 'text', placeholder: 'Your citizenship' },
+      { label: 'Are you currently employed with a government or government agency (including in the last 12 months)?', type: 'yesno' },
       { label: 'Are you willing to undergo a background verification?', type: 'yesno' },
       { label: 'Have you previously worked for this company?', type: 'yesno' },
       { label: 'Have you previously applied to this company?', type: 'yesno' },

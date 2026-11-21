@@ -19,7 +19,7 @@ import AdminJobs from './pages/AdminJobs';
 import SavedJobs from './pages/SavedJobs';
 import Subscription from './pages/Subscription';
 import VideoLoader from './components/VideoLoader';
-import HamzoohAssistant from './components/HamzoohAssistant';
+import DashboardRAGEntrance from './components/DashboardRAGEntrance';
 
 // The admin panel is a separate page served by the API server. While running
 // the Vite dev server on :5173, /admin only exists on :3000.
@@ -42,7 +42,7 @@ function GlobalAssistant() {
   const { pathname } = useLocation();
   if (!isAuthenticated) return null;
   if (!pathname.startsWith('/dashboard')) return null;
-  return <HamzoohAssistant />;
+  return <DashboardRAGEntrance />;
 }
 
 function ProtectedRoute({ children }) {

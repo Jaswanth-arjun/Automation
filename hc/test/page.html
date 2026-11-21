@@ -1,0 +1,14 @@
+<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<body style="margin:0;font:16px system-ui"><div style="height:2500px;padding:20px"><button id=b onclick="window.clicked=(window.clicked||0)+1">real button</button><p>content</p></div>
+<script type=module>
+import { HamsterEngine } from '../src/HamsterEngine.js';
+import { ANIMATIONS } from '../src/animations.config.js';
+import { createPlaceholderManifest } from '../src/placeholders.js';
+const q=new URLSearchParams(location.search);
+const cycle={active:[4000,7000],resting:[3000,5000],sleeping:[5000,8000],inactivityMs:+(q.get('idle')||600000),minSleepMs:2000,historySize:3,idleChance:.55};
+const e=new HamsterEngine(document.body,{manifest:createPlaceholderManifest(ANIMATIONS),debug:true,cycle,reducedMotion:q.get('rm')==='1'});
+window.__e=e;
+const log=[];window.__log=log;
+(function poll(){const s=e.getState();const l=log.at(-1);if(!l||l.anim!==s.anim||l.hold!==s.hold)log.push({t:performance.now()|0,anim:s.anim,hold:s.hold,mode:s.mode,pose:s.pose,x:s.x|0});requestAnimationFrame(poll)})();
+e.start().then(()=>window.__ready=true);
+</script>
