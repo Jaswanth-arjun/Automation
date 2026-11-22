@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hamzooh Mock Application — Workday-style required dropdowns</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 24px auto; }
+    .ff { margin-bottom: 22px; }
+    .ff > label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input[type="text"], input[type="email"] { width: 100%; padding: 9px; box-sizing: border-box; }
+    .dd { border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px 10px; cursor: pointer; background: #fff; }
+    .dd .value { color: #334155; }
+    .pop { border: 1px solid #cbd5e1; border-top: 0; max-height: 220px; overflow: auto; }
+    .pop[hidden] { display: none; }
+    .pop [role="option"] { padding: 8px 10px; cursor: pointer; }
+    .pop [role="option"]:hover { background: #eef2ff; }
+    .err { color: #b91c1c; font-size: 13px; display: none; }
+    .err.show { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Software Engineer — Application</h1>
+  <form id="wd-form" novalidate>
+    <div class="ff">
+      <label for="full_name">Full name</label>
+      <input id="full_name" name="full_name" type="text" required />
+    </div>
+    <div class="ff">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" required />
+    </div>
+
+    <div class="ff">
+      <label id="lbl-workauth">Are you legally authorized to work in the country/region of the job?</label>
+      <div class="dd" id="dd-workauth" role="combobox" aria-haspopup="listbox" aria-required="true"
+           aria-labelledby="lbl-workauth" aria-controls="pop-workauth" tabindex="0">
+        <span class="value">No Selection</span>
+      </div>
+      <div class="pop" id="pop-workauth" role="listbox" hidden>
+        <div role="option">Yes</div>
+        <div role="option">No</div>
+      </div>
+    </div>
+
+    <div class="ff">
+      <label id="lbl-sponsorship">Will you now or in the future require sponsorship for employment visa status?</label>
+      <div class="dd" id="dd-sponsorship" role="combobox" aria-haspopup="listbox" aria-required="true"
+           aria-labelledby="lbl-sponsorship" aria-controls="pop-sponsorship" tabindex="0">
+        <span class="value">No Selection</span>
+      </div>
+      <div class="pop" id="pop-sponsorship" role="listbox" hidden>
+        <div role="option">Yes</div>
+        <div role="option">No</div>
+      </div>
+    </div>
+
+    <div class="ff">
+      <label id="lbl-government">Are you currently employed with a government or government agency (including in the last 12 months)?</label>
+      <div class="dd" id="dd-government" role="combobox" aria-haspopup="listbox" aria-required="true"
+           aria-labelledby="lbl-government" aria-controls="pop-government" tabindex="0">
+        <span class="value">No Selection</span>
+      </div>
+      <div class="pop" id="pop-government" role="listbox" hidden>
+        <div role="option">Yes</div>
+        <div role="option">No</div>
+      </div>
+    </div>
+
+    <div class="ff">
+      <label id="lbl-auth-country">Work Authorization Country</label>
+      <div class="dd" id="dd-auth-country" role="combobox" aria-haspopup="listbox" aria-required="true"
+           aria-labelledby="lbl-auth-country" aria-controls="pop-auth-country" tabindex="0">
+        <span class="value">No Selection</span>
+      </div>
+      <div class="pop" id="pop-auth-country" role="listbox" hidden>
+        <div role="option">India</div>
+        <div role="option">United States of America</div>
+        <div role="option">United Kingdom</div>
+        <div role="option">Singapore</div>
+        <div role="option">Australia</div>
+      </div>
+    </div>
+
+    <div class="ff">
+      <label id="lbl-citizenship">Citizenship</label>
+      <div class="dd" id="dd-citizenship" role="combobox" aria-haspopup="listbox" aria-required="true"
+           aria-labelledby="lbl-citizenship" aria-controls="pop-citizenship" tabindex="0">
+        <span class="value">No Selection</span>
+      </div>
+      <div class="pop" id="pop-citizenship" role="listbox" hidden>
+        <div role="option">India</div>
+        <div role="option">United States of America</div>
+        <div role="option">United Kingdom</div>
+        <div role="option">Singapore</div>
+        <div role="option">Australia</div>
+      </div>
+    </div>
+
+    <button type="button" id="next">Submit application</button>
+    <div class="err" id="form-error">Please answer every required question.</div>
+  </form>
+  <div id="done" style="display:none">Your application has been submitted.</div>
+  <script>
+    const dropdowns = [...document.querySelectorAll('.dd')];
+    const closeAll = (except) => {
+      document.querySelectorAll('.pop').forEach((pop) => { if (pop !== except) pop.hidden = true; });
+    };
+
+    dropdowns.forEach((dd) => {
+      const pop = document.getElementById(dd.getAttribute('aria-controls'));
+      dd.addEventListener('click', () => {
+        closeAll(pop);
+        pop.hidden = !pop.hidden;
+      });
+      pop.querySelectorAll('[role="option"]').forEach((opt) => {
+        opt.addEventListener('click', (event) => {
+          event.stopPropagation();
+          dd.dataset.value = opt.textContent.trim();
+          dd.querySelector('.value').textContent = opt.textContent.trim();
+          pop.hidden = true;
+        });
+      });
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!event.target.closest || !event.target.closest('.ff')) closeAll(null);
+    });
+
+    document.getElementById('next').addEventListener('click', () => {
+      const name = document.getElementById('full_name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const missing = dropdowns.filter((dd) => !dd.dataset.value);
+      if (!name || !email || missing.length) {
+        document.getElementById('form-error').classList.add('show');
+        return;
+      }
+      document.getElementById('wd-form').style.display = 'none';
+      document.getElementById('done').style.display = 'block';
+    });
+  </script>
+</body>
+</html>

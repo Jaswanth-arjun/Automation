@@ -78,7 +78,27 @@ async function installChromeStub(page) {
             case 'HAMZOOH_IS_JOB_TAB': return reply({ ok: true });
             case 'HAMZOOH_ADOPT_TAB': return reply({ ok: true });
             case 'HAMZOOH_GET_RESUME': return reply({ resumeBase64: resumeB64, resumeName: 'jaswanth-tailored-resume.pdf' });
+            case 'HAMZOOH_CDP_INPUT': {
+              // The real background worker drives Chrome's input domain. Report
+              // ok only when the click actually landed, otherwise the filler
+              // believes a synthetic click happened and the page never moves.
+              if (message.action === 'click') {
+                const el = document.elementFromPoint(Number(message.x), Number(message.y));
+                if (!el) return reply({ ok: false });
+                el.click();
+                return reply({ ok: true });
+              }
+              if (message.action === 'type') {
+                const el = document.activeElement;
+                if (!el || !('value' in el)) return reply({ ok: false });
+                el.value = String(message.text ?? '');
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                return reply({ ok: true });
+              }
+              return reply({ ok: true });
+            }
             case 'HAMZOOH_FILLER_PROGRESS':
+            case 'HAMZOOH_RUN_EVENT':
               window.__hamzoohEvents.push(clone(message));
               return reply({ ok: true });
             case 'HAMZOOH_PROXY_FETCH': return reply({ ok: true, data: { match: null } });
@@ -89,11 +109,15 @@ async function installChromeStub(page) {
       },
       storage: {
         local: {
+          // MV3 supports both forms: a callback, or a Promise when none is
+          // given. filler.js uses both, so the stub must too.
           get(keys, cb) {
             const out = {};
             const list = Array.isArray(keys) ? keys : [keys];
             for (const key of list) out[key] = clone(storage[key]);
+            if (typeof cb !== 'function') return Promise.resolve(clone(out));
             setTimeout(() => cb(out), 0);
+            return undefined;
           },
           set(patch, cb) {
             const changes = {};
@@ -101,10 +125,12 @@ async function installChromeStub(page) {
               changes[key] = { oldValue: clone(storage[key]), newValue: clone(value) };
               storage[key] = clone(value);
             }
-            setTimeout(() => {
-              listeners.forEach((fn) => fn(changes, 'local'));
-              if (typeof cb === 'function') cb();
-            }, 0);
+            const commit = () => listeners.forEach((fn) => fn(changes, 'local'));
+            if (typeof cb !== 'function') {
+              return new Promise((resolve) => setTimeout(() => { commit(); resolve(); }, 0));
+            }
+            setTimeout(() => { commit(); cb(); }, 0);
+            return undefined;
           },
         },
         onChanged: { addListener(fn) { listeners.push(fn); } },
@@ -115,9 +141,11 @@ async function installChromeStub(page) {
 
 async function runFiller(page, pending) {
   // Kick off the pipeline without awaiting: fillPage blocks on the review
-  // overlay until the user (or this test) clicks a decision.
+  // overlay until the user (or this test) clicks a decision. runEvent() is
+  // silent without a run id, so every run gets one here.
   await page.evaluate((pendingArg) => {
-    window.__hamzoohRun = window.__HAMZOOH_TEST_RUN__(pendingArg.profile, pendingArg.answers, pendingArg.pending);
+    const pendingApply = { runId: `test-${Date.now()}`, ...pendingArg.pending };
+    window.__hamzoohRun = window.__HAMZOOH_TEST_RUN__(pendingArg.profile, pendingArg.answers, pendingApply);
     return true;
   }, pending);
 }
@@ -142,6 +170,12 @@ const clickOverlaySubmit = (page) => clickOverlay(page, 'hamzooh-do-submit');
 
 async function snapshotEvents(page) {
   return page.evaluate(() => window.__hamzoohEvents || []);
+}
+
+// Counts how many times the in-page answer card asked about a question.
+async function questionCardCount(page, fragment) {
+  const events = await snapshotEvents(page);
+  return events.filter((e) => e.step === 'asking_user' && String(e.message || '').includes(fragment)).length;
 }
 
 test('real filler fills layout A, attaches resume, and does not submit without confirmation', async (t) => {
@@ -408,9 +442,11 @@ test('MDC div buttons and group-level aria-required advance through both steps',
         url: page.url(),
         jobTitle: 'Forward Deployed Engineer Intern',
         company: 'Google',
-        autoSubmit: true,
       },
     });
+
+    // There is one submission path: the candidate approves in the overlay.
+    assert.equal(await clickOverlaySubmit(page), true, 'the review overlay must appear');
 
     let complete = null;
     const deadline = Date.now() + 90000;
@@ -439,7 +475,7 @@ test('MDC div buttons and group-level aria-required advance through both steps',
     assert.equal(state.school, 'NIT Trichy', 'step 2 must be reached and filled');
     assert.equal(state.grad, '2027');
     assert.equal(complete.status, 'submitted');
-    assert.equal(state.submitted, true, 'the application should be submitted automatically');
+    assert.equal(state.submitted, true, 'the approved application should be submitted');
   } finally {
     await browser.close();
   }
@@ -502,7 +538,7 @@ test('job page with a stretched-anchor Apply button opens the real form', async 
   }
 });
 
-test('autoSubmit reports missing fields instead of stalling on the review overlay', async (t) => {
+test('an incomplete form never offers submission and reports what is missing', async (t) => {
   if (!browserPath) {
     t.skip('No Chrome/Edge executable found');
     return;
@@ -522,12 +558,96 @@ test('autoSubmit reports missing fields instead of stalling on the review overla
         url: page.url(),
         jobTitle: 'Forward Deployed Engineer Intern',
         company: 'Google',
-        autoSubmit: true,
       },
     });
 
+    // Nothing can answer the required radios, so the run must ask the candidate
+    // instead of clicking through to the submit button.
+    const asked = await page.waitForSelector('#hamzooh-answer-input', { timeout: 60000 }).catch(() => null);
+    assert.ok(asked, 'an unanswerable required question must be asked, not skipped');
+    const submitted = await page.evaluate(() => document.getElementById('done')?.style.display === 'block');
+    assert.equal(submitted, false, 'an incomplete form must never be submitted');
+    const events = await snapshotEvents(page);
+    assert.ok(
+      events.some((e) => e.step === 'asking_user'),
+      'the run must report that it is waiting on the candidate',
+    );
+    assert.ok(
+      !events.some((e) => e.step === 'complete' && e.status === 'submitted'),
+      'no completion may claim a submission for an empty form',
+    );
+  } finally {
+    await browser.close();
+  }
+});
+
+// The candidate pressed Skip in the in-page card and the same question kept
+// coming back on the next pass, which made the automation look stuck. One Skip
+// must silence the question for the rest of the application.
+test('a skipped question is not asked again on the next pass', async (t) => {
+  if (!browserPath) {
+    t.skip('No Chrome/Edge executable found');
+    return;
+  }
+  const browser = await puppeteer.launch({ headless: true, executablePath: browserPath, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await installChromeStub(page);
+    await page.goto(fixtureUrl('mock-apply-mdc.html'), { waitUntil: 'domcontentloaded' });
+    await page.addScriptTag({ path: join(process.cwd(), 'extension', 'filler.js') });
+
+    // No work flag and a country the question does not name: nothing can answer
+    // "authorized to work in India?", so the card must appear.
+    await runFiller(page, {
+      profile: { fullName: 'Nelluru Jaswanth', email: 'jaswanth@example.com', country: 'Germany' },
+      answers: {},
+      pending: { url: page.url(), jobTitle: 'Forward Deployed Engineer Intern', company: 'Google' },
+    });
+
+    const card = await page.waitForSelector('#hamzooh-skip-btn', { timeout: 60000 }).catch(() => null);
+    assert.ok(card, 'the unanswered required question must be asked first');
+    await page.click('#hamzooh-skip-btn');
+
+    // Give the run several passes to prove it does not re-prompt.
+    await new Promise((r) => setTimeout(r, 12000));
+    const askedAgain = await questionCardCount(page, 'authorized to work in India');
+    assert.equal(askedAgain, 1, 'a skipped question must be asked exactly once');
+    const skippedEvents = (await snapshotEvents(page)).filter((e) => e.step === 'question_skipped');
+    assert.ok(skippedEvents.length >= 1, 'the skip must be recorded');
+  } finally {
+    await browser.close();
+  }
+});
+
+// Workday-style required dropdowns show the placeholder "No Selection" until an
+// option is committed. That placeholder was read as a real value, so every
+// required question was skipped, Next was clicked with the form empty, and the
+// page rejected the step.
+test('required "No Selection" dropdowns are answered instead of skipped', async (t) => {
+  if (!browserPath) {
+    t.skip('No Chrome/Edge executable found');
+    return;
+  }
+  const browser = await puppeteer.launch({ headless: true, executablePath: browserPath, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await installChromeStub(page);
+    await page.goto(fixtureUrl('mock-apply-workday.html'), { waitUntil: 'domcontentloaded' });
+    await page.addScriptTag({ path: join(process.cwd(), 'extension', 'filler.js') });
+
+    const { workAuthorized, ...rest } = profile;
+    await runFiller(page, {
+      profile: { ...rest, country: 'India', workAuthorized: true, requireSponsorship: false },
+      answers: {
+        'are you currently employed with a government or government agency (including in the last 12 months)?': 'No',
+      },
+      pending: { url: page.url(), jobTitle: 'Software Engineer', company: 'Workday' },
+    });
+
+    assert.equal(await clickOverlaySubmit(page), true, 'the review overlay must appear');
+
     let complete = null;
-    const deadline = Date.now() + 120000;
+    const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
       const events = await snapshotEvents(page);
       complete = events.filter((e) => e.step === 'complete').pop() || null;
@@ -535,16 +655,37 @@ test('autoSubmit reports missing fields instead of stalling on the review overla
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    assert.ok(complete, 'an unattended run must always end with a report');
-    assert.equal(complete.status, 'needs_attention', 'nothing should be submitted when the form is incomplete');
-    const submitted = await page.evaluate(() => document.getElementById('done')?.style.display === 'block');
-    assert.equal(submitted, false, 'an incomplete form must never be submitted');
+    const state = await page.evaluate(() => {
+      const value = (id) => document.getElementById(id)?.dataset.value || '';
+      return {
+        name: document.getElementById('full_name')?.value || '',
+        email: document.getElementById('email')?.value || '',
+        workauth: value('dd-workauth'),
+        sponsorship: value('dd-sponsorship'),
+        government: value('dd-government'),
+        authCountry: value('dd-auth-country'),
+        citizenship: value('dd-citizenship'),
+        submitted: document.getElementById('done')?.style.display === 'block',
+      };
+    });
+
+    assert.equal(state.name, 'Nelluru Jaswanth');
+    assert.equal(state.email, 'jaswanth@example.com');
+    assert.equal(state.workauth, 'Yes', 'work auth must be answered from the profile flag');
+    assert.equal(state.sponsorship, 'No', 'sponsorship must be answered from the profile flag');
+    assert.equal(state.government, 'No', 'a saved answer must be applied to the dropdown');
+    assert.equal(state.authCountry, 'India', 'a country dropdown must get a country, not "Yes"');
+    assert.equal(state.citizenship, 'India', 'citizenship must get a country, not "Yes"');
+    assert.ok(complete, 'the run must finish instead of stalling on empty dropdowns');
+    assert.equal(state.submitted, true, 'the application should be submitted after approval');
   } finally {
     await browser.close();
   }
 });
 
-test('autoSubmit applies without any confirmation click when the form is clean', async (t) => {
+// The only path to submission is the candidate's explicit approval, so a clean
+// form must reach the review with nothing missing and submit on that click.
+test('a clean form submits only after the candidate approves in the overlay', async (t) => {
   if (!browserPath) {
     t.skip('No Chrome/Edge executable found');
     return;
@@ -563,11 +704,11 @@ test('autoSubmit applies without any confirmation click when the form is clean',
         url: page.url(),
         jobTitle: 'Forward Deployed Engineer Intern',
         company: 'Google',
-        autoSubmit: true,
       },
     });
 
-    // No overlay must ever be clicked.
+    assert.equal(await clickOverlaySubmit(page), true, 'the review overlay must appear');
+
     let complete = null;
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
@@ -576,8 +717,8 @@ test('autoSubmit applies without any confirmation click when the form is clean',
       if (complete) break;
       await new Promise((r) => setTimeout(r, 500));
     }
-    assert.ok(complete, 'automation should finish on its own');
-    assert.equal(complete.status, 'submitted', 'clean form should be submitted automatically');
+    assert.ok(complete, 'automation should finish once approved');
+    assert.equal(complete.status, 'submitted', 'an approved clean form should be submitted');
     const done = await page.evaluate(() => document.getElementById('done')?.style.display === 'block');
     assert.equal(done, true, 'site confirmation must appear');
   } finally {

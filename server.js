@@ -28,7 +28,7 @@ import {
   validateStartPayload, pauseTask, resumeTask, cancelTask, approveTask, answerTaskQuestion,
   recordHeartbeat, recordCheckpoint, recordAgentObservation, recordReview, completeTask,
   decideNextAction, lookupTaskAnswer, reportTaskQuestion, getTaskExtensionState,
-  recordSubmissionAttempt, getTaskReview, recordExtensionAnswer,
+  recordSubmissionAttempt, getTaskReview, recordExtensionAnswer, skipTaskQuestion,
   isTaskStale, abandonTask, sweepSilentTasks,
 } from './lib/application-tasks.js';
 
@@ -6301,6 +6301,18 @@ app.post('/api/applications/extension/question', async (req, res) => {
   try {
     const { taskId, token } = req.body || {};
     const result = await reportTaskQuestion(taskId, token, req.body || {});
+    const task = await getTask(taskId);
+    if (task) broadcastTask(publicTaskView(task));
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    taskError(res, err);
+  }
+});
+
+app.post('/api/applications/extension/question/skip', async (req, res) => {
+  try {
+    const { taskId, token } = req.body || {};
+    const result = await skipTaskQuestion(taskId, token, req.body || {});
     const task = await getTask(taskId);
     if (task) broadcastTask(publicTaskView(task));
     res.json({ ok: true, ...result });

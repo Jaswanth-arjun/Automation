@@ -272,7 +272,7 @@ export default function Profile() {
       // Keep the Resume/Apply pages' active resume in sync with this upload so
       // tailoring always uses the real PDF text (experience included) instead
       // of the short profile-field fallback.
-      resumeStore.add({ name: file.name, size: `${(file.size / 1024).toFixed(1)} KB`, type: file.type, text: result.text, makeActive: true });
+      resumeStore.add({ name: file.name, size: `${(file.size / 1024).toFixed(1)} KB`, type: file.type, text: result.text, pdfBase64: dataUrl, makeActive: true });
       setProfile(updated);
       setEditing(false);
       setSaved(true);

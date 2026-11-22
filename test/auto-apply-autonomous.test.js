@@ -9,7 +9,7 @@ import {
 import {
   createTask, getTask, getTaskView, recordCheckpoint, recordReview, approveTask,
   completeTask, pauseTask, resumeTask, cancelTask, reportTaskQuestion, answerTaskQuestion,
-  recordSubmissionAttempt, isNoiseQuestion, sanitizeQuestionLabel,
+  recordSubmissionAttempt, isNoiseQuestion, sanitizeQuestionLabel, skipTaskQuestion,
   lookupTaskAnswer, decideNextAction, parseAgentAction, compactSnapshot,
   isTaskStale, abandonTask,
 } from '../lib/application-tasks.js';
@@ -256,6 +256,40 @@ test('widget chrome is never a candidate question and cleaned answers are reused
     question: 'Skills', options: ['Data Analysis', 'Linux'],
   });
   assert.equal(reused.answer, 'Data Analysis');
+});
+
+// The candidate pressed Skip once and the same question kept coming back, so
+// the run looked stuck. One Skip must silence the question for this application
+// and clear its pending card, without saving any answer.
+test('a skipped question is never asked again for that application', async () => {
+  const { task, token } = await newTask(USER_A, { payload: { url: 'https://jobs.example.com/apply/skip' } });
+  const question = 'Do you have a current government security clearance?';
+
+  const asked = await reportTaskQuestion(task.id, token, { question, options: ['Yes', 'No'] });
+  assert.ok(asked.question?.id, 'the question should start as a pending card');
+  assert.equal((await getTaskView(task.id, USER_A)).status, 'waiting_for_user_input');
+
+  const skipped = await skipTaskQuestion(task.id, token, { question });
+  assert.equal(skipped.ok, true);
+  assert.equal(skipped.skippedAny, true);
+
+  const view = await getTaskView(task.id, USER_A);
+  assert.equal(
+    (view.questions || []).filter((item) => item.status === 'pending').length,
+    0,
+    'the skipped card must not stay pending',
+  );
+  assert.equal(view.status, 'filling_application', 'the run resumes after the skip');
+
+  // Reporting the same question again must not create a new card.
+  const again = await reportTaskQuestion(task.id, token, { question, options: ['Yes', 'No'] });
+  assert.equal(again.question, null, 'a skipped question must not be re-asked');
+  assert.equal(again.skipped, true);
+
+  // Skipping is per application: a fresh application still asks it.
+  const { task: other, token: otherToken } = await newTask(USER_A, { payload: { url: 'https://jobs.example.com/apply/skip-2' } });
+  const otherAsked = await reportTaskQuestion(other.id, otherToken, { question, options: ['Yes', 'No'] });
+  assert.ok(otherAsked.question?.id, 'a new application must still ask the question');
 });
 
 test('task questions are saved to memory and reused by a later task', async () => {

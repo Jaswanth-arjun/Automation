@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, applicationStore, resumeStore, api, authHeaders, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore, coverLetterStore, reconcileSubmittedApplications } from '../lib/api';
+import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore, coverLetterStore } from '../lib/api';
 import CoverLetterModal from '../components/CoverLetterModal';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';
 import { calculateMatchScore } from '../lib/matchScore';
@@ -165,7 +165,6 @@ export default function Apply() {
   const [extensionReady, setExtensionReady] = useState(false);
   const [autoTask, setAutoTask] = useState(null);
   const [autoTaskError, setAutoTaskError] = useState('');
-  const [blockingTask, setBlockingTask] = useState(null);
   const [taskAnswerDrafts, setTaskAnswerDrafts] = useState({});
   const [taskAnswerConsent, setTaskAnswerConsent] = useState({});
   const [taskBusy, setTaskBusy] = useState('');
@@ -202,29 +201,6 @@ export default function Apply() {
       localStorage.setItem('hamzooh_full_auto_mode', fullAutoMode ? 'true' : 'false');
     } catch { }
   }, [fullAutoMode]);
-
-  // A verified submission recorded by the backend — including a manual submit in
-  // the job tab after the run stopped — must mark this role as applied.
-  useEffect(() => {
-    if (!jobId) return;
-    const jobUrl = [job?.applyLink, job?.url, job?.sourceUrl]
-      .map((value) => String(value || '').trim())
-      .find((value) => /^https?:\/\//i.test(value)) || '';
-    const norm = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
-    reconcileSubmittedApplications({
-      jobId, jobUrl, jobTitle: job?.title || job?.role || '', jobCompany: job?.company || '',
-    })
-      .then((changed) => {
-        if (!changed) return;
-        const applied = applyProgressStore.get(jobId)?.apply
-          || applicationStore.getAll().some((app) => (
-            String(app.jobId || '') === String(jobId)
-            || (norm(app.company) === norm(job?.company) && norm(app.title) === norm(job?.title)))
-          );
-        if (applied) setSubmitted(true);
-      })
-      .catch(() => {});
-  }, [jobId, job?.applyLink, job?.url, job?.title, job?.company]);
 
   // A tailored resume only belongs to the job it was generated for. If this job
   // was already tailored, restore that report instead of asking for it again.
@@ -950,10 +926,9 @@ ${firstName}`;
     const markReady = () => {
       if (!alive) return;
       setExtensionReady(true);
-      fetch('/api/vault/answers', { headers: authHeaders() }).then(r => (r.ok ? r.json() : null)).then(data => {
-        const answers = data?.map || {};
-        if (Object.keys(answers).length) {
-          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_SYNC_ANSWERS', answers }, '*');
+      fetch('/api/vault/answers').then(r => r.json()).then(data => {
+        if (data.answers) {
+          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_SYNC_ANSWERS', answers: data.answers }, '*');
         }
       }).catch(() => { });
     };
@@ -966,10 +941,6 @@ ${firstName}`;
     const onMsg = (event) => {
       if (!alive) return;
       if (event.data?.source === 'hamzooh-extension' && (event.data.type === 'HAMZOOH_PONG' || event.data.type === 'HAMZOOH_ANSWERS_SYNCED')) {
-        if (event.data.type === 'HAMZOOH_PONG' && event.data.alive === false) {
-          setExtensionReady(false);
-          return;
-        }
         markReady();
       }
     };
@@ -996,25 +967,6 @@ ${firstName}`;
       clearTimeout(stopTimer);
     };
   }, []);
-
-  // If the extension was reloaded while the user was starting an apply, the
-  // bridge refreshes this page and leaves a one-shot flag. Retry the apply
-  // automatically once the fresh extension reconnects, so the user does not
-  // have to press F5 and click again.
-  const handleAutoApplyRef = useRef(null);
-  useEffect(() => {
-    if (!extensionReady) return undefined;
-    let pending = false;
-    try {
-      pending = sessionStorage.getItem('hamzooh_resume_apply') === '1';
-      if (pending) sessionStorage.removeItem('hamzooh_resume_apply');
-    } catch {}
-    if (!pending) return undefined;
-    const timer = setTimeout(() => {
-      Promise.resolve(handleAutoApplyRef.current?.()).catch(() => {});
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [extensionReady]);
 
   // Keep latest job/match values without re-subscribing on every render
   // (job and matchResult are freshly created objects each render).
@@ -1047,22 +999,17 @@ ${firstName}`;
         });
         setAutoApplying(false);
         if (event.data.status === 'submitted') {
-          const alreadyTracked = applicationStore.getAll().some((item) => (
-            item?.appliedViaExtension && String(item?.jobId || '') === String(ctx.job?.id || '')
-          ));
-          if (!alreadyTracked) {
-            applicationStore.add({
-              title: ctx.job?.title,
-              company: ctx.job?.company,
-              companyMark: ctx.job?.companyMark,
-              jobId: ctx.job?.id,
-              status: 'Applied',
-              stage: 'apply',
-              appliedViaExtension: true,
-              ...(ctx.hasMatchScore ? { matchScore: ctx.matchResult.score } : {}),
-              resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
-            });
-          }
+          applicationStore.add({
+            title: ctx.job?.title,
+            company: ctx.job?.company,
+            companyMark: ctx.job?.companyMark,
+            jobId: ctx.job?.id,
+            status: 'Applied',
+            stage: 'apply',
+            appliedViaExtension: true,
+            ...(ctx.hasMatchScore ? { matchScore: ctx.matchResult.score } : {}),
+            resumeUsed: 'Tailored Resume (Extension Auto-Applied)',
+          });
           applyProgressStore.mark(jobId || ctx.job?.id, 'apply', {
             company: ctx.job?.company || '',
             title: ctx.job?.title || '',
@@ -1120,66 +1067,11 @@ ${firstName}`;
         if (res.task.url !== link) return;
         setAutoTask(res.task);
         setShowAutoApplyModal(true);
-        setAutoApplying(!['submitted', 'failed', 'cancelled', 'waiting_for_user_input', 'waiting_for_approval', 'paused'].includes(res.task.status));
+        setAutoApplying(!['submitted', 'failed', 'cancelled', 'waiting_for_user_input'].includes(res.task.status));
       })
       .catch(() => { });
     return () => { alive = false; };
   }, [extensionReady, jobId]);
-
-  // Automatic submission detection. The extension inspects any open tab for
-  // this job and records a real site confirmation, so the role becomes Applied
-  // without the candidate marking anything by hand.
-  useEffect(() => {
-    if (!extensionReady || !job || submitted) return undefined;
-    const link = [job.applyLink, job.url, job.sourceUrl]
-      .map((value) => String(value || '').trim())
-      .find((value) => /^https?:\/\//i.test(value)) || '';
-    if (!link) return undefined;
-    let alive = true;
-    let pendingTimer = null;
-
-    const check = () => {
-      if (!alive) return;
-      const requestId = `subcheck_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const onMsg = (event) => {
-        if (event.source !== window || event.data?.source !== 'hamzooh-extension'
-          || event.data.type !== 'HAMZOOH_SUBMISSION_CHECK_RESULT'
-          || event.data.requestId !== requestId) return;
-        window.removeEventListener('message', onMsg);
-        if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
-        if (!alive || !event.data.ok) return;
-        if (event.data.task) setAutoTask(event.data.task);
-        setSubmitted(true);
-        setAutoApplyResult({
-          status: 'submitted',
-          message: event.data.task?.result?.message || 'Submission detected in the job tab.',
-          filledFields: [],
-          filledCount: event.data.task?.filledCount || 0,
-          emptyCount: 0,
-        });
-        applyProgressStore.mark(jobId || job?.id, 'apply', { company: job?.company || '', title: job?.title || '' });
-        reconcileSubmittedApplications({
-          jobId, jobUrl: link, jobTitle: job?.title || job?.role || '', jobCompany: job?.company || '',
-        }).catch(() => {});
-      };
-      window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_CHECK_SUBMISSION', requestId, url: link }, '*');
-      pendingTimer = setTimeout(() => window.removeEventListener('message', onMsg), 10000);
-    };
-
-    const first = setTimeout(check, 1500);
-    const interval = setInterval(check, 20000);
-    const stop = setTimeout(() => clearInterval(interval), 5 * 60 * 1000);
-    window.addEventListener('focus', check);
-    return () => {
-      alive = false;
-      clearTimeout(first);
-      clearInterval(interval);
-      clearTimeout(stop);
-      if (pendingTimer) clearTimeout(pendingTimer);
-      window.removeEventListener('focus', check);
-    };
-  }, [extensionReady, jobId, job?.applyLink, job?.url, submitted]);
 
   // Live task state — the modal and controls read genuine backend state.
   useEffect(() => {
@@ -1218,11 +1110,7 @@ ${firstName}`;
         });
         setSubmitted(true);
         const ctx = applyContextRef.current;
-        const alreadyTracked = applicationStore.getAll().some((item) => (
-          (task.id && String(item?.taskId || '') === String(task.id))
-          || (item?.appliedViaExtension && String(item?.jobId || '') === String(ctx.job?.id || ''))
-        ));
-        if (!alreadyTracked) applicationStore.add({
+        applicationStore.add({
           title: ctx.job?.title,
           company: ctx.job?.company,
           companyMark: ctx.job?.companyMark,
@@ -1350,18 +1238,16 @@ ${firstName}`;
     let savedAnswers = {};
     try { savedAnswers = JSON.parse(localStorage.getItem(ANSWERS_KEY) || '{}'); } catch { }
     try {
-      const serverVault = await fetch('http://localhost:3000/api/vault/answers', { headers: authHeaders() })
-        .then((r) => (r.ok ? r.json() : null));
-      if (serverVault?.map) {
-        savedAnswers = { ...serverVault.map, ...savedAnswers };
+      const serverVault = await fetch('http://localhost:3000/api/vault/answers').then((r) => r.json());
+      if (serverVault?.answers) {
+        savedAnswers = { ...serverVault.answers, ...savedAnswers };
       }
     } catch { }
 
     // Ensure we have a valid PDF base64 for resume attachment.
     // Priority: just-tailored this session > resume saved for THIS job > global active.
     const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
-    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64
-      || profile?.resume?.dataUrl || '';
+    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || '';
     if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
     let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
 
@@ -1503,9 +1389,8 @@ ${firstName}`;
   const loadApplyAnswers = async () => {
     let answers = {};
     try {
-      const r = await fetch('http://localhost:3000/api/vault/answers', { headers: authHeaders() })
-        .then((res) => (res.ok ? res.json() : null));
-      answers = r?.map || {};
+      const r = await fetch('http://localhost:3000/api/vault/answers').then((res) => res.json());
+      answers = r.answers || {};
     } catch { }
     try { answers = { ...answers, ...JSON.parse(localStorage.getItem('hamzooh_apply_answers') || '{}') }; } catch { }
     return answers;
@@ -1584,7 +1469,7 @@ ${firstName}`;
   // Guarantee a real resume PDF before the autonomous run starts.
   const ensureApplyResumePdf = async (link) => {
     const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
-    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || '';
+    let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || profile?.resume?.dataUrl || '';
     if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
     let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name
       || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
@@ -1661,7 +1546,6 @@ ${firstName}`;
     beginBackendRun();
     setAutoTask(null);
     setAutoTaskError('');
-    setBlockingTask(null);
     handledTaskTerminalRef.current = '';
 
     try {
@@ -1672,12 +1556,12 @@ ${firstName}`;
       const resumeFiles = new Map();
       if (pdfToAttach) resumeFiles.set(fileNameToAttach, pdfToAttach);
       (resumes || []).forEach((resume) => {
-        const bytes = resume?.pdfBase64 || resume?.base64 || resume?.dataUrl || '';
+        const bytes = resume?.pdfBase64 || resume?.base64 || '';
         if (resume?.name && bytes) resumeFiles.set(resume.name, String(bytes).includes(',') ? String(bytes).split(',')[1] : bytes);
       });
 
       const resumeCandidates = (resumes || [])
-        .filter((resume) => resume?.name && (resume.pdfBase64 || resume.base64 || resume.dataUrl))
+        .filter((resume) => resume?.name || resume?.text)
         .map((resume) => ({ name: resume.name || '', size: resume.size || '', text: String(resume.text || '').slice(0, 12000) }));
       if (!resumeCandidates.some((resume) => resume.name === fileNameToAttach)) {
         resumeCandidates.push({ name: fileNameToAttach, size: 'PDF', text: String(currentResumeText).slice(0, 12000) });
@@ -1689,13 +1573,9 @@ ${firstName}`;
       const start = await api.startAutoApply({
         url: link,
         job: {
-          // The dashboard job id is what lets a completed task mark this exact
-          // role as applied in the Job Tracker.
-          id: job?.id || jobId || '',
           title: job?.title || job?.role || '',
           company: job?.company || '',
           location: job?.location || job?.filters?.location || '',
-          url: job?.applyLink || job?.url || link,
           description: job?.description || '',
           source: job?.source || job?.sourceName || job?.provider || '',
         },
@@ -1708,10 +1588,6 @@ ${firstName}`;
 
       const task = start.task;
       setAutoTask(task);
-      try {
-        const beat = await api.extensionHeartbeat(task.id, start.token, { status: 'connecting_browser', url: link });
-        if (beat?.task) setAutoTask(beat.task);
-      } catch {}
       setShowAutoApplyModal(true);
       setAutoApplying(true);
       setAutoApplyResult(null);
@@ -1762,18 +1638,6 @@ ${firstName}`;
       if (!ready.ok) {
         await api.cancelApplicationTask(task.id, ready.error || 'The browser did not start.').catch(() => { });
         setAutoApplying(false);
-        if (ready.stale) {
-          // The extension was updated mid-start. bridge.js refreshes this page
-          // and left a one-shot retry flag, so this run restarts automatically
-          // once the fresh extension reconnects.
-          try { sessionStorage.setItem('hamzooh_resume_apply', '1'); } catch {}
-          setAutoApplyProgress((previous) => [...previous, {
-            step: 'reconnecting',
-            message: '🔄 Extension updated — reconnecting and restarting automatically…',
-            timestamp: Date.now(),
-          }]);
-          return;
-        }
         setAutoTaskError(ready.error || 'Could not open the job page in your browser.');
         setAutoApplyResult({ status: 'failed', message: ready.error || 'Could not open the job page in your browser.', filledFields: [] });
         return;
@@ -1787,9 +1651,8 @@ ${firstName}`;
       if (err.code === 'TASK_ALREADY_RUNNING' && err.payload?.task) {
         setAutoTask(err.payload.task);
         setShowAutoApplyModal(true);
-        setAutoApplying(!['submitted', 'failed', 'cancelled', 'waiting_for_user_input', 'waiting_for_approval', 'paused'].includes(err.payload.task.status));
+        setAutoApplying(!['submitted', 'failed', 'cancelled', 'waiting_for_user_input'].includes(err.payload.task.status));
         setAutoTaskError(err.message || 'An application is already running.');
-        if (String(err.payload.task.url || '') !== String(link || '')) setBlockingTask(err.payload.task);
         return;
       }
       setAutoApplying(false);
@@ -1797,7 +1660,6 @@ ${firstName}`;
       setAutoApplyResult({ status: 'failed', message: err.message || 'Auto Apply could not start.', filledFields: [] });
     }
   };
-  handleAutoApplyRef.current = handleAutoApply;
 
   const handleTaskDraftChange = (questionId, value) => {
     setTaskAnswerDrafts((previous) => ({ ...previous, [questionId]: value }));
@@ -1814,23 +1676,12 @@ ${firstName}`;
     setTaskBusy(`answer:${question.id}`);
     setAutoTaskError('');
     try {
-      // Sensitive facts are saved only after an explicit checkbox opt-in.
-      const remember = question.sensitive
-        ? taskAnswerConsent[question.id] === true
-        : taskAnswerConsent[question.id] !== false;
       const res = await api.answerApplicationQuestion(autoTask.id, question.id, {
         answer,
-        remember,
-        consent: remember,
+        remember: taskAnswerConsent[question.id] !== false,
+        consent: taskAnswerConsent[question.id] !== false,
       });
-      if (res?.task) {
-        setAutoTask(res.task);
-        // Answering the last outstanding question resumes the run by itself. A
-        // candidate should never have to press Resume after answering.
-        if (res.task.status === 'filling_application') {
-          window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action: 'resume', taskId: autoTask.id }, '*');
-        }
-      }
+      if (res?.task) setAutoTask(res.task);
       setTaskAnswerDrafts((previous) => ({ ...previous, [question.id]: '' }));
     } catch (err) {
       setAutoTaskError(err.message || 'Could not save that answer.');
@@ -1850,14 +1701,7 @@ ${firstName}`;
       else if (action === 'pause') res = await api.pauseApplicationTask(autoTask.id);
       else if (action === 'resume') res = await api.resumeApplicationTask(autoTask.id);
       if (res?.task) setAutoTask(res.task);
-      // A resume that still has an open question comes back as
-      // waiting_for_user_input, not an error: say what is needed instead of
-      // posting a control the agent would immediately stop on.
-      const waitingOnAnswer = action === 'resume' && res?.task?.status === 'waiting_for_user_input';
-      if (waitingOnAnswer) {
-        setAutoTaskError('Answer the question below and the application continues automatically.');
-      }
-      if (!waitingOnAnswer && (action === 'cancel' || action === 'pause' || action === 'resume' || action === 'approve')) {
+      if (action === 'cancel' || action === 'pause' || action === 'resume') {
         window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action, taskId: autoTask.id }, '*');
       }
       if (action === 'approve') {
@@ -1872,20 +1716,6 @@ ${firstName}`;
     } finally {
       setTaskBusy('');
     }
-  };
-
-  const handleCancelPreviousAndStart = async () => {
-    if (!blockingTask?.id) return;
-    setTaskBusy('cancel-previous');
-    try {
-      await api.cancelApplicationTask(blockingTask.id, 'Cancelled to start a new application.');
-      window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action: 'cancel', taskId: blockingTask.id }, '*');
-    } catch { /* the stale-task sweep will clear it server-side anyway */ }
-    setBlockingTask(null);
-    setAutoTask(null);
-    setAutoTaskError('');
-    setTaskBusy('');
-    await handleAutoApply();
   };
 
   // Request the structured Phase-0 log for this run and download it.
@@ -3510,37 +3340,35 @@ ${firstName}`;
           <div style={{ background: '#171817', color: '#ffffff', borderRadius: '14px', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
             <div>
               <h4 style={{ fontSize: '16px', fontWeight: '800', margin: '0 0 4px', color: '#fff' }}>
-                {submitted ? '✅ Application Submitted and Verified' : 'Ready to let Hamzooh apply for you?'}
+                {submitted ? '✅ Application Submitted!' : 'Ready to Submit Direct Application?'}
               </h4>
               <p style={{ fontSize: '12.5px', color: '#aaa', margin: 0 }}>
                 {submitted
                   ? `HAMZOOH auto-applied to ${job.company} successfully.`
-                  : 'Opens the job in your own browser, fills it with your real profile and resume, asks only for missing facts, and never submits without your approval.'}
+                  : `Opens the job in a new tab, fills the form, and asks you before submitting.`}
               </p>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <button
-                className="btn-accent"
-                onClick={handleAutoApply}
-                disabled={autoApplying || submitted}
-                style={{
-                  background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
-                  borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
-                  fontSize: '14px', padding: '12px 24px', gap: '8px',
-                  opacity: autoApplying ? 0.7 : 1,
-                  cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {autoApplying ? (
-                  <><Loader size={16} className="spin" /> Auto-Applying...</>
-                ) : submitted ? (
-                  <><CheckCircle2 size={16} /> Applied Successfully</>
-                ) : (
-                  <><Zap size={16} /> Auto Apply with AI</>
-                )}
-              </button>
-            </div>
+            <button
+              className="btn-accent"
+              onClick={handleAutoApply}
+              disabled={autoApplying || submitted}
+              style={{
+                background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
+                borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
+                fontSize: '14px', padding: '12px 24px', gap: '8px',
+                opacity: autoApplying ? 0.7 : 1,
+                cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {autoApplying ? (
+                <><Loader size={16} className="spin" /> Auto-Applying...</>
+              ) : submitted ? (
+                <><CheckCircle2 size={16} /> Applied Successfully</>
+              ) : (
+                <><Zap size={16} /> Auto Apply with AI</>
+              )}
+            </button>
           </div>
 
           {/* Stage navigation */}
@@ -3650,26 +3478,6 @@ ${firstName}`;
                   onPause={() => handleTaskControl('pause')}
                   onResume={() => handleTaskControl('resume')}
                 />
-              )}
-
-              {blockingTask && (
-                <div style={{ border: '1px solid #fecaca', background: '#fef2f2', borderRadius: '12px', padding: '14px', marginTop: '12px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
-                    Another application is already in progress
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#7f1d1d', marginBottom: '10px' }}>
-                    {blockingTask.job?.title || 'An application'}{blockingTask.job?.company ? ` at ${blockingTask.job.company}` : ''} is still open. Cancel it to start this one.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCancelPreviousAndStart}
-                    disabled={taskBusy === 'cancel-previous'}
-                    className="btn-accent"
-                    style={{ fontSize: '12.5px', padding: '9px 16px', background: '#dc2626', borderColor: '#dc2626' }}
-                  >
-                    {taskBusy === 'cancel-previous' ? 'Cancelling…' : 'Cancel previous & start this one'}
-                  </button>
-                </div>
               )}
 
               {autoApplying && !autoTask && (
@@ -3800,18 +3608,10 @@ ${firstName}`;
               padding: '16px 28px', borderTop: '1px solid #e5e7eb',
               display: 'flex', justifyContent: 'flex-end', gap: '10px'
             }}>
-              {(autoApplyResult?.status === 'needs_attention'
-                || autoTask?.status === 'waiting_for_user_input'
-                || autoTask?.approval?.status === 'approved') && (
+              {(autoApplyResult?.status === 'needs_attention' || autoTask?.status === 'waiting_for_user_input') && (
                 <button
                   onClick={() => {
-                    if (autoTask?.id) {
-                      // Let the extension reattach or recreate the correct job tab.
-                      // Opening the URL here would create an untracked duplicate.
-                      window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action: 'resume', taskId: autoTask.id }, '*');
-                      return;
-                    }
-                    const link = job?.applyLink || job?.url || autoApplyResult?.applyUrl;
+                    const link = job?.applyLink || job?.url || autoTask?.url || autoApplyResult?.applyUrl;
                     if (link) window.open(link, '_blank');
                   }}
                   className="btn-accent"

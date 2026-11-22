@@ -170,6 +170,42 @@
       return;
     }
 
+    if (data.type === 'HAMZOOH_SCAN_SUBMISSIONS') {
+      chrome.runtime.sendMessage({ type: 'HAMZOOH_SCAN_SUBMISSIONS' }, (result) => {
+        reply('HAMZOOH_DETECTED_SUBMISSIONS', {
+          requestId: data.requestId || '',
+          ok: Boolean(result?.ok) && !chrome.runtime.lastError,
+          items: Array.isArray(result?.items) ? result.items : [],
+          error: chrome.runtime.lastError?.message || result?.error || '',
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'HAMZOOH_LIST_DETECTED_SUBMISSIONS') {
+      chrome.storage.local.get(['detectedSubmissions'], (stored) => {
+        reply('HAMZOOH_DETECTED_SUBMISSIONS', {
+          requestId: data.requestId || '',
+          ok: true,
+          items: Array.isArray(stored?.detectedSubmissions) ? stored.detectedSubmissions : [],
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'HAMZOOH_CLEAR_DETECTED_SUBMISSION') {
+      const id = String(data.id || '');
+      if (!id) { reply('HAMZOOH_DETECTED_SUBMISSION_CLEARED', { id: '', ok: false }); return; }
+      chrome.storage.local.get(['detectedSubmissions'], (stored) => {
+        const list = Array.isArray(stored?.detectedSubmissions) ? stored.detectedSubmissions : [];
+        const next = list.filter((item) => item?.id !== id);
+        chrome.storage.local.set({ detectedSubmissions: next }, () => {
+          reply('HAMZOOH_DETECTED_SUBMISSION_CLEARED', { id, ok: true });
+        });
+      });
+      return;
+    }
+
     if (data.type === 'HAMZOOH_TASK_CONTROL') {
       chrome.runtime.sendMessage({
         type: 'HAMZOOH_TASK_CONTROL',

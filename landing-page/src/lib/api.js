@@ -526,6 +526,195 @@ export const tailorReportStore = {
  * submit in the job tab — so the Job Tracker and the role page show "Applied"
  * even when the dashboard was closed while the submission happened.
  */
+const APPLIED_APPLICATION_STATUSES = new Set(['Applied', 'Shortlisted', 'Assessment', 'Interview', 'Offer', 'Rejected']);
+
+const normalized = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+function urlFingerprint(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (!/^https?:$/.test(url.protocol)) return null;
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    const path = decodeURIComponent(url.pathname).replace(/\/+$/, '').toLowerCase();
+    const ids = (path.match(/[a-z]{0,4}\d{5,}[a-z0-9]*/g) || []).filter((token) => token.length >= 6);
+    return { host, path, ids };
+  } catch {
+    return null;
+  }
+}
+
+/** Same page, a confirmation sub-page of it, or the same job posting id. */
+function detectionMatchesJob(detectionUrl, jobUrl) {
+  const a = urlFingerprint(detectionUrl);
+  const b = urlFingerprint(jobUrl);
+  if (!a || !b || a.host !== b.host) return false;
+  if (a.path === b.path) return true;
+  if (a.path && b.path && (a.path.startsWith(`${b.path}/`) || b.path.startsWith(`${a.path}/`))) return true;
+  return a.ids.some((id) => b.ids.includes(id));
+}
+
+/**
+ * When the confirmation page lives on a different host, fall back to the role
+ * title plus company appearing on the detected page. Both must match, so a
+ * generic "thanks for applying" page can never mark an unrelated job.
+ */
+function detectionMatchesRole(detection, candidate) {
+  const title = normalized(candidate.title);
+  if (!title || title.length < 6) return false;
+  const haystack = normalized(`${detection.title || ''} ${detection.url || ''}`);
+  if (!haystack) return false;
+  const company = normalized(candidate.company);
+  if (company && !haystack.includes(company) && !normalized(detection.company || '').includes(company)) return false;
+  if (haystack.includes(title)) return true;
+  // ATS titles carry location/seniority suffixes, so require most meaningful
+  // words of the tracked role to appear on the confirmation page.
+  const words = title.split(/[^a-z0-9+#.]+/).filter((word) => word.length >= 3);
+  if (words.length < 2) return false;
+  const hits = words.filter((word) => haystack.includes(word)).length;
+  return hits / words.length >= 0.6;
+}
+
+function requestExtensionDetections({ scan = false, timeoutMs = 2000 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') { resolve([]); return; }
+    // No bridge on this page (extension missing or stale): do not make the
+    // tracker wait for a reply that can never come.
+    if (typeof document === 'undefined' || document.documentElement?.dataset?.hamzoohExtension !== '1') {
+      resolve([]);
+      return;
+    }
+    const requestId = `detsub_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    let settled = false;
+    const finish = (items) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', onMessage);
+      resolve(Array.isArray(items) ? items : []);
+    };
+    function onMessage(event) {
+      if (event.source !== window || event.data?.source !== 'hamzooh-extension') return;
+      if (event.data.type !== 'HAMZOOH_DETECTED_SUBMISSIONS' || event.data.requestId !== requestId) return;
+      finish(event.data.items);
+    }
+    window.addEventListener('message', onMessage);
+    window.postMessage({
+      source: 'hamzooh-app',
+      type: scan ? 'HAMZOOH_SCAN_SUBMISSIONS' : 'HAMZOOH_LIST_DETECTED_SUBMISSIONS',
+      requestId,
+    }, '*');
+    setTimeout(() => finish([]), timeoutMs);
+  });
+}
+
+function clearExtensionDetection(id) {
+  if (!id || typeof window === 'undefined') return;
+  window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_CLEAR_DETECTED_SUBMISSION', id }, '*');
+}
+
+/**
+ * Consume confirmation pages the extension noticed in the browser — including
+ * manual applies from a job page with no auto-apply task — and mark the
+ * matching tracked role as Applied.
+ */
+export async function reconcileDetectedSubmissions({
+  jobId = '', jobUrl = '', jobTitle = '', jobCompany = '', onlyCurrentJob = false, scan = false,
+} = {}) {
+  try {
+    const detections = await requestExtensionDetections({ scan });
+    if (!detections.length) return false;
+
+    const candidates = [];
+    const addCandidate = (seed = {}) => {
+      const id = seed.jobId ? String(seed.jobId) : '';
+      const url = String(seed.jobUrl || '').trim();
+      if (!id && !url) return;
+      if (candidates.some((item) => (id && item.jobId === id) || (url && item.jobUrl === url))) return;
+      candidates.push({
+        jobId: id,
+        jobUrl: url,
+        title: String(seed.title || '').trim(),
+        company: String(seed.company || '').trim(),
+      });
+    };
+    resumeStore.getAll().forEach(addCandidate);
+    applicationStore.getAll().forEach(addCandidate);
+    if (jobId || jobUrl || jobTitle) addCandidate({ jobId, jobUrl, title: jobTitle, company: jobCompany });
+
+    const scoped = onlyCurrentJob
+      ? candidates.filter((candidate) => (
+        (jobId && candidate.jobId === String(jobId))
+        || (jobUrl && candidate.jobUrl === String(jobUrl))
+        || (jobTitle && normalized(candidate.title) === normalized(jobTitle)
+          && (!jobCompany || normalized(candidate.company) === normalized(jobCompany)))
+      ))
+      : candidates;
+    if (!scoped.length) return false;
+
+    let changed = false;
+    for (const detection of detections.slice(0, 20)) {
+      if (!detection?.url) continue;
+      let match = scoped.find((candidate) => candidate.jobUrl && detectionMatchesJob(detection.url, candidate.jobUrl));
+      if (!match) match = scoped.find((candidate) => detectionMatchesRole(detection, candidate));
+      if (!match) continue;
+
+      const appliedAt = detection.at || new Date().toISOString();
+      const existing = applicationStore.getAll().find((app) => (
+        (match.jobId && String(app.jobId || '') === match.jobId)
+        || (match.jobUrl && normalized(app.jobUrl) === normalized(match.jobUrl))
+        || (app.appliedViaDetectedPage && normalized(app.company) === normalized(match.company)
+          && normalized(app.title) === normalized(match.title))
+      ));
+
+      if (existing) {
+        if (!APPLIED_APPLICATION_STATUSES.has(existing.status || 'Applied')) {
+          applicationStore.update(existing.id, {
+            status: 'Applied',
+            stage: existing.stage || 'apply',
+            appliedViaDetectedPage: true,
+            detectedUrl: detection.url,
+            detectedAt: appliedAt,
+            appliedAt: existing.appliedAt || appliedAt,
+            statusSource: existing.statusSource || 'extension-detection',
+            jobId: existing.jobId || match.jobId || undefined,
+            jobUrl: existing.jobUrl || match.jobUrl || detection.url,
+          });
+          changed = true;
+        } else if (!existing.detectedUrl) {
+          applicationStore.update(existing.id, {
+            appliedViaDetectedPage: true,
+            detectedUrl: detection.url,
+            detectedAt: appliedAt,
+          });
+        }
+      } else {
+        applicationStore.add({
+          title: match.title || detection.title || '',
+          company: match.company || detection.company || '',
+          jobId: match.jobId || undefined,
+          jobUrl: match.jobUrl || detection.url,
+          status: 'Applied',
+          stage: 'apply',
+          appliedViaDetectedPage: true,
+          detectedUrl: detection.url,
+          detectedAt: appliedAt,
+          appliedAt,
+          statusSource: 'extension-detection',
+        });
+        changed = true;
+      }
+
+      if (match.jobId && !applyProgressStore.get(match.jobId)?.apply) {
+        applyProgressStore.mark(match.jobId, 'apply', { company: match.company, title: match.title });
+        changed = true;
+      }
+      clearExtensionDetection(detection.id);
+    }
+    return changed;
+  } catch {
+    return false;
+  }
+}
+
 export async function reconcileSubmittedApplications({ limit = 25, jobId = '', jobUrl = '', jobTitle = '', jobCompany = '' } = {}) {
   try {
     const res = await api.listApplicationTasks(limit);
@@ -551,17 +740,17 @@ export async function reconcileSubmittedApplications({ limit = 25, jobId = '', j
         && norm(jobTitle) === norm(title)
         && norm(jobCompany) === norm(company);
       const matchesCurrentJob = Boolean(jobId) && ((jobUrl && sameJobPage(jobUrl, task.url)) || sameRole);
-      const jobId = matchesCurrentJob ? String(jobId) : (task.job?.id ? String(task.job.id) : '');
-      const already = existing.some((app) => (
+      const resolvedJobId = matchesCurrentJob ? String(jobId) : (task.job?.id ? String(task.job.id) : '');
+      const match = existing.find((app) => (
         (task.id && String(app.taskId || '') === String(task.id))
-        || (jobId && String(app.jobId || '') === jobId)
-        || (app.appliedViaExtension && norm(app.company) === norm(company) && norm(app.title) === norm(title))
+        || (resolvedJobId && String(app.jobId || '') === resolvedJobId)
+        || (norm(app.company) === norm(company) && norm(app.title) === norm(title))
       ));
-      if (!already && (title || company)) {
+      if (!match && (title || company)) {
         applicationStore.add({
           title,
           company,
-          jobId: jobId || undefined,
+          jobId: resolvedJobId || undefined,
           jobUrl: task.url || '',
           status: 'Applied',
           stage: 'apply',
@@ -570,10 +759,32 @@ export async function reconcileSubmittedApplications({ limit = 25, jobId = '', j
           taskId: task.id,
           resumeUsed: task.resumeName || task.selectedResume?.name || 'Tailored Resume (AI agent)',
         });
-        existing.push({ taskId: task.id, jobId, company, title, appliedViaExtension: true });
+        existing.push({ taskId: task.id, jobId: resolvedJobId, company, title, appliedViaExtension: true, status: 'Applied' });
+        changed = true;
+      } else if (match && !APPLIED_APPLICATION_STATUSES.has(match.status || 'Applied')) {
+        // A referral/outreach record for the same role must not hide a real
+        // submission. Upgrade it instead of adding a duplicate.
+        applicationStore.update(match.id, {
+          status: 'Applied',
+          stage: match.stage || 'apply',
+          appliedViaExtension: true,
+          appliedViaManualSubmission: task.result?.reasonCode === 'MANUAL_SUBMISSION',
+          taskId: match.taskId || task.id,
+          jobId: match.jobId || resolvedJobId || undefined,
+          jobUrl: match.jobUrl || task.url || '',
+          appliedAt: match.appliedAt || task.result?.at || task.updatedAt || new Date().toISOString(),
+        });
+        Object.assign(match, {
+          status: 'Applied',
+          taskId: match.taskId || task.id,
+          jobId: match.jobId || resolvedJobId,
+          appliedViaExtension: true,
+        });
         changed = true;
       }
-      if (jobId) applyProgressStore.mark(jobId, 'apply', { company, title });
+      if (resolvedJobId && !applyProgressStore.get(resolvedJobId)?.apply) {
+        applyProgressStore.mark(resolvedJobId, 'apply', { company, title });
+      }
     }
     return changed;
   } catch {

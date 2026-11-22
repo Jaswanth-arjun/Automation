@@ -7,7 +7,8 @@
 
   const FIELD_HINTS = [
     { key: 'email', test: /e-?mail/i },
-    { key: 'phone', test: /phone|mobile|\btel\b|telephone|cell/i },
+    { key: 'phone', test: /^(?!.*(extension|\bext\b)).*(phone|mobile|\btel\b|telephone|cell)/i },
+    { key: 'phoneExtension', test: /extension|\bext\b/i },
     { key: 'firstName', test: /first.?name|given.?name|firstname/i },
     { key: 'lastName', test: /last.?name|surname|family.?name|lastname/i },
     { key: 'fullName', test: /^name$|full.?name|your.?name|legal.?name|candidate.?name|applicant.?name/i },
@@ -47,6 +48,66 @@
 
   const skipped = [];
   const logs = [];
+
+  // The candidate pressed Skip on a question. Asking that same question again
+  // on the next pass (or the next page step) is what made the overlay look
+  // stuck, so a skip is remembered for the rest of THIS application. It is
+  // scoped per application: skipping "notice period" on one job must never
+  // silence that question on the next one.
+  const SKIP_STORAGE_KEY = 'skippedQuestions';
+  let SKIPPED_QUESTIONS = {};
+  let SKIP_SCOPE = '';
+
+  function skipKeyFor(question) {
+    return normalizeQuestion(question) || String(question || '').toLowerCase().trim().slice(0, 200);
+  }
+
+  function isSkippedQuestion(question) {
+    const key = skipKeyFor(question);
+    return Boolean(key && SKIPPED_QUESTIONS[key]);
+  }
+
+  function skipScopeFor(pending) {
+    const id = pending?.taskId || pending?.runId || pending?.sessionId || '';
+    const url = String(pending?.url || location.href || '').split('?')[0].split('#')[0];
+    return id ? `task:${id}` : `url:${url}`;
+  }
+
+  async function loadSkippedQuestions(pending = null) {
+    SKIP_SCOPE = skipScopeFor(pending);
+    try {
+      const stored = await chrome.storage.local.get(SKIP_STORAGE_KEY);
+      const all = stored?.[SKIP_STORAGE_KEY];
+      const scoped = all && typeof all === 'object' ? all[SKIP_SCOPE] : null;
+      SKIPPED_QUESTIONS = scoped && typeof scoped === 'object' ? scoped : {};
+    } catch {
+      SKIPPED_QUESTIONS = {};
+    }
+  }
+
+  async function rememberSkippedQuestion(question) {
+    const key = skipKeyFor(question);
+    if (!key) return;
+    SKIPPED_QUESTIONS[key] = { question: String(question || '').slice(0, 300), at: Date.now() };
+    try {
+      if (extensionAlive()) {
+        const stored = await chrome.storage.local.get(SKIP_STORAGE_KEY);
+        const all = stored?.[SKIP_STORAGE_KEY];
+        const next = all && typeof all === 'object' && !Array.isArray(all) ? { ...all } : {};
+        next[SKIP_SCOPE || 'global'] = SKIPPED_QUESTIONS;
+        await chrome.storage.local.set({ [SKIP_STORAGE_KEY]: next });
+      }
+    } catch {}
+    runEvent('question_skipped', { question: String(question || '').slice(0, 200) }, 'Skip pressed — this question will not be asked again.');
+    // The dashboard keeps a pending card for the question until it is told
+    // otherwise, so the skip has to reach the backend as well.
+    if (taskMode()) {
+      await taskCall('/api/applications/extension/question/skip', {
+        question, reason: 'Skipped by the candidate — do not ask again.',
+      }).catch(() => null);
+    }
+  }
+
   let filling = false;
   let CURRENT_RUN_ID = '';
   let CURRENT_DRY_RUN = false;
@@ -79,14 +140,26 @@
       runEvent('dry_run_skipped_question', { question: String(question || '').slice(0, 200), reason, options }, 'Dry run: question left unanswered');
       return null;
     }
+    // A question the candidate already skipped is not asked again. This is the
+    // whole point of the Skip button: pressing it once must silence the
+    // question for the rest of the run instead of re-prompting forever.
+    if (isSkippedQuestion(question)) {
+      runEvent('question_skipped_recall', { question: String(question || '').slice(0, 200) }, 'Question was skipped earlier — not asking again.');
+      return { skipped: true };
+    }
     // One question never decides the fate of the next one. An earlier timeout
     // must not turn every later question into a silent skip: that is how a run
     // "finishes" with fields nobody answered. Each question is asked on its
     // own, and in task mode the dashboard is an equal answering channel.
-    if (!taskMode()) return askHamzoohQuestion(question, index, total, options, reason);
+    if (!taskMode()) {
+      const answer = await askHamzoohQuestion(question, index, total, options, reason);
+      if (answer?.skipped) await rememberSkippedQuestion(question);
+      return answer;
+    }
     let overlaySettled = false;
-    const overlay = askHamzoohQuestion(question, index, total, options, reason).then((value) => {
+    const overlay = askHamzoohQuestion(question, index, total, options, reason).then(async (value) => {
       overlaySettled = true;
+      if (value?.skipped) await rememberSkippedQuestion(question);
       return value;
     });
     const dashboard = waitForDashboardAnswer(question, 180000).then((value) => {
@@ -139,7 +212,10 @@
   // "None Selected", "-- Select --") is empty. Reading that text as a committed
   // value made the run skip the field entirely and click Next with every
   // required question unanswered.
-  const EMPTY_CHOICE_RE = /^(?:no selections?|none selected|nothing selected|not selected|no value|no answer|select one|select(?:\.\.\.|…)?|please select|choose(?: an option| a value| one)?|search|type to search|none|-+|—+|\*|required|optional)$/i;
+  // "Select an option" is the most common placeholder of all (React-Select,
+  // layout-B comboboxes) and used to read as a committed value, so the run
+  // skipped the dropdown and the page rejected Next.
+  const EMPTY_CHOICE_RE = /^(?:no selections?|none selected|nothing selected|not selected|no value|no answer|select one|select(?:\.\.\.|…)?|select an option|please select|choose(?: an option| a value| one)?|search|type to search|none|-+|—+|\*|required|optional)$/i;
 
   function isEmptyChoiceText(text) {
     const value = String(text || '')
@@ -190,6 +266,10 @@
     if (PLACEHOLDER_PROMPT_RE.test(value)) return true;
     // A dropdown's own empty-state label is not a question and not an option.
     if (isEmptyChoiceText(raw)) return true;
+    // "No" is a real option on almost every Yes/No question. The old 3-letter
+    // rule discarded it, so a dropdown that only offered Yes/No looked like it
+    // had a single choice and could never answer "No".
+    if (/^(yes|no|y|n|ok)$/i.test(value)) return false;
     if (!/[a-z]{3}/i.test(value)) return true;
     return false;
   }
@@ -370,15 +450,20 @@
   // Every required field on this step that still has no value: plain inputs,
   // unchecked required radio/checkbox groups, and custom listbox dropdowns.
   function requiredEmptyFields() {
+    // A field the candidate explicitly skipped stays empty on purpose. Counting
+    // it again would put the run back into "waiting for your answer" and re-ask
+    // the very question they dismissed.
     const empty = collectInputs().filter((input) => {
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (['hidden', 'password', 'submit', 'button'].includes(type)) return false;
       if (!isRequiredField(input, questionFor(input))) return false;
       if (type === 'radio' || type === 'checkbox') return false;
+      if (isSkippedQuestion(questionFor(input))) return false;
       return type === 'file' ? !input.files?.length : isPlaceholderValue(input);
     });
     requiredGroupsOf().forEach((group) => {
       if (group.items.some((input) => input.checked)) return;
+      if (isSkippedQuestion(group.question || '')) return;
       // EEO/demographic groups are answered with "decline" when offered and
       // otherwise left for the candidate, never turned into a blocking prompt.
       if (isEeoQuestion(group.question || '')) return;
@@ -386,7 +471,7 @@
       empty.push(group.items[0]);
     });
     emptyRequiredDropdowns().forEach((widget) => empty.push(widget));
-    return empty;
+    return empty.filter((el) => !isSkippedQuestion(questionFor(el)));
   }
 
   // Apply an answer to whatever the required field is: text box, native select,
@@ -556,6 +641,25 @@
     return data?.ok ? data : null;
   }
 
+  // Answered questions on this task, normalized by question text, so the filler
+  // can apply a dashboard answer instead of asking the same question again.
+  let TASK_ANSWERS_MAP = {};
+  let TASK_ANSWERS_REFRESH_AT = 0;
+  async function refreshTaskAnswers() {
+    if (Date.now() - TASK_ANSWERS_REFRESH_AT < 500) return TASK_ANSWERS_MAP;
+    TASK_ANSWERS_REFRESH_AT = Date.now();
+    try {
+      const snapshot = await taskState();
+      const map = {};
+      (snapshot?.answers || []).forEach((item) => {
+        const question = String(item?.question || '').trim();
+        if (question && item?.answer) map[normalizeQuestion(question)] = item.answer;
+      });
+      TASK_ANSWERS_MAP = map;
+    } catch {}
+    return TASK_ANSWERS_MAP;
+  }
+
   async function waitForDashboardAnswer(question, timeoutMs = 180000) {
     if (!taskMode()) return null;
     const startedAt = Date.now();
@@ -564,8 +668,12 @@
       const state = await taskState();
       if (!state) continue;
       if (state.status === 'cancelled' || state.status === 'failed') return { cancelled: true };
-      const answered = (state.answers || []).find((item) => item.question === question);
-      if (answered?.answer) return { answer: answered.answer, via: 'dashboard' };
+      const answered = (state.answers || []).find((item) => item.question === question
+        || questionSimilarity(normalizeQuestion(item.question || ''), normalizeQuestion(question)) >= 0.45);
+      if (answered?.answer) {
+        TASK_ANSWERS_MAP[normalizeQuestion(question)] = answered.answer;
+        return { answer: answered.answer, via: 'dashboard' };
+      }
       // Tell the caller to stop asking instead of leaving it waiting forever on
       // a card for an application that is already finished.
       if (state.status === 'submitted') return { submitted: true };
@@ -1161,9 +1269,26 @@
     return humanized.length >= 3 ? humanized : '';
   }
 
+  // aria-labelledby and the visual <label> often carry the same sentence, and
+  // questionForRaw joins both. The candidate then saw "…job? …job?" on the
+  // prompt card. Collapse an exact repeat while keeping a genuinely different
+  // second clause.
+  function dedupeRepeatedPrompt(text) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!value) return value;
+    const half = Math.floor(value.length / 2);
+    for (const cut of [half, Math.ceil(value.length / 2)]) {
+      const left = value.slice(0, cut).trim();
+      const right = value.slice(cut).trim();
+      if (left && left === right) return left;
+      if (left && right && left.toLowerCase() === right.toLowerCase()) return left;
+    }
+    return value;
+  }
+
   function questionFor(el) {
     const originalRaw = questionForRaw(el);
-    const raw = sanitizePromptText(originalRaw);
+    const raw = dedupeRepeatedPrompt(sanitizePromptText(originalRaw));
     if (raw && !isNoisePrompt(originalRaw)) return raw;
     const labelledBy = el.getAttribute?.('aria-labelledby')
       ? String(el.getAttribute('aria-labelledby')).split(/\s+/)
@@ -1179,7 +1304,7 @@
       labelFor(el),
     ];
     for (const candidate of candidates) {
-      const value = sanitizePromptText(candidate);
+      const value = dedupeRepeatedPrompt(sanitizePromptText(candidate));
       if (value && !isNoisePrompt(candidate)) return value;
     }
     const derived = fieldLabelFromAutomationId(el);
@@ -1255,6 +1380,7 @@
     const map = {
       email: profile.email || '',
       phone: phoneDigits.length > 10 ? phoneDigits.slice(-10) : phoneDigits,
+      phoneExtension: '',
       firstName: first || '',
       lastName: rest.join(' ') || '',
       fullName: name,
@@ -1306,10 +1432,50 @@
       )).join('')).join(' ');
   }
 
+  function normalizePhoneValue(label, value) {
+    if (!/phone|mobile|\btel\b|telephone|cell/i.test(label) || /extension|\bext\b/i.test(label)) return value;
+    const digits = String(value || '').replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+    if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
+    if (digits.length > 10) return digits.slice(-10);
+    return digits || value;
+  }
+
+  function normalizeNoticePeriod(label, value) {
+    if (!/notice\s*period/i.test(label)) return value;
+    const text = String(value || '').trim().toLowerCase();
+    if (/in\s+days|days/i.test(label)) {
+      if (/immediate|immediately|none|fresh|na|n\/a|^0\b/.test(text)) return '0';
+      const mMatch = text.match(/(\d+)\s*month/);
+      if (mMatch) return String(Number(mMatch[1]) * 30);
+      const dMatch = text.match(/(\d+)\s*day/);
+      if (dMatch) return dMatch[1];
+      const digits = text.replace(/\D/g, '');
+      if (digits) return digits;
+      return '0';
+    }
+    return value;
+  }
+
+  function normalizeExperience(label, value) {
+    if (!/total\s*experience|years\s*of\s*experience/i.test(label)) return value;
+    const text = String(value || '').trim().toLowerCase();
+    if (/in\s*years|years/i.test(label)) {
+      if (/fresher|student|none|fresh|immediate|^0\b/.test(text)) return '0';
+      const digits = text.replace(/[^\d.]/g, '');
+      if (digits) return digits;
+      return '0';
+    }
+    return value;
+  }
+
   function normalizeValueForInput(input, value) {
     if (!input || typeof value !== 'string' || input.tagName === 'SELECT') return value;
     const label = `${labelFor(input)} ${input.getAttribute?.('name') || ''} ${input.getAttribute?.('placeholder') || ''} ${input.getAttribute?.('aria-label') || ''}`;
-    const normalized = isPersonNameField(label) ? titleCaseName(value) : value;
+    let normalized = isPersonNameField(label) ? titleCaseName(value) : value;
+    normalized = normalizePhoneValue(label, normalized);
+    normalized = normalizeNoticePeriod(label, normalized);
+    normalized = normalizeExperience(label, normalized);
     return normalizeNumericValue(input, label, normalized);
   }
 
@@ -1319,10 +1485,19 @@
     const text = String(value || '').trim();
     if (!text || !/\d/.test(text)) return value;
     if (!/salary|compensation|\bctc\b|stipend|annual pay|expected pay|amount|remuneration/i.test(label)) return value;
+    const inLacs = /\b(?:in\s+lacs?|in\s+lakhs?|lacs?\s+per\s+annum|lakhs?\s+per\s+annum)\b/i.test(label);
     const lpa = text.replace(/[,\s]/g, '').match(/^(\d+(?:\.\d+)?)(lpa|lakh|lakhs|lac|lacs)$/i);
-    if (lpa) return String(Math.round(Number(lpa[1]) * 100000));
+    if (lpa) {
+      return inLacs ? lpa[1] : String(Math.round(Number(lpa[1]) * 100000));
+    }
     const digits = text.replace(/^(?:inr|rs\.?|\u20b9)/i, '').replace(/[,\s\u20b9]/g, '');
-    return /^\d+(?:\.\d+)?$/.test(digits) ? digits : value;
+    if (/^\d+(?:\.\d+)?$/.test(digits)) {
+      if (inLacs && Number(digits) >= 10000) {
+        return (Number(digits) / 100000).toFixed(1).replace(/\.0$/, '');
+      }
+      return digits;
+    }
+    return value;
   }
 
   function squashValue(value) {
@@ -1345,9 +1520,32 @@
     if (isPlaceholderValue(input)) return false;
     const current = squashValue(input.value);
     if (!current) return false;
+
+    // Person name: if current value is ALL CAPS (e.g. Workday autofill put "NELLURU"), it must be corrected!
+    if (isPersonNameField(label)) {
+      const letters = String(input.value || '').replace(/[^A-Za-z]/g, '');
+      const isAllCaps = letters.length > 2 && letters === letters.toUpperCase();
+      if (isAllCaps) return false;
+      return current === exp;
+    }
+
+    // Phone numbers: if current value starts with country code (e.g. "+91 9440552825") while expected is 10 digits, it needs normalization!
+    if (/(phone|mobile|\btel\b)/i.test(label) && !/extension|\bext\b/i.test(label)) {
+      const curDigits = String(input.value || '').replace(/\D/g, '');
+      const expDigits = String(expected || '').replace(/\D/g, '');
+      if (curDigits.length > expDigits.length && curDigits.endsWith(expDigits)) {
+        return false;
+      }
+      return curDigits === expDigits;
+    }
+
+    // Phone Extension: if it holds a 7+ digit phone number, clear it!
+    if (/extension|\bext\b/i.test(label)) {
+      const digits = String(input.value || '').replace(/\D/g, '');
+      if (digits.length >= 7) return false;
+    }
+
     if (current === exp) return true;
-    // Phone numbers may carry formatting or a country code.
-    if (/(phone|mobile|\btel\b)/i.test(label)) return current.endsWith(exp) || exp.endsWith(current);
     return false;
   }
 
@@ -1381,12 +1579,31 @@
         input.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
         return true;
       }
+      try { input.focus(); } catch {}
+
+      // Reset React's internal valueTracker so React synthetic event system detects state transition
+      const tracker = input._valueTracker;
+      if (tracker) {
+        try { tracker.setValue(''); } catch {}
+      }
+
       const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      setter?.call(input, value);
-      input.dispatchEvent(new InputEvent('input', { bubbles: true, data: String(value), inputType: 'insertText' }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      input.dispatchEvent(new Event('blur', { bubbles: true }));
+      if (setter) {
+        setter.call(input, value);
+      } else {
+        input.value = value;
+      }
+
+      input.dispatchEvent(new Event('focus', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('focusin', { bubbles: true, composed: true }));
+      try {
+        input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, composed: true, data: String(value), inputType: 'insertText' }));
+      } catch {}
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: String(value), inputType: 'insertText' }));
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('focusout', { bubbles: true, composed: true }));
       return true;
     } catch (err) {
       hamzoohLog('error', 'setNativeValue failed', err.message);
@@ -1643,6 +1860,11 @@
         ?? p.jobPreferences?.workAuthorized ?? p.preferences?.workAuthorized;
       if (flag === true || /^(yes|true|y|1)$/i.test(String(flag || ''))) return 'Yes';
       if (flag === false || /^(no|false|n|0)$/i.test(String(flag || ''))) return 'No';
+      // No explicit flag, but the question names a country the candidate
+      // already lives in ("authorized to work in India?"). That is a fact the
+      // profile answers; a different country must still be left blank.
+      const home = String(p.country || '').trim() || String(p.location || '').split(',').pop().trim();
+      if (home && new RegExp(`\\b${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(q)) return 'Yes';
     }
     if (/(require|need) (company )?(assistance|sponsorship)|require sponsorship|need sponsorship|visa sponsorship|immigration (support|assistance)|assistance to obtain (work )?authori[sz]ation/.test(q)) {
       const flag = p.requireSponsorship ?? p.sponsorshipRequired
@@ -1664,10 +1886,19 @@
       // Always relative to today (or the candidate's configured offset).
       return joiningDateValue(p);
     }
-    if (/currently (enrolled|studying|pursuing)|still (in|at) (college|university|school)|are you a student|pursuing a (bachelor|master|degree)/.test(q)) {
+    if (/currently (enrolled|studying|pursuing)|still (in|at) (college|university|school)|are you a student|pursuing a (bachelor|master|degree)|enrolled in a degree/.test(q)) {
       const explicit = p.currentlyEnrolled ?? p.isStudent;
       if (explicit === true) return 'Yes';
       if (explicit === false) return 'No';
+      // A graduation year still in the future means the candidate is studying
+      // right now. Asking this every time wasted a prompt on a fact the
+      // profile already answers.
+      const years = (Array.isArray(p.education) ? p.education : [])
+        .map((item) => String(item?.graduationYear || item?.endYear || item?.dates || '').match(/(19|20)\d{2}/)?.[0])
+        .filter(Boolean)
+        .map(Number);
+      const latest = years.length ? Math.max(...years) : 0;
+      if (latest) return latest > new Date().getFullYear() ? 'Yes' : 'No';
     }
     if (/desired (annual )?(salary|compensation)|expected (salary|ctc|compensation)|salary expectation|salary requirement|target salary|current (salary|ctc)/.test(q)) {
       const salary = salaryFromProfile(p);
@@ -1692,6 +1923,14 @@
       const c = String(item?.company || '').toLowerCase();
       return c && company && (c.includes(String(company).toLowerCase()) || String(company).toLowerCase().includes(c));
     });
+    if (/government (or government )?agency|employed (with|by) (a |the )?government|government employ|public sector employ|federal employ/.test(q)) {
+      // "Are you currently employed with a government agency…?" is a yes/no
+      // fact the profile can hold, so it never needs to interrupt the run.
+      const flag = profile.governmentEmployee ?? profile.govEmployee
+        ?? profile.jobPreferences?.governmentEmployee;
+      if (flag === true || /^(yes|true|y|1)$/i.test(String(flag || ''))) return 'yes';
+      if (flag === false || /^(no|false|n|0)$/i.test(String(flag || ''))) return 'no';
+    }
     if (/employed by|worked (for|at)|previously employed|ever been employed/.test(q)) {
       if (workedHere) return 'yes';
       if (company && (q.includes(String(company).toLowerCase()) || /this company|the company/.test(q))) return 'no';
@@ -1836,6 +2075,8 @@
       const question = questionFor(widget);
       // Already answered correctly in an earlier pass: never touch it again.
       if (dropdownHasValue(widget)) continue;
+      // Skipped by the candidate: never re-ask this dropdown.
+      if (isSkippedQuestion(question)) continue;
       // A sensitive question is decided by its own category, never by a generic
       // field hint: "...authorization to work in the job location?" would
       // otherwise be answered with the candidate's city.
@@ -2303,15 +2544,25 @@
     for (const el of nodes) {
       if (!visible(el)) continue;
       const text = String(el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
-      // Workday renders informational hints as [role="alert"] ("Alert: Verify
-      // that the field ... is correctly capitalized"). They are not errors.
-      if (!text || text.length >= 300 || /^alert\s*:/i.test(text) || isNoisePrompt(text)) continue;
+      // If container holds multiple errors (like Workday "Errors Found (8 items)"), extract each line
+      if (text.length >= 300 && /error|alert|required/i.test(text)) {
+        const lines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 5 && l.length < 250);
+        for (const line of lines) {
+          if (/error|alert|required|is correctly capitalized/i.test(line) && !out.includes(line)) {
+            out.push(line);
+          }
+        }
+        continue;
+      }
+      // Workday renders capitalization warnings as [role="alert"] ("Alert: Verify that the field ... is correctly capitalized").
+      // Keep capitalization alerts so refillErrorFields can auto-correct them!
+      if (!text || text.length >= 300 || (/^alert\s*:/i.test(text) && !/capital/i.test(text)) || isNoisePrompt(text)) continue;
       if (!out.includes(text)) out.push(text);
     }
     const body = String(document.body?.innerText || '').slice(0, 4000);
     const match = body.match(/(?:please|must) (?:fill|complete|enter|select|answer)[^\n.]{0,120}/gi);
     if (match) match.slice(0, 5).forEach((text) => { if (!out.includes(text)) out.push(text); });
-    return out.slice(0, 10);
+    return out.slice(0, 20);
   }
 
   function allFileInputs() {
@@ -2322,13 +2573,19 @@
     });
   }
 
-  async function attachGeneratedResume(pending) {
-    const fromBg = await runtimeSend({ type: 'HAMZOOH_GET_RESUME' });
-    if (fromBg?.resumeBase64) {
-      pending.resumeBase64 = fromBg.resumeBase64;
-      pending.resumeName = fromBg.resumeName || pending.resumeName;
+  async function ensureResumeFile(pending) {
+    if (!pending?.resumeBase64) {
+      const fromBg = await runtimeSend({ type: 'HAMZOOH_GET_RESUME' });
+      if (fromBg?.resumeBase64) {
+        pending.resumeBase64 = fromBg.resumeBase64;
+        pending.resumeName = fromBg.resumeName || pending.resumeName;
+      }
     }
-    const file = resumeFile(pending);
+    return resumeFile(pending);
+  }
+
+  async function attachGeneratedResume(pending) {
+    const file = await ensureResumeFile(pending);
     if (!file) {
       skipped.push({ field: 'resume', reason: 'No tailored resume bytes were available to attach.' });
       sendProgress('resume_missing', '⚠️ Tailored resume was not available to attach.');
@@ -2367,19 +2624,8 @@
           || Boolean(document.querySelector('[data-automation-id="file-upload-item"], [data-automation-id*="file"]'));
       }
     }
-    // LinkedIn: if existing resumes are displayed in the Easy Apply modal, ensure one is selected
-    if (!attached) {
-      const linkedInResumeOptions = queryAllDeep('.jobs-document-upload__title, [data-test-document-upload-resume], .jobs-resume-picker__resume-item');
-      if (linkedInResumeOptions.length > 0) {
-        const radio = queryAllDeep('input[type="radio"]', linkedInResumeOptions[0]).find(visible);
-        if (radio && !radio.checked) {
-          try { radio.click(); } catch {}
-        } else {
-          try { linkedInResumeOptions[0].click(); } catch {}
-        }
-        attached = true;
-      }
-    }
+    // Never fall back to whatever resume LinkedIn happens to have selected.
+    // The tailored resume must be the one attached to this application.
     if (attached) {
       // Phase 1i: confirm the browser actually holds the file and, where the
       // page shows it, that its name is visible before moving to Next.
@@ -2401,31 +2647,150 @@
   }
 
   // LinkedIn Easy Apply often shows previously uploaded resumes instead of a
-  // file input. Pick one (or open the upload control) before pressing Next.
+  // file input. The tailored resume must still win: upload it (or select the
+  // row that already holds it), and never silently reuse another resume.
+  function linkedInResumeOptionRows(modal = findLinkedInModal() || document) {
+    const rows = queryAllDeep(
+      '.jobs-document-upload__title, [data-test-document-upload-resume], .jobs-resume-picker__resume-item, .jobs-document-upload__container li, li',
+      modal,
+    ).filter((el) => visible(el)
+      && /\.(pdf|docx?|doc)\b/i.test(el.innerText || '')
+      && (el.innerText || '').replace(/\s+/g, ' ').length < 220);
+    // Keep the innermost row: wrappers list every file and would confuse clicks.
+    return rows.filter((el) => !rows.some((other) => other !== el && el.contains(other)));
+  }
+
+  async function chooseLinkedInResumeOption(row) {
+    if (!row) return false;
+    const scope = row.closest('li, label, .jobs-document-upload__container, [data-test-document-upload-resume]') || row;
+    const radio = queryAllDeep('input[type="radio"]', scope).find(visible)
+      || scope.querySelector?.('input[type="radio"]');
+    if (radio?.checked) return true;
+    // Click the title text, never the whole row: each row also holds a
+    // download icon, and clicking the centre used to download the resume.
+    const title = queryAllDeep('.jobs-document-upload__title', scope).find(visible) || row;
+    await realClick(title);
+    await sleep(450);
+    if (radio && !radio.checked) {
+      try { radio.click(); } catch {}
+      await sleep(250);
+    }
+    if (radio) return radio.checked;
+    return scope.getAttribute('aria-expanded') === 'true'
+      || scope.getAttribute('aria-checked') === 'true'
+      || /selected|active/i.test(String(scope.className || ''));
+  }
+
+  function linkedInResumePickerPresent() {
+    if (!/linkedin\.com/i.test(location.hostname)) return false;
+    const modal = findLinkedInModal();
+    if (!modal) return false;
+    const text = String(modal.innerText || '');
+    if (/select or upload a resume|upload resume|tailor resume with ai/i.test(text)) return true;
+    return queryAllDeep('input[type="file"]', modal).some(visible);
+  }
+
   async function selectLinkedInResume(pending) {
     if (!/linkedin\.com/i.test(location.hostname)) return false;
     const modal = findLinkedInModal() || document;
-    const options = queryAllDeep('div, li, label, span', modal).filter((el) => visible(el)
-      && /\.(pdf|docx?|doc)\b/i.test(el.innerText || '')
-      && (el.innerText || '').length < 180);
-    if (options.length) {
-      const stem = String(pending?.resumeName || '').replace(/\.[^.]+$/, '').slice(0, 12).toLowerCase();
-      const target = options.find((el) => stem && (el.innerText || '').toLowerCase().includes(stem)) || options[0];
-      await realClick(target);
-      await sleep(700);
-      runEvent('resume_selected', { label: String(target.innerText || '').replace(/\s+/g, ' ').slice(0, 120) }, 'Selected an existing resume in the LinkedIn Easy Apply modal');
-      return true;
+    const file = await ensureResumeFile(pending);
+    const stem = String(pending?.resumeName || file?.name || '').replace(/\.[^.]+$/, '').toLowerCase();
+    const matchesTailored = (row) => {
+      const text = String(row.innerText || '').toLowerCase();
+      if (!text) return false;
+      if (stem.length >= 5 && text.includes(stem)) return true;
+      if (file?.name && text.includes(String(file.name).toLowerCase())) return true;
+      return false;
+    };
+
+    // 1. The tailored resume is already in the list (uploaded on a prior run):
+    //    select exactly that row.
+    let row = linkedInResumeOptionRows(modal).find(matchesTailored);
+    if (row) {
+      const chosen = await chooseLinkedInResumeOption(row);
+      runEvent('resume_selected', {
+        label: String(row.innerText || '').replace(/\s+/g, ' ').slice(0, 140), tailored: true,
+      }, 'Selected the tailored resume in the LinkedIn Easy Apply modal');
+      return chosen;
     }
-    const uploadBtn = queryAllDeep('button, a', modal).find((el) => visible(el)
-      && /^(upload resume|upload (a )?(cv|resume)|choose file)$/i.test((el.innerText || '').trim()));
-    if (uploadBtn) {
-      await realClick(uploadBtn);
-      const startedAt = Date.now();
-      while (Date.now() - startedAt < 3000 && !allFileInputs().length) await sleep(200);
-      return attachGeneratedResume(pending);
+
+    // 2. Upload the tailored PDF — the normal path.
+    if (file) {
+      let input = allFileInputs().find((el) => !el.disabled) || null;
+      if (!input) {
+        const uploadBtn = queryAllDeep('button, a, label', modal).find((el) => visible(el)
+          && /^(upload resume|upload (a )?(cv|resume)|choose file)$/i.test((el.innerText || '').trim()));
+        if (uploadBtn) {
+          await realClick(uploadBtn);
+          const startedAt = Date.now();
+          while (Date.now() - startedAt < 3000 && !allFileInputs().length) await sleep(150);
+          input = allFileInputs().find((el) => !el.disabled) || null;
+        }
+      }
+      if (input) {
+        const attached = attachResume(input, file);
+        if (attached) {
+          runEvent('resume_upload', { name: file.name }, `Uploading tailored resume ${file.name}`);
+          sendProgress('resume_uploading', `📎 Uploading ${file.name}…`);
+          const startedAt = Date.now();
+          let uploadedRow = null;
+          while (Date.now() - startedAt < 15000) {
+            await sleep(500);
+            uploadedRow = linkedInResumeOptionRows(modal).find(matchesTailored);
+            if (uploadedRow) break;
+            if (String(document.body?.innerText || '').toLowerCase().includes(String(file.name).toLowerCase())) {
+              uploadedRow = linkedInResumeOptionRows(modal).find(matchesTailored);
+              if (uploadedRow) break;
+            }
+          }
+          if (!uploadedRow) uploadedRow = linkedInResumeOptionRows(modal).find(matchesTailored);
+          if (uploadedRow) {
+            await chooseLinkedInResumeOption(uploadedRow);
+            sendProgress('resume_attached', `📎 Uploaded ${file.name}`);
+            runEvent('resume_selected', {
+              label: String(uploadedRow.innerText || '').replace(/\s+/g, ' ').slice(0, 140), tailored: true,
+            }, 'Uploaded and selected the tailored resume');
+            return true;
+          }
+          if (allFileInputs().some((el) => el.files && el.files.length > 0)) {
+            sendProgress('resume_attached', `📎 Uploaded ${file.name}`);
+            return true;
+          }
+        }
+      }
+    }
+
+    // 3. Last resort only: say plainly that an existing resume was used.
+    const fallback = linkedInResumeOptionRows(modal)[0];
+    if (fallback) {
+      await chooseLinkedInResumeOption(fallback);
+      runEvent('resume_fallback_existing', {
+        label: String(fallback.innerText || '').replace(/\s+/g, ' ').slice(0, 140),
+      }, 'Tailored resume could not be uploaded — selected an existing resume');
+      sendProgress('resume_fallback', '⚠️ Tailored resume could not be uploaded — selected an existing resume for this step.');
+      return true;
     }
     return false;
   }
+
+  // Premium/upsell cards inside the Easy Apply modal can cover the Next button.
+  // Dismiss the small "Dismiss/Not now" controls, but never the apply modal's
+  // own close button (that would throw the application away).
+  async function dismissBlockingUpsells() {
+    const buttons = queryAllDeep('button, [role="button"]', document).filter((el) => visible(el)
+      && /^(dismiss|no thanks|not now|maybe later|got it|skip|✕|×)$/i
+        .test((el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()));
+    for (const btn of buttons.slice(0, 4)) {
+      const modal = findLinkedInModal();
+      if (modal && modal.contains(btn) && btn.closest('.jobs-easy-apply-modal__header, [data-test-modal-header]')) continue;
+      try {
+        await realClick(btn);
+        await sleep(250);
+        runEvent('upsell_dismissed', { label: buttonText(btn) }, 'Dismissed a blocking promo/upsell');
+      } catch {}
+    }
+  }
+
 
   function detectCaptchaOrMFA() {
     const captchaIframes = queryAllDeep('iframe').filter((iframe) => /recaptcha|hcaptcha|captcha|turnstile|challenge/i.test(
@@ -2516,7 +2881,11 @@
       document.body.appendChild(container);
       const input = container.querySelector('#hamzooh-answer-input');
       const rememberCheck = container.querySelector('#hamzooh-remember-check');
-      const finish = (answer, remember) => { container.remove(); resolve(answer == null ? null : { answer, remember }); };
+      const finish = (answer, remember) => {
+        container.remove();
+        if (answer == null) resolve({ skipped: true });
+        else resolve({ answer, remember });
+      };
       container.querySelectorAll('.hamzooh-chip-btn').forEach((btn) => {
         btn.addEventListener('click', () => finish(btn.getAttribute('data-val'), rememberCheck.checked));
       });
@@ -3302,6 +3671,77 @@
     };
   }
 
+  // ── Global submission detection (no auto-apply task required) ─────────────
+  // The candidate may apply from a job page that Hamzooh only knows from the
+  // Job Tracker, so there is no task token to report against. A real site
+  // confirmation is still solid evidence: remember it, and let the dashboard
+  // match it to a tracked role and move that application to "Applied".
+  let DETECTED_PAGE_REPORTED = false;
+  let LAST_CONFIRMATION_WATCH_AT = 0;
+
+  function jobLikePage() {
+    const haystack = `${document.title || ''} ${location.hostname} ${location.pathname}`;
+    return /job|career|apply|application|position|role|recruit|talent|hiring/i.test(haystack);
+  }
+
+  function pageCompanyGuess() {
+    try {
+      const meta = document.querySelector('meta[property="og:site_name"], meta[name="application-name"]');
+      const fromMeta = (meta?.getAttribute('content') || '').trim();
+      if (fromMeta) return fromMeta.slice(0, 120);
+    } catch {}
+    const host = location.hostname.replace(/^www\./i, '');
+    const base = host.split('.')[0] || host;
+    return base ? base.charAt(0).toUpperCase() + base.slice(1) : '';
+  }
+
+  async function recordDetectedSubmission(hit) {
+    try {
+      const stored = await chrome.storage.local.get('detectedSubmissions');
+      const list = Array.isArray(stored?.detectedSubmissions) ? stored.detectedSubmissions : [];
+      const key = `${location.hostname.replace(/^www\./i, '').toLowerCase()}${location.pathname.replace(/\/+$/, '').toLowerCase()}`;
+      const at = Date.now();
+      if (list.some((item) => item?.key === key && at - Number(item.atMs || 0) < 1000 * 60 * 30)) return;
+      const entry = {
+        id: `det_${at.toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+        key,
+        url: location.href.slice(0, 2000),
+        host: location.hostname,
+        title: String(document.title || '').slice(0, 200),
+        company: pageCompanyGuess(),
+        confirmation: hit.confirmation,
+        atMs: at,
+        at: new Date(at).toISOString(),
+        source: 'content',
+      };
+      await chrome.storage.local.set({ detectedSubmissions: [entry, ...list].slice(0, 30) });
+      runEvent('submission_page_detected', { url: entry.url, title: entry.title }, 'Detected an application confirmation page');
+    } catch {}
+  }
+
+  async function watchSubmissionConfirmation() {
+    if (DETECTED_PAGE_REPORTED || !extensionAlive() || window.top !== window) return;
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    if (!jobLikePage()) return;
+    const now = Date.now();
+    if (now - LAST_CONFIRMATION_WATCH_AT < 10000) return;
+    LAST_CONFIRMATION_WATCH_AT = now;
+    const stored = await chrome.storage.local.get('pendingApply').catch(() => ({}));
+    const pendingApply = stored?.pendingApply || {};
+    const taskId = CURRENT_TASK_ID || pendingApply.taskId || '';
+    const taskToken = CURRENT_TASK_TOKEN || pendingApply.taskToken || '';
+    if (taskId && taskToken && !pendingApply.done) {
+      // An active run owns this submission; report it against the task.
+      await reportManualSubmission();
+      return;
+    }
+    let hit = null;
+    try { hit = submissionConfirmationNow(); } catch { return; }
+    if (!hit) return;
+    DETECTED_PAGE_REPORTED = true;
+    await recordDetectedSubmission(hit);
+  }
+
   async function reportManualSubmission() {
     if (MANUAL_SUBMISSION_REPORTED || SUBMIT_IN_PROGRESS || !extensionAlive()) return;
     // Always check the task's own URL: the dashboard page also contains
@@ -3391,10 +3831,18 @@
 
   async function typeWithCdp(input, value) {
     if (!CDP_AVAILABLE) return false;
-    try { input.focus(); } catch {}
+    try {
+      input.focus();
+      if (typeof input.select === 'function') input.select();
+      setNativeValue(input, '');
+    } catch {}
     const ok = await cdpInput({ action: 'type', text: String(value) });
     if (!ok) { CDP_AVAILABLE = false; return false; }
-    try { input.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+    try {
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true, data: String(value) }));
+      input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+    } catch {}
     return String(input.value) === String(value);
   }
 
@@ -3404,6 +3852,15 @@
     const target = normalizeValueForInput(input, value);
     if (!setNativeValue(input, target)) return false;
     await sleep(80);
+    // On complex ATS like Workday, textareas and fields in error state need trusted CDP typing
+    // so Workday's React state and client-side validators register genuine user keystrokes!
+    if (CDP_AVAILABLE && (input.tagName === 'TEXTAREA' || input.getAttribute('aria-invalid') === 'true')) {
+      const recovered = await typeWithCdp(input, target);
+      if (recovered) {
+        runEvent('cdp_type', { tag: input.tagName, name: input.name || '', value: String(target).slice(0, 80) }, 'Typed with CDP into textarea/invalid field');
+        return true;
+      }
+    }
     if (String(input.value) === String(target)) return true;
     const recovered = await typeWithCdp(input, target);
     if (recovered) {
@@ -3457,6 +3914,11 @@
   }
 
   async function fillUnknownField(input, question, options, answers, profile, pending, index, total) {
+    // The candidate skipped this one: never spend an AI call or a prompt on it.
+    if (isSkippedQuestion(question)) {
+      skipped.push({ field: String(question || '').slice(0, 80), reason: 'Skipped by you — not asked again.' });
+      return false;
+    }
     // Joining-date questions are always relative to today, never a saved date.
     if (isJoiningDateQuestion(question)) {
       const nextDay = joiningDateValue(profile);
@@ -3466,6 +3928,7 @@
       }
     }
     let savedAnswer = findBestAnswer(question, answers);
+    if (!savedAnswer) savedAnswer = findBestAnswer(question, await refreshTaskAnswers());
     if (!savedAnswer && !taskMode()) savedAnswer = await queryServerVaultMatch(question);
     if (!savedAnswer && taskMode()) {
       const memory = await taskCall('/api/applications/extension/answer-lookup', { question, options });
@@ -3529,7 +3992,8 @@
           consent: false,
           options,
         }).catch(() => null);
-        answers[question.toLowerCase()] = result.answer;
+          TASK_ANSWERS_MAP[normalizeQuestion(question)] = result.answer;
+          answers[question.toLowerCase()] = result.answer;
       } else if (result.remember) {
         await rememberAnswer(answers, question, result.answer);
       }
@@ -3544,28 +4008,75 @@
   // and must have a value."). Use those messages to target and fix the fields
   // the agent missed, then let the caller click Next again.
   async function refillErrorFields(errorTexts, profile, answers, pending) {
+    const allInputs = collectInputs();
+    // Gather all inputs explicitly flagged as invalid by the framework / DOM
+    const invalidInputs = allInputs.filter((el) => {
+      return el.getAttribute('aria-invalid') === 'true'
+        || el.classList.contains('error')
+        || Boolean(el.closest?.('[aria-invalid="true"], [data-automation-id*="error"]'))
+        || Boolean(el.parentElement?.querySelector?.('[role="alert"], [class*="error"], [data-automation-id*="error"]'));
+    });
+
     const names = [];
     for (const text of errorTexts || []) {
       const match = String(text).match(/the field\s+(.+?)\s+is required/i)
-        || String(text).match(/^error\s*[-–:]\s*(.+)$/i);
+        || String(text).match(/field\s+([A-Za-z\s()]+?)\s+is correctly capitalized/i)
+        || String(text).match(/alert\s*[-–:]\s*([A-Za-z\s()]+)/i)
+        || String(text).match(/(?:\d+\.\s*)?error\s*[-–:]\s*(.+)$/i);
       if (match && match[1]) names.push(match[1].replace(/\s+/g, ' ').trim());
+      if (/phone number|phone|country phone code/i.test(String(text))) names.push('phone');
+      if (/capitalized|capital letter/i.test(String(text))) {
+        names.push('given name');
+        names.push('family name');
+        names.push('first name');
+        names.push('last name');
+      }
     }
+
+    // Combine targets: elements identified by error text + elements marked invalid
+    const targetElements = new Set(invalidInputs);
+    for (const name of names) {
+      const cleanName = name.replace(/[?*]+$/g, '').trim().toLowerCase();
+      const matched = allInputs.filter((el) => {
+        const label = (labelFor(el) || '').toLowerCase();
+        return label && (label.includes(cleanName) || cleanName.includes(label.slice(0, 40)));
+      });
+      matched.forEach((el) => targetElements.add(el));
+    }
+
     let fixed = 0;
     let aiCalls = 0;
-    const seen = new Set();
-    for (const name of names) {
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const input = collectInputs().find((el) => {
-        const label = labelFor(el);
-        return label && label.toLowerCase().includes(key);
-      });
-      if (!input) continue;
+    for (const input of targetElements) {
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) continue;
-      const question = labelFor(input) || name;
+      const question = labelFor(input);
       const options = input.tagName === 'SELECT' ? optionList(input).map((o) => o.text.trim()).filter(Boolean) : [];
+
+      // Direct auto-fixes for Workday specific validation alerts
+      if (isPersonNameField(question)) {
+        const titleCased = titleCaseName(input.value || profileValue(profile, 'fullName'));
+        if (titleCased && await setVerified(input, titleCased)) {
+          fixed += 1;
+          runEvent('error_field_fixed', { question, value: titleCased }, `Auto-corrected capitalization on ${question}`);
+          continue;
+        }
+      }
+      if (/phone|mobile/i.test(question) && !/extension/i.test(question)) {
+        const rawDigits = String(input.value || profileValue(profile, 'phone')).replace(/\D/g, '');
+        const clean10 = rawDigits.length > 10 ? rawDigits.slice(-10) : rawDigits;
+        if (clean10 && await setVerified(input, clean10)) {
+          fixed += 1;
+          runEvent('error_field_fixed', { question, value: clean10 }, `Auto-corrected phone format on ${question}`);
+          const ext = collectInputs().find((el) => /extension|\bext\b/i.test(labelFor(el)));
+          if (ext && ext.value) await setVerified(ext, '');
+          continue;
+        }
+      }
+      if (/extension|\bext\b/i.test(question)) {
+        if (input.value) await setVerified(input, '');
+        continue;
+      }
+
       if (isJoiningDateQuestion(question)) {
         const nextDay = joiningDateValue(profile);
         if (await fillDateControl(input, nextDay)) {
@@ -3574,18 +4085,30 @@
           continue;
         }
       }
-      let value = '';
-      const hint = FIELD_HINTS.find((item) => item.test.test(question));
-      if (hint) value = profileValue(profile, hint.key, pending.jobTitle || '', pending.company || '');
-      if (!value) value = chooseFromProfile(question, profile, pending.company || '');
-      if (!value) value = heuristicChoice(question, options, profile);
-      if (!value) value = semanticOptionText(question, options, profile);
-      if (!value && aiCalls < 4 && !(taskMode() && isSensitiveQuestion(question))) {
-        aiCalls += 1;
-        const ai = await inferAnswerWithAI(question, options, profile, pending.jobTitle, pending.company, pending.resumeText, pending);
-        value = ai?.answer || '';
+
+      // If the field already has a value entered (e.g. Workday showed error despite text),
+      // re-normalize it (e.g. notice period "Immediately" -> "0", CTC "360000" -> "3.6")
+      let value = input.value ? normalizeValueForInput(input, input.value) : '';
+      if (!value) {
+        const hint = FIELD_HINTS.find((item) => item.test.test(question));
+        if (hint) value = profileValue(profile, hint.key, pending.jobTitle || '', pending.company || '');
+        if (!value) value = chooseFromProfile(question, profile, pending.company || '');
+        if (!value) value = heuristicChoice(question, options, profile);
+        if (!value) value = semanticOptionText(question, options, profile);
+        if (!value && input.value) value = input.value;
+        if (!value && aiCalls < 4 && !(taskMode() && isSensitiveQuestion(question))) {
+          aiCalls += 1;
+          const ai = await inferAnswerWithAI(question, options, profile, pending.jobTitle, pending.company, pending.resumeText, pending);
+          value = ai?.answer || '';
+        }
       }
-      if (value && await setVerified(input, value)) {
+
+      if (value) {
+        if (CDP_AVAILABLE) {
+          await typeWithCdp(input, value);
+        } else {
+          await setVerified(input, value);
+        }
         fixed += 1;
         runEvent('error_field_fixed', { question: question.slice(0, 80), value: String(value).slice(0, 60) }, `Fixed rejected field "${question.slice(0, 60)}"`);
       }
@@ -3625,6 +4148,34 @@
       // Leave an already-correct value untouched; fix an empty OR wrong one.
       if (inputHasExpectedValue(input, value)) continue;
       if (await setVerified(input, value)) filledCount += 1;
+    }
+
+    // Workday resume autofill post-processing cleanup:
+    // 1. Correct ALL-CAPS names ("NELLURU" -> "Nelluru", "JASWANTH" -> "Jaswanth")
+    // 2. Normalize phone numbers with duplicate country code ("+91 9440552825" -> "9440552825")
+    // 3. Clear phone extension if mistakenly populated with a phone number
+    for (const input of collectInputs()) {
+      const type = (input.getAttribute('type') || '').toLowerCase();
+      if (['file', 'password', 'checkbox', 'radio', 'hidden'].includes(type)) continue;
+      const label = labelFor(input);
+      const val = String(input.value || '').trim();
+      if (!val) continue;
+
+      if (isPersonNameField(label)) {
+        const letters = val.replace(/[^A-Za-z]/g, '');
+        if (letters.length > 2 && letters === letters.toUpperCase()) {
+          const fixed = titleCaseName(val);
+          if (fixed !== val) await setVerified(input, fixed);
+        }
+      } else if (/extension|\bext\b/i.test(label)) {
+        const digits = val.replace(/\D/g, '');
+        if (digits.length >= 7) {
+          await setVerified(input, '');
+        }
+      } else if (/phone|mobile|\btel\b/i.test(label)) {
+        const normalized = normalizePhoneValue(label, val);
+        if (normalized !== val) await setVerified(input, normalized);
+      }
     }
 
     // Start-date / availability fields are always relative to the day AFTER the
@@ -3754,6 +4305,8 @@
       const group = groups[g];
       if (group.items.some((input) => input.checked)) continue;
       const question = group.question || '';
+      // The candidate already pressed Skip on this group: leave it alone.
+      if (isSkippedQuestion(question)) continue;
       const optionTexts = group.items.map((item) => (optionTextFor(item) || item.value || '').slice(0, 60));
       if (group.type === 'checkbox' && /privacy|acknowledge|agree|terms|consent/i.test(question)) {
         if (applyChoice(group.items[0], 'yes')) resolved += 1;
@@ -3767,10 +4320,12 @@
         else skipped.push({ field: (question || 'Voluntary disclosure').slice(0, 80), reason: 'Voluntary/EEO question — left for you to answer if you wish.' });
         continue;
       }
-      let wanted = (taskMode() ? null : findBestAnswer(question, answers)) || chooseFromProfile(question, profile, pending.company || '');
+      let wanted = findBestAnswer(question, answers) || findBestAnswer(question, await refreshTaskAnswers())
+        || chooseFromProfile(question, profile, pending.company || '');
       if (!wanted && !(taskMode() && isSensitiveQuestion(question))) {
         wanted = heuristicChoice(question, optionTexts, profile);
       }
+      if (!wanted && taskMode()) wanted = findBestAnswer(question, TASK_ANSWERS_MAP);
       if (!wanted && !taskMode()) wanted = await queryServerVaultMatch(question);
       if (!wanted) {
         // Backend safely answers sensitive questions from the stored answer or
@@ -3784,6 +4339,7 @@
           reason: 'This required choice is not in your profile or saved answers.',
         });
         wanted = reported?.answer || '';
+        if (wanted) TASK_ANSWERS_MAP[normalizeQuestion(question)] = wanted;
       }
       if (!wanted) {
         sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
@@ -3794,6 +4350,7 @@
             : 'This required choice is not in your profile.');
         if (result?.answer) {
           wanted = result.answer;
+          TASK_ANSWERS_MAP[normalizeQuestion(question)] = wanted;
           if (result.remember) await rememberAnswer(answers, question, wanted, optionTexts.filter(Boolean));
         }
       }
@@ -3925,16 +4482,20 @@
         },
         fill: async (el, value) => setVerified(el, value),
         select: async (el, option) => {
-          const wanted = String(option || '').trim().toLowerCase();
-          const options = [...(el.options || [])];
-          const match = options.find((o) => o.value === option || o.text.trim().toLowerCase() === wanted)
-            || options.find((o) => o.text.trim().toLowerCase().includes(wanted) || wanted.includes(o.text.trim().toLowerCase()));
-          if (!match) return false;
-          el.value = match.value;
-          ['input', 'change', 'blur'].forEach((t) => {
-            try { el.dispatchEvent(new Event(t, { bubbles: true })); } catch {}
-          });
-          return true;
+          if (!el) return false;
+          if (el.tagName === 'SELECT') {
+            const wanted = String(option || '').trim().toLowerCase();
+            const options = [...(el.options || [])];
+            const match = options.find((o) => o.value === option || o.text.trim().toLowerCase() === wanted)
+              || options.find((o) => o.text.trim().toLowerCase().includes(wanted) || wanted.includes(o.text.trim().toLowerCase()));
+            if (!match) return false;
+            el.value = match.value;
+            ['input', 'change', 'blur'].forEach((t) => {
+              try { el.dispatchEvent(new Event(t, { bubbles: true })); } catch {}
+            });
+            return true;
+          }
+          return selectCustomOption(el, String(option || ''));
         },
         check: async (el, value) => {
           if (Boolean(el.checked) !== Boolean(value)) await realClick(el);
@@ -4024,11 +4585,23 @@
     // Progress-based loop (Phase 1d): keep going only while the page state
     // actually changes. Hard cap 40 steps; stop after 3 no-progress steps.
     STEP_COUNT += 1;
+    // LinkedIn Easy Apply advances through modal screens that may expose no
+    // text inputs (resume picker, review). Include the step heading so moving
+    // to the next screen always counts as progress.
+    const linkedInStep = (() => {
+      if (!/linkedin\.com/i.test(location.hostname)) return '';
+      const modal = findLinkedInModal();
+      if (!modal) return '';
+      const heading = modal.querySelector('h2, h3, .jobs-easy-apply-modal__header, [data-test-modal-header]');
+      const progress = modal.querySelector('progress, .artdeco-completeness-meter-linear__progress-element');
+      return `${(heading?.innerText || '').replace(/\s+/g, ' ').slice(0, 80)}:${progress?.value ?? progress?.getAttribute?.('aria-valuenow') ?? ''}`;
+    })();
     const signature = [
       location.href,
       collectInputs().map((i) => `${i.name}:${i.id}:${i.type}:${i.value}`).join('|'),
       findSubmitButton() ? 'submit' : '',
       findAdvanceButton() ? 'next' : '',
+      linkedInStep,
     ].join('::');
     if (signature === LAST_SIGNATURE) NO_PROGRESS_STEPS += 1;
     else { NO_PROGRESS_STEPS = 0; LAST_SIGNATURE = signature; }
@@ -4118,6 +4691,7 @@
 
     await waitForDomStable();
     await waitForContent();
+    await dismissBlockingUpsells();
 
     // Check if Workday or ATS is displaying an "Autofill with Resume" choice dialog
     if (await checkAndHandleApplyChoices()) {
@@ -4292,9 +4866,20 @@
 
     // No fillable HTML fields but an actionable control is visible: this is a
     // widget/modal-only step (LinkedIn resume picker, custom ATS step, etc.).
-    // Let the AI agent drive it instead of blindly clicking Next.
-    if (fieldsDetected === 0 && !CURRENT_DRY_RUN) {
-      const hasControl = findAdvanceButton() || findSubmitButton()
+    // The resume picker is handled deterministically above — never hand it to
+    // the agent, which used to click a download icon there.
+    if (fieldsDetected === 0 && !CURRENT_DRY_RUN && !linkedInResumePickerPresent()) {
+      const advance = findAdvanceButton();
+      // On resume upload step (e.g. Workday autofillWithResume): if resume was attached
+      // or dropzone is present and Continue button is visible, advance directly to the form!
+      if (advance && (RESUME_ATTACHED || hasResumeDropzone())) {
+        sendProgress('page_advancing', '➡️ Resume attached — continuing to the application form…');
+        await realClick(advance);
+        await waitForDomStable(1500);
+        await waitForForm();
+        return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
+      }
+      const hasControl = advance || findSubmitButton()
         || queryAllDeep('button, [role="button"]').some((el) => visible(el) && /\.(pdf|docx?|doc)\b/i.test(el.innerText || ''));
       if (hasControl) {
         sendProgress('agent_start', '🤖 No fillable fields found — asking the AI agent to drive this step…');
@@ -4482,8 +5067,13 @@
 
     // There is no unattended submit path. Every run shows the review card and
     // submits only after an explicit click; task runs use the dashboard gate.
+    const skippedList = Object.values(SKIPPED_QUESTIONS).map((entry) => ({
+      field: String(entry?.question || '').slice(0, 80),
+      reason: 'You skipped this — it stays unanswered.',
+    }));
     const decision = await showSubmitConfirmation(filledCount, skipped.concat(
-      stillEmpty.map((el) => ({ field: labelFor(el).slice(0, 80), reason: 'Still empty / required.' }))
+      skippedList,
+      stillEmpty.map((el) => ({ field: labelFor(el).slice(0, 80), reason: 'Still empty / required.' })),
     ));
     if (decision === 'submit' && submitBtn && stillEmpty.length === 0) {
       const verified = await submitAndVerify(submitBtn);
@@ -4620,6 +5210,7 @@
 
     if (filling || window.__HAMZOOH_FILLER_BUSY__) return;
     if (!(await shouldRun(pending))) return;
+    await loadSkippedQuestions(pending);
     CURRENT_RUN_ID = pending.runId || pending.sessionId || '';
     CURRENT_DRY_RUN = pending.dryRun === true;
     NEXT_CLICKS = 0;
@@ -4696,7 +5287,7 @@
   if (extensionAlive()) {
     // Keep watching after the filler stops: a manual submit in this tab must
     // still be detected and recorded against the task.
-    setInterval(() => { reportManualSubmission(); }, 6000);
+    setInterval(() => { reportManualSubmission(); watchSubmissionConfirmation(); }, 6000);
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'HAMZOOH_INIT_TRAIN') {
         window.__HAMZOOH_TRAIN_MODE__ = true;
@@ -4775,7 +5366,14 @@
     }, 2500);
   }
 
-  window.__HAMZOOH_TEST_RUN__ = (profile, answers, pending) => fillPage(profile, answers || {}, pending || { url: location.href });
+  window.__HAMZOOH_TEST_RUN__ = async (profile, answers, pending) => {
+    const run = pending || { url: location.href };
+    // runEvent() is silent without a run id; a harness run still needs the
+    // structured events to assert on.
+    CURRENT_RUN_ID = run.runId || run.sessionId || `test-${Date.now()}`;
+    await loadSkippedQuestions(run);
+    return fillPage(profile, answers || {}, run);
+  };
   window.__HAMZOOH_DEBUG__ = {
     questionFor, labelFor, sanitizePromptText, isNoisePrompt, fieldLabelFromAutomationId, submissionConfirmationNow, chooseFromProfile, heuristicChoice, applyChoice,
     profileValue, collectInputs, SUCCESS_PATTERNS, VALIDATION_PATTERNS,

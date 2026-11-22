@@ -47,6 +47,43 @@
     } catch { return ''; }
   }
 
+  function readWidgetOptions(el) {
+    try {
+      const out = [];
+      const seen = new Set();
+      const addOption = (text, val) => {
+        const clean = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!clean || seen.has(clean.toLowerCase()) || clean.length > 80) return;
+        seen.add(clean.toLowerCase());
+        out.push({ text: clean, value: val ?? clean });
+      };
+      const ctrlId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+      if (ctrlId) {
+        const popup = document.getElementById(ctrlId);
+        if (popup) {
+          popup.querySelectorAll('[role="option"], [data-automation-id="promptOption"], [data-automation-id="menu-item"], li').forEach((opt) => {
+            addOption(opt.innerText || opt.textContent);
+          });
+        }
+      }
+      el.querySelectorAll?.('[role="option"], [data-automation-id="promptOption"], li').forEach((opt) => {
+        addOption(opt.innerText || opt.textContent);
+      });
+      if (!out.length) {
+        const popups = deepQuery('[role="listbox"], [role="menu"], [data-automation-id="menu"]').filter(isVisible);
+        for (const pop of popups) {
+          pop.querySelectorAll('[role="option"], [data-automation-id="promptOption"], [data-automation-id="menu-item"], li').forEach((opt) => {
+            addOption(opt.innerText || opt.textContent);
+          });
+          if (out.length) break;
+        }
+      }
+      return out.slice(0, 30);
+    } catch {
+      return [];
+    }
+  }
+
   const elements = new Map();
 
   function observe() {
@@ -61,10 +98,13 @@
       elements.set(id, el);
       try { el.setAttribute('data-hz-id', String(id)); } catch {}
       const rect = el.getBoundingClientRect();
+      const role = el.getAttribute('role') || '';
+      const isCustomDropdown = role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox'
+        || String(el.getAttribute('data-automation-id') || '').includes('select');
       list.push({
         id,
         tag: el.tagName,
-        role: el.getAttribute('role') || '',
+        role: role,
         type: type || el.tagName.toLowerCase(),
         text: String(el.innerText || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 140),
         label: labelFor(el),
@@ -72,7 +112,7 @@
         value: String(el.value ?? '').slice(0, 200),
         options: el.tagName === 'SELECT'
           ? [...el.options].slice(0, 30).map((o) => ({ text: o.text.trim(), value: o.value }))
-          : [],
+          : (isCustomDropdown ? readWidgetOptions(el) : []),
         required: el.required === true || el.getAttribute('aria-required') === 'true',
         disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
         checked: el.checked === true || el.getAttribute('aria-checked') === 'true',

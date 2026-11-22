@@ -610,6 +610,96 @@ async function checkOpenTabsForSubmission(jobUrl = '') {
   return { ok: false, reason: 'no-confirmation' };
 }
 
+/**
+ * Persist confirmation pages found by scanning open tabs. Detections are
+ * deduplicated by host+path so a page that stays open is not re-added.
+ */
+async function saveDetectedSubmissions(entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return [];
+  const stored = await chrome.storage.local.get('detectedSubmissions').catch(() => ({}));
+  const list = Array.isArray(stored?.detectedSubmissions) ? stored.detectedSubmissions : [];
+  const merged = [...list];
+  for (const entry of entries) {
+    if (!entry?.key) continue;
+    const hit = merged.findIndex((item) => item?.key === entry.key
+      && Math.abs(Number(item.atMs || 0) - Number(entry.atMs || 0)) < 1000 * 60 * 30);
+    if (hit >= 0) merged[hit] = { ...merged[hit], ...entry };
+    else merged.unshift(entry);
+  }
+  const next = merged
+    .sort((a, b) => Number(b.atMs || 0) - Number(a.atMs || 0))
+    .slice(0, 30);
+  await storageSet({ detectedSubmissions: next }).catch(() => {});
+  return next;
+}
+
+/**
+ * Look for real "application submitted" pages among the open tabs. This finds
+ * applications the candidate finished by hand from a job page the dashboard
+ * tracks, even when no auto-apply task was running.
+ */
+async function scanOpenTabsForSubmissions(maxTabs = 25) {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  const found = [];
+  for (const tab of tabs.slice(0, maxTabs)) {
+    if (!tab?.id || !/^https?:/i.test(tab.url || '') || isDashboardUrl(tab.url)) continue;
+    let probe = null;
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const text = (document.body?.innerText || '').slice(0, 200000);
+          const fields = [...document.querySelectorAll('input, textarea, select')].filter((el) => {
+            const type = (el.getAttribute('type') || '').toLowerCase();
+            if (['hidden', 'submit', 'button', 'image', 'reset', 'password', 'file'].includes(type)) return false;
+            if (el.disabled) return false;
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 1 || rect.height <= 1) return false;
+            return Boolean(el.closest('form, fieldset, [data-automation-id*="formField"], [data-automation-id*="question"]'));
+          }).length;
+          const meta = document.querySelector('meta[property="og:site_name"], meta[name="application-name"]');
+          return {
+            url: location.href,
+            title: document.title || '',
+            text,
+            fields,
+            site: (meta?.getAttribute('content') || '').trim(),
+          };
+        },
+      });
+      probe = results?.[0]?.result || null;
+    } catch { continue; }
+    if (!probe || probe.fields > 0) continue; // a visible form means not finished
+    const messageHit = SUBMISSION_CONFIRM_RE.test(probe.text || '');
+    const urlHit = SUBMISSION_URL_RE.test(probe.url || '');
+    if (!messageHit && !urlHit) continue;
+    if (!/job|career|apply|application|position|role|recruit|talent|hiring/i.test(`${probe.title || ''} ${probe.url || ''}`)) continue;
+    let host = '';
+    let key = '';
+    try {
+      const pageUrl = new URL(probe.url);
+      host = pageUrl.hostname;
+      key = `${pageUrl.hostname.replace(/^www\./i, '').toLowerCase()}${pageUrl.pathname.replace(/\/+$/, '').toLowerCase()}`;
+    } catch { key = String(probe.url || '').toLowerCase(); }
+    const at = Date.now();
+    const fallbackCompany = host.replace(/^www\./i, '').split('.')[0] || '';
+    found.push({
+      id: `det_${at.toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+      key,
+      url: probe.url,
+      host,
+      title: String(probe.title || '').slice(0, 200),
+      company: String(probe.site || '').slice(0, 120)
+        || (fallbackCompany ? fallbackCompany.charAt(0).toUpperCase() + fallbackCompany.slice(1) : ''),
+      confirmation: messageHit ? 'confirmation message shown in the job tab' : 'confirmation page',
+      atMs: at,
+      at: new Date(at).toISOString(),
+      source: 'tab-scan',
+    });
+  }
+  return saveDetectedSubmissions(found);
+}
+
 async function injectFiller(tabId) {
   if (!tabId) return false;
   try {
@@ -737,6 +827,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     checkOpenTabsForSubmission(String(message.url || ''))
       .then((result) => sendResponse(result))
       .catch((err) => sendResponse({ ok: false, error: err?.message || 'submission check failed' }));
+    return true;
+  }
+
+  if (message?.type === 'HAMZOOH_SCAN_SUBMISSIONS') {
+    scanOpenTabsForSubmissions()
+      .then((items) => sendResponse({ ok: true, items }))
+      .catch((err) => sendResponse({ ok: false, error: err?.message || 'submission scan failed', items: [] }));
     return true;
   }
 

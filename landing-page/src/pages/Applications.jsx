@@ -10,7 +10,7 @@ import {
   TRACKER_FILTERS, TRACKER_STATUS_META, STAGE_ORDER, STAGE_LABELS,
 } from '../lib/jobTracker';
 import { adminJobStore } from '../lib/adminJobStore';
-import { profileStore, reconcileSubmittedApplications } from '../lib/api';
+import { profileStore, reconcileSubmittedApplications, reconcileDetectedSubmissions } from '../lib/api';
 import { DEMO_JOBS } from '../lib/mockData';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
@@ -85,6 +85,9 @@ export default function Applications() {
     // Pull in applications the backend verified as submitted (including manual
     // submits in the job tab) before building the tracker.
     await reconcileSubmittedApplications().catch(() => false);
+    // Also pick up confirmation pages the extension saw even when no auto-apply
+    // task was running (manual applies from a tracked job page).
+    await reconcileDetectedSubmissions({ scan: true }).catch(() => false);
     const sources = await fetchTrackerSources();
     // Application-status emails from the company/ATS update the stored
     // application (applied, shortlisted, interview, offer, rejected).
@@ -114,6 +117,38 @@ export default function Applications() {
       window.removeEventListener('storage', refreshLocal);
     };
   }, [loadSources]);
+
+  // Keep the tracker live: an application finished in another tab (approved
+  // auto-apply, manual submit, or a confirmation page the extension saw) must
+  // flip to Applied without a page refresh.
+  useEffect(() => {
+    let busy = false;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || busy || document.hidden) return;
+      busy = true;
+      try {
+        const submitted = await reconcileSubmittedApplications().catch(() => false);
+        const detected = await reconcileDetectedSubmissions().catch(() => false);
+        if (!cancelled && (submitted || detected)) {
+          setEntries(buildTrackerEntries(sourcesRef.current));
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const interval = setInterval(tick, 12000);
+    const onFocus = () => { tick(); };
+    const onVisible = () => { if (!document.hidden) tick(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // Keep the open outreach popup in sync when the tracker refreshes.
   useEffect(() => {
