@@ -12,6 +12,8 @@ import {
   isStartDateQuestion,
   startDateAnswer,
   salaryDigits,
+  matchHint,
+  parseLocationString,
 } from '../lib/apply-intelligence.js';
 import { answerCompatibility, questionCategory } from '../lib/answer-memory.js';
 
@@ -183,4 +185,17 @@ test('phone device type and source questions are answered locally without asking
     const res = applicationLogisticsAnswer('How Did You Hear About Us?', { profile });
     assert.equal(res.answer, expected, `source ${profile.jobSource} should map to ${expected}`);
   }
+});
+
+test('location parser and hints handle multi-part addresses and asterisked labels', () => {
+  const p = {
+    ...profile,
+    location: 'Naidupeta, Tirupati District, Andhra Pradesh, India',
+  };
+  assert.equal(matchHint('City *')?.key, 'city');
+  assert.equal(matchHint('State/Province *')?.key, 'state');
+  assert.equal(matchHint('Country *')?.key, 'country');
+  assert.equal(profileValueForHint(p, 'city'), 'Naidupeta');
+  assert.equal(profileValueForHint(p, 'state'), 'Andhra Pradesh');
+  assert.equal(profileValueForHint(p, 'country'), 'India');
 });

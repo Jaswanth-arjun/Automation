@@ -12,12 +12,12 @@
     { key: 'firstName', test: /first.?name|given.?name|firstname/i },
     { key: 'lastName', test: /last.?name|surname|family.?name|lastname/i },
     { key: 'fullName', test: /^name$|full.?name|your.?name|legal.?name|candidate.?name|applicant.?name/i },
-    { key: 'address', test: /street.?address|^address$|address.?line.?1|mailing.?address/i },
-    { key: 'city', test: /^city$|town/i },
-    { key: 'state', test: /state|province|region/i },
-    { key: 'zip', test: /zip|postal.?code|pin.?code/i },
-    { key: 'country', test: /country|nation/i },
-    { key: 'location', test: /city|location|current.?location|where.?do.?you.?live/i },
+    { key: 'address', test: /\b(street|address|addr)\b/i },
+    { key: 'city', test: /\b(city|town|municipality)\b/i },
+    { key: 'state', test: /\b(state|province|region)\b/i },
+    { key: 'zip', test: /\b(zip|postal.?code|pin.?code)\b/i },
+    { key: 'country', test: /\b(country|nation)\b/i },
+    { key: 'location', test: /\b(location|current.?location|where.?do.?you.?(live|reside))\b/i },
     { key: 'linkedin', test: /linkedin/i },
     { key: 'github', test: /github/i },
     { key: 'portfolio', test: /portfolio|website|personal.?url|^url$|personal.?site/i },
@@ -1357,6 +1357,52 @@
     return isNoisePrompt(merged) ? '' : merged;
   }
 
+  function extractLocationFromText(text) {
+    if (!text) return '';
+    const lines = String(text).replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const nameIndex = lines.findIndex((l) => /^[A-Za-z][A-Za-z .'-]{2,45}$/.test(l));
+    const candidates = lines.slice(Math.max(0, nameIndex + 1), Math.min(lines.length, (nameIndex >= 0 ? nameIndex + 5 : 5)));
+    return candidates
+      .map((l) => l.replace(/[⋄|•]/g, ' ').replace(/\s+/g, ' ').trim())
+      .find((l) => /[A-Za-z]/.test(l) && /,/.test(l) && !/@|https?:\/\/|linkedin|github|\+?\d[\d\s().-]{7,}/i.test(l)) || '';
+  }
+
+  function parseLocationString(locStr) {
+    const parts = String(locStr || '').split(',').map((p) => p.trim()).filter(Boolean);
+    if (!parts.length) return { city: '', district: '', state: '', country: '', zip: '' };
+    let country = '';
+    let zip = '';
+    let state = '';
+    let city = '';
+    let district = '';
+
+    const cleanParts = [];
+    for (const part of parts) {
+      if (/^\d{5,6}(-\d{4})?$/.test(part)) {
+        zip = part;
+      } else {
+        cleanParts.push(part);
+      }
+    }
+
+    if (cleanParts.length === 1) {
+      city = cleanParts[0];
+    } else if (cleanParts.length === 2) {
+      city = cleanParts[0];
+      state = cleanParts[1];
+    } else if (cleanParts.length === 3) {
+      city = cleanParts[0];
+      state = cleanParts[1];
+      country = cleanParts[2];
+    } else if (cleanParts.length >= 4) {
+      city = cleanParts[0];
+      district = cleanParts[1];
+      state = cleanParts[cleanParts.length - 2];
+      country = cleanParts[cleanParts.length - 1];
+    }
+    return { city, district, state, country, zip };
+  }
+
   function profileValue(profile, key, jobTitle, company) {
     const name = profile.fullName || '';
     const [first, ...rest] = name.split(' ').filter(Boolean);
@@ -1375,7 +1421,8 @@
     const projectUrl = projects.map((p) => p.link || p.url).find(Boolean)
       || profile.links?.github || profile.github || profile.links?.portfolio || '';
     const phoneDigits = String(profile.phone || '').replace(/\D/g, '');
-    const locParts = String(profile.location || '').split(',').map((p) => p.trim()).filter(Boolean);
+    const rawLoc = profile.location || profile.currentLocation || extractLocationFromText(profile.resumeText || profile.resume?.text || '');
+    const parsedLoc = parseLocationString(rawLoc);
     const firstPart = (value) => String(value || '').split(',')[0].trim();
     const map = {
       email: profile.email || '',
@@ -1385,11 +1432,11 @@
       lastName: rest.join(' ') || '',
       fullName: name,
       address: profile.address || profile.street || '',
-      city: firstPart(profile.city) || firstPart(profile.town) || locParts[0] || '',
-      state: firstPart(profile.state) || firstPart(profile.province) || (locParts.length > 2 ? locParts[1] : '') || '',
-      zip: String(profile.zip || profile.postalCode || profile.pincode || '').trim(),
-      country: String(profile.country || '').trim() || locParts[locParts.length - 1] || '',
-      location: profile.location || '',
+      city: firstPart(profile.city) || firstPart(profile.town) || parsedLoc.city || '',
+      state: firstPart(profile.state) || firstPart(profile.province) || parsedLoc.state || '',
+      zip: String(profile.zip || profile.postalCode || profile.pincode || parsedLoc.zip || '').trim(),
+      country: String(profile.country || parsedLoc.country || '').trim() || 'India',
+      location: rawLoc || '',
       linkedin: profile.links?.linkedin || profile.linkedin || '',
       github: profile.links?.github || profile.github || '',
       portfolio: profile.links?.portfolio || profile.portfolio || profile.links?.github || profile.github || '',
@@ -1626,6 +1673,17 @@
     return [...select.options].filter((item) => item.value !== '' && !isEmptyChoiceText(item.text) && !/choose/i.test(item.text.trim()));
   }
 
+  function isCaptchaElement(el) {
+    if (!el) return false;
+    const name = String(el.name || el.id || '').toLowerCase();
+    const placeholder = String(el.placeholder || '').toLowerCase();
+    const aria = String(el.getAttribute?.('aria-label') || '').toLowerCase();
+    const cls = String(el.className || '').toLowerCase();
+    const label = String(labelFor(el) || '').toLowerCase();
+    const text = `${name} ${placeholder} ${aria} ${cls} ${label}`;
+    return /\b(captcha|recaptcha|hcaptcha|turnstile)\b/i.test(text);
+  }
+
   function collectInputs() {
     // On LinkedIn, inputs ONLY exist if the Easy Apply modal is open!
     const isLinkedIn = /linkedin\.com/i.test(location.hostname);
@@ -1640,6 +1698,7 @@
       const type = (input.getAttribute('type') || '').toLowerCase();
       if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) return false;
       if (input.disabled) return false;
+      if (isCaptchaElement(input)) return false;
       if (type === 'radio' || type === 'checkbox') return choiceVisible(input);
       return visible(input);
     });
@@ -1682,7 +1741,7 @@
   }
 
   function isSensitiveQuestion(question) {
-    return /authori[sz]ed to work|authori[sz]ation to work|work authorization|sponsorship|assistance to obtain|visa status|citizenship|ssn|social security|passport number|national id|aadhaar|convicted|felony|criminal|date of birth|\bdob\b|desired (annual )?(salary|compensation)|expected salary|compensation|notice period|currently employed/i.test(String(question || ''));
+    return /captcha|recaptcha|hcaptcha|turnstile|authori[sz]ed to work|authori[sz]ation to work|work authorization|sponsorship|assistance to obtain|visa status|citizenship|ssn|social security|passport number|national id|aadhaar|convicted|felony|criminal|date of birth|\bdob\b|desired (annual )?(salary|compensation)|expected salary|compensation|notice period|currently employed/i.test(String(question || ''));
   }
 
   function isEeoQuestion(question) {
@@ -4128,10 +4187,10 @@
     const fieldsDetected = inputs.length;
 
     const captchaType = detectCaptchaOrMFA();
-    if (captchaType) {
+    if (captchaType === 'mfa') {
       sendProgress('captcha_detected', '⚠️ Verification detected — waiting for you.');
       if (taskMode()) {
-        await taskCheckpoint('verification_required', 'CAPTCHA or verification code detected. Complete it in the job tab; Hamzooh will never solve or bypass it.', {
+        await taskCheckpoint('verification_required', 'Verification code detected. Complete it in the job tab; Hamzooh will never solve or bypass it.', {
           status: 'waiting_for_user_input',
           data: { type: captchaType },
         });
@@ -4270,6 +4329,22 @@
         resumeAttached: RESUME_ATTACHED,
         data: { url: location.href, fieldsDetected, missing: stillEmpty.map((input) => labelFor(input).slice(0, 90)).filter(Boolean) },
       });
+    }
+
+    const captchaDetected = detectCaptchaOrMFA();
+    if (captchaDetected === 'captcha' && !CURRENT_DRY_RUN) {
+      sendProgress('captcha_detected', '⚠️ Form filled! Complete the CAPTCHA before submission.');
+      try {
+        const captchaEl = queryAllDeep('input, [class*="captcha"], [id*="captcha"]').find((el) => isCaptchaElement(el) || /captcha/i.test(el.id || el.className));
+        captchaEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch {}
+      if (taskMode()) {
+        await taskCheckpoint('verification_required', 'All form fields are prepared. Complete the CAPTCHA in the job tab to proceed with submission.', {
+          status: 'waiting_for_user_input',
+          data: { type: 'captcha' },
+        });
+      }
+      await showCaptchaPauseOverlay('captcha');
     }
 
     return { filledCount, stillEmpty, fieldsDetected };
@@ -4437,6 +4512,15 @@
           status: 'needs_attention', reasonCode: 'APPROVAL_REQUIRED', filledCount, emptyCount: stillEmpty.length,
         });
         return;
+      }
+      if (detectCaptchaOrMFA() === 'captcha') {
+        const captchaInput = queryAllDeep('input').find((el) => isCaptchaElement(el) || /captcha/i.test(el.name || el.id || el.placeholder));
+        const val = String(captchaInput?.value || '').trim();
+        if (!val) {
+          sendProgress('captcha_detected', '⚠️ Please solve the CAPTCHA before submitting.');
+          try { captchaInput?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+          await showCaptchaPauseOverlay('captcha');
+        }
       }
       await taskCheckpoint('submitting', 'Approved. Submitting the application and verifying the site response.', {
         status: 'submitting', filledCount, emptyCount: stillEmpty.length,
