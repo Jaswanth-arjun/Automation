@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hamzooh Apply",
-  "version": "1.9.37",
+  "version": "1.9.38",
   "description": "Autonomous Hamzooh Apply agent: fills external job applications with your profile and resume, asks only when information is missing, and submits only after you approve.",
   "icons": {
     "16": "icons/icon-16.png",
