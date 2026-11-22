@@ -124,6 +124,20 @@ test('two disjoint lanes: nara+gpt-6-luna for the app, OpenAI only for Auto Appl
       assert.equal(routes[0].model, expected);
     }
 
+    // When OPENAI_ENABLED is switched off, Auto Apply seamlessly routes all roles to free Nara
+    process.env.OPENAI_ENABLED = 'false';
+    for (const role of ['fast', 'primary', 'vision', 'reasoning']) {
+      const routes = modelRoutes(role, { paid: true });
+      assert.equal(routes.length, 1, `${role} free fallback must be a single route`);
+      assert.equal(routes[0].provider, 'nara');
+      assert.equal(routes[0].model, 'gpt-6-luna');
+    }
+
+    // When OPENAI_ENABLED is switched on again, Auto Apply returns to OpenAI models
+    process.env.OPENAI_ENABLED = 'true';
+    assert.equal(modelRoutes('primary', { paid: true })[0].provider, 'openai');
+    assert.equal(modelRoutes('primary', { paid: true })[0].model, 'gpt-4.1');
+
     // Cheap deterministic work never pays for the primary model.
     assert.equal(roleForTask('answer_inference'), 'fast');
     assert.equal(roleForTask('label_extraction'), 'fast');
