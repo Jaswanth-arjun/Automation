@@ -69,6 +69,7 @@ export default function AutoApplyTaskPanel({
   onCancel,
   onPause,
   onResume,
+  onMarkSubmitted,
 }) {
   if (!task) return null;
 
@@ -272,6 +273,16 @@ export default function AutoApplyTaskPanel({
             style={{ padding: '10px 16px', borderRadius: '10px', border: 'none', background: '#0d9488', color: '#fff', fontWeight: 700, fontSize: '12.5px', cursor: 'pointer' }}
           >
             {busy === 'resume' ? 'Resuming…' : status === 'paused' ? 'Resume' : 'Resume agent'}
+          </button>
+        )}
+        {!isTerminal && (
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={onMarkSubmitted}
+            style={{ padding: '10px 16px', borderRadius: '10px', border: 'none', background: '#059669', color: '#fff', fontWeight: 700, fontSize: '12.5px', cursor: 'pointer' }}
+          >
+            {busy === 'mark-submitted' ? 'Marking as Submitted…' : '✅ I Submitted (Mark as Applied)'}
           </button>
         )}
         {!isTerminal && (

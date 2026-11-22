@@ -25,7 +25,7 @@ import { executeModel, getUsageSummary, modelConfig, providerStatus, probeModels
 import { listAnswers, saveAnswer, updateAnswer, deleteAnswer, lookupAnswer, questionCategory, isSensitiveCategory } from './lib/answer-memory.js';
 import {
   TASK_STATUS, createTask, getTask, getTaskView, getActiveTask, getLatestTaskForJob, listTasks,
-  validateStartPayload, pauseTask, resumeTask, cancelTask, approveTask, answerTaskQuestion,
+  validateStartPayload, pauseTask, resumeTask, cancelTask, approveTask, markTaskSubmitted, answerTaskQuestion,
   recordHeartbeat, recordCheckpoint, recordAgentObservation, recordReview, completeTask,
   decideNextAction, lookupTaskAnswer, reportTaskQuestion, getTaskExtensionState,
   recordSubmissionAttempt, getTaskReview, recordExtensionAnswer, skipTaskQuestion,
@@ -6241,6 +6241,19 @@ app.post('/api/applications/tasks/:taskId/approve', async (req, res) => {
   if (!user) return;
   try {
     const task = await approveTask(req.params.taskId, user.id);
+    const view = publicTaskView(task);
+    broadcastTask(view);
+    res.json({ ok: true, task: view });
+  } catch (err) {
+    taskError(res, err);
+  }
+});
+
+app.post('/api/applications/tasks/:taskId/mark-submitted', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  try {
+    const task = await markTaskSubmitted(req.params.taskId, user.id, req.body || {});
     const view = publicTaskView(task);
     broadcastTask(view);
     res.json({ ok: true, task: view });

@@ -3635,18 +3635,21 @@
   // verified manual submission — the automation itself never clicks Submit.
   let SUBMIT_IN_PROGRESS = false;
   let MANUAL_SUBMISSION_REPORTED = false;
-  const MANUAL_CONFIRM_URL_RE = /\/(thank|thanks|confirmation|success|submitted|applied)\b|\/apply\/(status|confirm)/i;
+  const MANUAL_CONFIRM_URL_RE = /\/(thank|thanks|confirmation|success|submitted|applied|candidateHome)\b|\/apply\/(status|confirm|submitted)/i;
 
   // Stronger than the submit-time signals: "thank you for your interest" in a
   // job description is not a confirmation, and a visible form means the
   // application is not done yet.
   const CONFIRMATION_PATTERNS = [
     /application (has been |was )?(submitted|received|complete|sent)/i,
-    /thank you for (applying|your application)/i,
+    /thank you for (applying|your application|your interest)/i,
     /we('| a)?ve received your application/i,
     /your application (is|has been) (in|under) review/i,
     /successfully (applied|submitted)/i,
     /application confirmation/i,
+    /congratulations.*application/i,
+    /view my applications|my applications/i,
+    /candidate home/i,
   ];
 
   function submissionConfirmationNow() {
@@ -3654,7 +3657,10 @@
     const text = pageBodyText();
     const pattern = CONFIRMATION_PATTERNS.find((re) => re.test(text));
     const urlHit = MANUAL_CONFIRM_URL_RE.test(location.href);
-    if (!pattern && !urlHit) return null;
+    const atsConfirmElement = Boolean(
+      document.querySelector('[data-automation-id="viewMyApplications"], [data-automation-id="thankYouMessage"], [data-automation-id*="confirmation"], [data-automation-id="doneButton"]')
+    );
+    if (!pattern && !urlHit && !atsConfirmElement) return null;
     const modalHit = queryAllDeep('.artdeco-modal, [role="dialog"]')
       .some((modal) => visible(modal) && CONFIRMATION_PATTERNS.some((re) => re.test(modal.innerText || '')));
     // A page that still shows the application form is not a confirmation.
@@ -3666,7 +3672,9 @@
     return {
       confirmation: pattern
         ? 'confirmation message shown in the job tab'
-        : `confirmation page ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}`,
+        : atsConfirmElement
+          ? 'Workday confirmation screen detected'
+          : `confirmation page ${location.href.replace(/^https?:\/\//, '').slice(0, 80)}`,
       url: location.href,
     };
   }
@@ -3724,15 +3732,15 @@
     if (document.visibilityState && document.visibilityState !== 'visible') return;
     if (!jobLikePage()) return;
     const now = Date.now();
-    if (now - LAST_CONFIRMATION_WATCH_AT < 10000) return;
+    if (now - LAST_CONFIRMATION_WATCH_AT < 4000) return;
     LAST_CONFIRMATION_WATCH_AT = now;
-    const stored = await chrome.storage.local.get('pendingApply').catch(() => ({}));
+    const stored = await chrome.storage.local.get(['pendingApply', 'detectedSubmissions']).catch(() => ({}));
     const pendingApply = stored?.pendingApply || {};
     const taskId = CURRENT_TASK_ID || pendingApply.taskId || '';
     const taskToken = CURRENT_TASK_TOKEN || pendingApply.taskToken || '';
-    if (taskId && taskToken && !pendingApply.done) {
-      // An active run owns this submission; report it against the task.
-      await reportManualSubmission();
+    if (taskId && taskToken) {
+      // An active or recent run owns this submission; report it against the task.
+      await reportManualSubmission(taskId, taskToken, pendingApply);
       return;
     }
     let hit = null;
@@ -3742,23 +3750,19 @@
     await recordDetectedSubmission(hit);
   }
 
-  async function reportManualSubmission() {
+  async function reportManualSubmission(taskId, taskToken, pendingApply) {
     if (MANUAL_SUBMISSION_REPORTED || SUBMIT_IN_PROGRESS || !extensionAlive()) return;
-    // Always check the task's own URL: the dashboard page also contains
-    // "applications submitted" copy and must never settle a job task.
-    const stored = await chrome.storage.local.get('pendingApply').catch(() => ({}));
-    const pendingApply = stored?.pendingApply || {};
-    const taskId = CURRENT_TASK_ID || pendingApply.taskId || '';
-    const taskToken = CURRENT_TASK_TOKEN || pendingApply.taskToken || '';
     if (!taskId || !taskToken) return;
     try {
-      if (pendingApply.url && new URL(pendingApply.url).hostname !== location.hostname) return;
+      if (pendingApply?.url && new URL(pendingApply.url).hostname !== location.hostname) return;
     } catch { return; }
     const hit = submissionConfirmationNow();
     if (!hit) return;
     MANUAL_SUBMISSION_REPORTED = true;
     runEvent('manual_submission', hit, 'Application submitted in the job tab — recording it');
-    await taskCall('/api/applications/extension/complete', {
+    await proxyFetch('/api/applications/extension/complete', {
+      taskId,
+      token: taskToken,
       status: 'submitted',
       message: `✅ Your application was submitted in the browser tab (${hit.confirmation}).`,
       verified: true,

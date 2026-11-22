@@ -158,6 +158,7 @@ export const api = {
   resumeApplicationTask: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' }),
   cancelApplicationTask: (taskId, reason = '') => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
   approveApplicationTask: (taskId) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/approve`, { method: 'POST' }),
+  markApplicationTaskSubmitted: (taskId, details = {}) => apiFetch('', `/api/applications/tasks/${encodeURIComponent(taskId)}/mark-submitted`, { method: 'POST', body: JSON.stringify(details) }),
   answerApplicationQuestion: (taskId, questionId, payload) => apiFetch(
     '',
     `/api/applications/tasks/${encodeURIComponent(taskId)}/questions/${encodeURIComponent(questionId)}/answer`,

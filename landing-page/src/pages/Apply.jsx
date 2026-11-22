@@ -1700,6 +1700,7 @@ ${firstName}`;
       else if (action === 'cancel') res = await api.cancelApplicationTask(autoTask.id, 'Cancelled by the candidate.');
       else if (action === 'pause') res = await api.pauseApplicationTask(autoTask.id);
       else if (action === 'resume') res = await api.resumeApplicationTask(autoTask.id);
+      else if (action === 'mark-submitted') res = await api.markApplicationTaskSubmitted(autoTask.id);
       if (res?.task) setAutoTask(res.task);
       if (action === 'cancel' || action === 'pause' || action === 'resume') {
         window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_TASK_CONTROL', action, taskId: autoTask.id }, '*');
@@ -3477,6 +3478,7 @@ ${firstName}`;
                   onCancel={() => handleTaskControl('cancel')}
                   onPause={() => handleTaskControl('pause')}
                   onResume={() => handleTaskControl('resume')}
+                  onMarkSubmitted={() => handleTaskControl('mark-submitted')}
                 />
               )}
 
