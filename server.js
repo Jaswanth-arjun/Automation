@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import net from 'net';
+import vm from 'vm';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { LinkedInBotEngine } from './lib/bot-engine.js';
@@ -2835,6 +2836,81 @@ async function fetchJobText(url) {
     };
   };
 
+  // Zoho Recruit career sites (company.zohorecruit.com/jobs/Careers/...) embed the
+  // posting as structured JSON in a script tag (`var jobs = JSON.parse('...')`).
+  const zohoJob = async () => {
+    let source;
+    try { source = new URL(url); } catch { return null; }
+    if (!/(?:^|\.)zohorecruit\.(?:com|in|eu|com\.au)$/i.test(source.hostname)) return null;
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) return null;
+    const pageHtml = await response.text();
+
+    const match = pageHtml.match(/(var\s+jobs\s*=\s*JSON\.parse\('[\s\S]*?'\);)/);
+    if (!match) return null;
+
+    let jobs = null;
+    try {
+      const sandbox = {};
+      vm.runInNewContext(match[1], sandbox);
+      jobs = sandbox.jobs;
+    } catch {
+      return null;
+    }
+    const job = Array.isArray(jobs) ? jobs[0] : jobs;
+    if (!job || typeof job !== 'object') return null;
+
+    const title = String(job.Posting_Title || job.Job_Opening_Name || '').trim();
+    const descHtml = String(job.Job_Description || job.Description || '').trim();
+    if (!descHtml) return null;
+
+    const companyMeta = pageHtml.match(/<meta\s+property=["']og:site_name["']\s+content=["'](.*?)["']/i)
+      || pageHtml.match(/<meta\s+name=["']application-name["']\s+content=["'](.*?)["']/i);
+    let company = companyMeta ? companyMeta[1].trim() : '';
+    if (!company) {
+      const titleTag = pageHtml.match(/<title>(.*?)<\/title>/i);
+      if (titleTag && titleTag[1].includes(' - ')) {
+        company = titleTag[1].split(' - ')[0].trim();
+      }
+    }
+    if (!company) {
+      const sub = source.hostname.split('.')[0];
+      company = sub.charAt(0).toUpperCase() + sub.slice(1);
+    }
+
+    const locParts = [job.City, job.State, job.Country].map((v) => String(v || '').trim()).filter(Boolean);
+    const location = locParts.join(', ') || 'India';
+
+    const posting = {
+      '@context': 'https://schema.org/',
+      '@type': 'JobPosting',
+      title,
+      description: descHtml,
+      hiringOrganization: { '@type': 'Organization', name: company },
+      ...(location ? { jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: location } } } : {}),
+      ...(job.Job_Type ? { employmentType: String(job.Job_Type) } : {}),
+    };
+
+    const titleHtml = escapeHtml(title);
+    return {
+      html: `<!doctype html><html><head><title>${titleHtml}</title>`
+        + `<meta property="og:title" content="${titleHtml}">`
+        + `<meta property="og:site_name" content="${escapeHtml(company)}">`
+        + `<script type="application/ld+json">${JSON.stringify(posting).replace(/</g, '\\u003c')}</script>`
+        + `</head><body><h1>${titleHtml}</h1><p>${escapeHtml(location)}</p>${descHtml}</body></html>`,
+      text: `${title}\n${company} · ${location}\n${htmlToLines(descHtml)}`,
+      finalUrl: `${source.origin}${source.pathname}`,
+    };
+  };
+
   let fetchError;
   try {
     const workday = await workdayJob();
@@ -2859,6 +2935,13 @@ async function fetchJobText(url) {
   try {
     const greenhouse = await greenhouseJob();
     if (greenhouse) return parse(greenhouse);
+  } catch (error) {
+    fetchError = error;
+  }
+
+  try {
+    const zoho = await zohoJob();
+    if (zoho) return parse(zoho);
   } catch (error) {
     fetchError = error;
   }
