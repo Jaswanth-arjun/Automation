@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Download, Copy, Check, Pencil, Eye, RefreshCw, FileText, Sparkles } from 'lucide-react';
+import { downloadCoverLetterPdf } from '../lib/coverLetterPdf';
 
 export default function CoverLetterModal({
   isOpen,
@@ -55,42 +56,12 @@ export default function CoverLetterModal({
   const handleDownloadPdf = async () => {
     if (isDownloadingPdf) return;
     setIsDownloadingPdf(true);
-    const name = (editedLetter.applicantName || 'Applicant').trim();
-    const comp = (editedLetter.companyName || company || 'Company').trim();
-    const safeName = name.replace(/[^a-zA-Z0-9_-]+/g, '-');
-    const safeComp = comp.replace(/[^a-zA-Z0-9_-]+/g, '-');
-    const filename = `${safeName}-${safeComp}-Cover-Letter.pdf`;
-
     try {
-      const res = await fetch('/api/cover-letter/render-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          coverLetter: editedLetter,
-          company,
-          jobTitle,
-        }),
-      }).then((r) => r.json());
-
-      if (res?.pdfBase64) {
-        const binary = atob(res.pdfBase64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
-        return;
-      }
-      alert('Could not download PDF: ' + (res?.error || 'Server error'));
+      // Same renderer and file name the Apply screen's Download PDF button uses.
+      await downloadCoverLetterPdf(editedLetter, { company, jobTitle });
     } catch (err) {
       console.error('PDF download error:', err);
-      alert('PDF generation failed: ' + err.message);
+      alert('PDF generation failed: ' + (err?.message || 'Server error'));
     } finally {
       setIsDownloadingPdf(false);
     }

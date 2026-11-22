@@ -14,9 +14,12 @@
     { key: 'fullName', test: /^name$|full.?name|your.?name|legal.?name|candidate.?name|applicant.?name/i },
     { key: 'address', test: /\b(street|address|addr)\b/i },
     { key: 'city', test: /\b(city|town|municipality)\b/i },
-    { key: 'state', test: /\b(state|province|region)\b/i },
+    // Country comes before state: "Country/Region of citizenship" and
+    // "Country / Region of residence" both contain the word "Region", and they
+    // must get the country, never the state.
+    { key: 'country', test: /\b(country|citizenship|nationality|nation)\b/i },
+    { key: 'state', test: /\b(state|province)\b|state\s*\/\s*region/i },
     { key: 'zip', test: /\b(zip|postal.?code|pin.?code)\b/i },
-    { key: 'country', test: /\b(country|nation)\b/i },
     { key: 'location', test: /\b(location|current.?location|where.?do.?you.?(live|reside))\b/i },
     { key: 'linkedin', test: /linkedin/i },
     { key: 'github', test: /github/i },
@@ -24,13 +27,14 @@
     { key: 'projectLink', test: /project.?(link|url)|link.?(to|of).?(project|work|portfolio|github|demo)|share.*link|deployed/i },
     { key: 'university', test: /university|college|school|institute|alma.?mater|institution/i },
     { key: 'gpa', test: /cgpa|gpa|grade.?point/i },
-    { key: 'internship', test: /internship|past.?intern|previous.?intern|intern.?experience/i },
+    { key: 'internship', test: /\b(?:past|previous|prior)\s+internships?|\binternship\s+experience|\binternships?\s+(?:held|completed)\b|^internships?$|^internship\s*(?:history|details?)?$/i },
     { key: 'degree', test: /degree|qualification|major|course|field.?of.?study|branch/i },
     { key: 'graduation', test: /graduat|class.?of|year.?of|expected.?graduat/i },
     { key: 'codechef', test: /codechef|code.?chef/i },
     { key: 'codeforces', test: /codeforces|code.?forces/i },
     { key: 'leetcode', test: /leetcode|leet.?code/i },
     { key: 'hackerrank', test: /hackerrank|hacker.?rank/i },
+    { key: 'salaryCurrency', test: /\bcurrency\b|salary.?currency|currency.?code/i },
     { key: 'salary', test: /salary|compensation|pay|ctc|expected.?salary/i },
     { key: 'experience_years', test: /years?.?of.?experience|total.?experience/i },
     { key: 'cover_letter', test: /cover.?letter|additional.?info|why.?do.?you.?want|tell.?us.?about|why.?this.?role|why.?our.?company/i },
@@ -402,23 +406,88 @@
     return false;
   }
 
-  const DROPDOWN_WIDGET_SELECTOR = '[data-automation-id*="select"], [data-automation-id*="dropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"]';
+  const DROPDOWN_WIDGET_SELECTOR = '[data-automation-id*="select"], [data-automation-id*="dropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="select-shell"], [class*="select2-container"]';
+
+  function cleanCountryName(str) {
+    return String(str || '').replace(/\s*\(\+?\d+\)/g, '').trim();
+  }
+
+  function isCustomDropdownControl(el) {
+    if (!el) return false;
+    if (el.tagName === 'SELECT') return false;
+    if (el.matches?.('[role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="select__input"]')) return true;
+    if (el.closest?.('[class*="select__control"], [class*="select-shell"], [data-automation-id*="select"], [data-automation-id*="dropdown"], [class*="select2-container"], [role="combobox"]')) return true;
+    return false;
+  }
+
+  function getDropdownWidgetFor(el) {
+    if (!el) return null;
+    return el.closest?.('[class*="select-shell"], [class*="select__control"], [data-automation-id*="select"], [data-automation-id*="dropdown"], [class*="select2-container"], [role="combobox"]') || el;
+  }
+
+  function clickOptionNode(node) {
+    if (!node) return;
+    const mouseOpts = { bubbles: true, cancelable: true, view: window, buttons: 1 };
+    try { node.dispatchEvent(new MouseEvent('mousedown', mouseOpts)); } catch {}
+    try { node.dispatchEvent(new MouseEvent('mouseup', mouseOpts)); } catch {}
+    try { node.click(); } catch {}
+  }
+
+  function openDropdownWidget(widget) {
+    if (!widget) return;
+    const control = widget.matches?.('[class*="select__control"], [class*="-control"]')
+      ? widget
+      : (widget.querySelector?.('[class*="select__control"], [class*="-control"]') || widget);
+    const arrow = control.querySelector?.('[class*="select__dropdown-indicator"], [class*="select__indicators"], [class*="indicator"], [class*="arrow"], svg') || control;
+    const searchInput = widget.matches?.('input, textarea') ? widget : widget.querySelector?.('input, textarea, [role="combobox"]');
+
+    try { (control || widget).scrollIntoView?.({ block: 'center' }); } catch {}
+
+    const mouseOpts = { bubbles: true, cancelable: true, view: window, buttons: 1 };
+    try { arrow.dispatchEvent(new MouseEvent('mousedown', mouseOpts)); } catch {}
+    try { arrow.dispatchEvent(new MouseEvent('mouseup', mouseOpts)); } catch {}
+    try { arrow.click(); } catch {}
+    if (control !== arrow) {
+      try { control.dispatchEvent(new MouseEvent('mousedown', mouseOpts)); } catch {}
+      try { control.dispatchEvent(new MouseEvent('mouseup', mouseOpts)); } catch {}
+      try { control.click(); } catch {}
+    }
+    if (searchInput) {
+      try { searchInput.focus(); } catch {}
+      try {
+        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
+      } catch {}
+    }
+  }
 
   function dropdownControl(widget) {
     if (!widget) return null;
-    if (widget.matches?.('button, input, textarea, [role="combobox"], [role="button"], [aria-haspopup="listbox"]')) return widget;
-    return widget.querySelector?.('button, input, textarea, [role="combobox"], [aria-haspopup="listbox"]') || widget;
+    const arrow = widget.querySelector?.('[class*="select__dropdown-indicator"], [class*="select__indicators"], [class*="indicator"], [class*="arrow"]');
+    if (arrow) return arrow;
+    if (widget.matches?.('button, [role="combobox"], [role="button"], [aria-haspopup="listbox"], [class*="select__control"]')) return widget;
+    return widget.querySelector?.('button, [role="combobox"], [role="button"], [aria-haspopup="listbox"], [class*="select__control"], input, textarea') || widget;
   }
 
-  // Workday keeps the committed value in the control's own text, not in an
-  // input value or a chip, so widgetHasValue alone reads a filled dropdown as
-  // empty.
+  // Workday and React-Select keep the committed value in custom containers:
+  // React-Select renders .select__single-value (and .select__placeholder when empty)
+  // Workday renders text inside the button or pill.
   function dropdownHasValue(widget) {
+    if (!widget) return false;
+    const placeholder = widget.querySelector?.('[class*="select__placeholder"], [class*="-placeholder"]');
+    if (placeholder && visible(placeholder)) {
+      const pText = String(placeholder.innerText || placeholder.textContent || '').trim();
+      if (isEmptyChoiceText(pText) || /select/i.test(pText)) return false;
+    }
+    const singleVal = widget.querySelector?.('[class*="select__single-value"], [class*="-singleValue"], [class*="select__multi-value"], [class*="value-container"] > [class*="value"]');
+    if (singleVal && visible(singleVal)) {
+      const text = String(singleVal.innerText || singleVal.textContent || '').trim();
+      if (text && !isEmptyChoiceText(text)) return true;
+    }
     const control = dropdownControl(widget);
     if (widgetHasValue(control)) return true;
     const text = String(control?.innerText || control?.textContent || '').replace(/\s+/g, ' ').trim();
     if (!text) return false;
-    if (!control.matches?.('button, [role="combobox"], [role="button"], [aria-haspopup="listbox"]')) return false;
+    if (!control.matches?.('button, [role="combobox"], [role="button"], [aria-haspopup="listbox"], [class*="select__control"]')) return false;
     return !isEmptyChoiceText(text);
   }
 
@@ -483,6 +552,7 @@
     const choice = /^true$/i.test(wanted) ? 'yes' : /^false$/i.test(wanted) ? 'no' : wanted;
     if (isJoiningDateQuestion(question)) return fillDateControl(el, joiningDateValue(profile));
     if (el.tagName === 'SELECT') return applyChoice(el, choice);
+    if (isCustomDropdownControl(el)) return selectCustomOption(getDropdownWidgetFor(el), choice);
     if (dropdownWidgets().includes(el)) return selectCustomOption(el, choice);
     return applyValue(el, wanted);
   }
@@ -492,6 +562,17 @@
     if (el.tagName === 'SELECT') {
       const chosen = el.options?.[el.selectedIndex];
       return chosen && chosen.value ? String(chosen.text || chosen.value).trim() : '';
+    }
+    if (isCustomDropdownControl(el)) {
+      const widget = getDropdownWidgetFor(el);
+      const singleVal = widget.querySelector?.('[class*="select__single-value"], [class*="-singleValue"], [class*="select__multi-value"], [class*="value-container"] > [class*="value"]');
+      if (singleVal) {
+        const text = String(singleVal.innerText || singleVal.textContent || '').trim();
+        if (text && !isEmptyChoiceText(text)) return text;
+      }
+      const control = dropdownControl(widget);
+      const text = String(control?.innerText || control?.textContent || '').replace(/\s+/g, ' ').trim();
+      return isEmptyChoiceText(text) ? '' : text;
     }
     if (dropdownWidgets().includes(el)) {
       const control = dropdownControl(el);
@@ -1316,6 +1397,53 @@
     return '';
   }
 
+  // The question a radio/checkbox option belongs to. The option's own label
+  // ("Yes") is never the question: the prompt lives in a legend, a group
+  // wrapper, or the text block directly above the options.
+  function groupPromptForChoice(el, type = '') {
+    const legend = cleanPrompt(el.closest('fieldset')?.querySelector('legend')?.innerText);
+    if (legend) return legend;
+    const widget = el.closest('mat-radio-group, mat-checkbox-group, [role="radiogroup"], [role="group"]');
+    if (widget) {
+      const aria = cleanPrompt(widget.getAttribute('aria-label') || '');
+      if (aria) return aria;
+      const by = (widget.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map((id) => document.getElementById(id)?.innerText || '').join(' ');
+      const byText = cleanPrompt(by);
+      if (byText) return byText;
+      const prompt = promptBefore(widget) || promptInside(widget);
+      if (prompt) return prompt;
+    }
+    // Every option label in the enclosing group; a candidate prompt that equals
+    // one of them is another option, not the question.
+    let groupNode = el;
+    while (groupNode && groupNode !== document.body
+      && groupNode.querySelectorAll('input[type="radio"], input[type="checkbox"]').length < 2) {
+      groupNode = groupNode.parentElement;
+    }
+    const optionTexts = groupNode && groupNode !== document.body
+      ? [...groupNode.querySelectorAll('input[type="radio"], input[type="checkbox"]')]
+        .map((input) => normalizeQuestion(optionTextFor(input))).filter(Boolean)
+      : [];
+    const notOption = (text) => {
+      if (!text) return false;
+      const norm = normalizeQuestion(text);
+      return Boolean(norm) && !optionTexts.includes(norm);
+    };
+    const container = choiceGroupContainer(el, type === 'checkbox' ? 'checkbox' : 'radio');
+    if (container) {
+      for (const candidate of [promptBefore(container), promptInside(container)]) {
+        if (notOption(candidate)) return candidate;
+      }
+    }
+    let node = el.closest('label') || el;
+    for (let depth = 0; depth < 6 && node && node !== document.body; depth += 1, node = node.parentElement) {
+      const candidate = promptBefore(node);
+      if (notOption(candidate) && !isNoisePrompt(candidate)) return candidate;
+    }
+    return '';
+  }
+
   function questionForRaw(el) {
     const type = (el.getAttribute('type') || '').toLowerCase();
     const aria = (el.getAttribute('aria-label') || '').trim();
@@ -1324,6 +1452,21 @@
       .map((id) => document.getElementById(id)?.innerText || '').join(' ').replace(/\s+/g, ' ').trim();
     const legend = cleanPrompt(el.closest('fieldset')?.querySelector('legend')?.innerText);
     const labelText = cleanPrompt(labelFor(el));
+
+    // AEM/Siemens labels every option with aria-label = option text, so the
+    // aria label is not the question. Use the group's own prompt instead, or
+    // the option sentence became the question the candidate had to answer.
+    const isChoice = type === 'radio' || type === 'checkbox'
+      || el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'checkbox';
+    if (isChoice) {
+      const groupPrompt = groupPromptForChoice(el, type);
+      const optionText = cleanPrompt(optionTextFor(el));
+      if (groupPrompt
+        && normalizeQuestion(groupPrompt) !== normalizeQuestion(optionText)
+        && !isNoisePrompt(groupPrompt)) {
+        return groupPrompt;
+      }
+    }
 
     if (aria || labelledByText) return cleanPrompt([legend, aria, labelledByText, labelText].filter(Boolean).join(' '));
 
@@ -1447,6 +1590,7 @@
       degree: [education.degree, education.branch].filter(Boolean).join(' ') || '',
       graduation: education.dates || education.graduationYear || profile.batch || '',
       salary: salaryFromProfile(profile),
+      salaryCurrency: currencyForProfile(profile),
       experience_years: String(experienceYears || '0'),
       codechef: profile.codechef || profile.codechefRating || '',
       codeforces: profile.codeforces || profile.codeforcesRating || '',
@@ -1523,7 +1667,94 @@
     normalized = normalizePhoneValue(label, normalized);
     normalized = normalizeNoticePeriod(label, normalized);
     normalized = normalizeExperience(label, normalized);
-    return normalizeNumericValue(input, label, normalized);
+    normalized = normalizeNumericValue(input, label, normalized);
+    return normalizeDateOrMonthInput(input, label, normalized);
+  }
+
+  const MONTH_NAMES = {
+    january: '01', jan: '01',
+    february: '02', feb: '02',
+    march: '03', mar: '03',
+    april: '04', apr: '04',
+    may: '05',
+    june: '06', jun: '06',
+    july: '07', jul: '07',
+    august: '08', aug: '08',
+    september: '09', sep: '09', sept: '09',
+    october: '10', oct: '10',
+    november: '11', nov: '11',
+    december: '12', dec: '12',
+  };
+
+  function normalizeDateOrMonthInput(input, label, value) {
+    if (!input || value == null) return value;
+    const text = String(value).trim();
+    if (!text) return value;
+    const lower = text.toLowerCase();
+    const type = (input.getAttribute?.('type') || input.type || '').toLowerCase();
+    const isMonth = type === 'month' || /month|\bmm\b/i.test(label) || (typeof datePartKind === 'function' && datePartKind(input) === 'month');
+    const monthNum = MONTH_NAMES[lower];
+
+    // 1. <input type="month"> strictly requires YYYY-MM in Blink/Chromium
+    if (type === 'month') {
+      if (monthNum) {
+        const year = new Date().getFullYear();
+        return `${year}-${monthNum}`;
+      }
+      const ym = text.match(/^(\d{4})[-/](\d{1,2})$/);
+      if (ym) return `${ym[1]}-${ym[2].padStart(2, '0')}`;
+      const my = text.match(/^(\d{1,2})[-/](\d{4})$/);
+      if (my) return `${my[2]}-${my[1].padStart(2, '0')}`;
+      const nameYear = text.match(/^([a-zA-Z]+)\s+(\d{4})$/);
+      if (nameYear && MONTH_NAMES[nameYear[1].toLowerCase()]) {
+        return `${nameYear[2]}-${MONTH_NAMES[nameYear[1].toLowerCase()]}`;
+      }
+      if (/^\d{4}-\d{2}$/.test(text)) return text;
+      return `${new Date().getFullYear()}-01`;
+    }
+
+    // 2. <input type="date"> strictly requires YYYY-MM-DD
+    if (type === 'date') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(text)) {
+        const [mm, dd, yyyy] = text.split('/');
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      if (monthNum) {
+        const year = new Date().getFullYear();
+        return `${year}-${monthNum}-01`;
+      }
+      const parsed = Date.parse(text);
+      if (!isNaN(parsed)) {
+        const d = new Date(parsed);
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${d.getFullYear()}-${mm}-${dd}`;
+      }
+      return '';
+    }
+
+    // 3. <input type="number"> strictly requires numeric characters
+    if (type === 'number') {
+      if (monthNum) return String(Number(monthNum));
+      const digits = text.replace(/[^\d.-]/g, '');
+      return digits;
+    }
+
+    // 4. Text or custom inputs for month fields
+    if (isMonth && monthNum) {
+      const maxLen = input.getAttribute?.('maxlength');
+      const placeholder = (input.getAttribute?.('placeholder') || '').toLowerCase();
+      if (maxLen === '2' || placeholder === 'mm' || input.getAttribute?.('inputmode') === 'numeric') {
+        return monthNum;
+      }
+      if (placeholder === 'm' || /^\s*m\s*$/.test(placeholder)) {
+        return String(Number(monthNum));
+      }
+      return monthNum;
+    }
+
+    return value;
   }
 
   // A salary saved as "3LPA" / "₹30,000" must reach a numeric Workday input as
@@ -1564,6 +1795,10 @@
       if (!text || /^(select|choose|pleaseselect)/.test(text)) return false;
       return text === exp || text.includes(exp) || exp.includes(text);
     }
+    if (isCustomDropdownControl(input)) {
+      const widget = getDropdownWidgetFor(input);
+      return dropdownHasValue(widget);
+    }
     if (isPlaceholderValue(input)) return false;
     const current = squashValue(input.value);
     if (!current) return false;
@@ -1600,16 +1835,31 @@
     if (!input) return false;
     value = normalizeValueForInput(input, value);
     // A native <input type="date"> needs YYYY-MM-DD, not MM/DD/YYYY.
-    if (input.type === 'date' && /^\d{2}\/\d{2}\/\d{4}$/.test(String(value))) {
-      const [mm, dd, yyyy] = String(value).split('/');
-      value = `${yyyy}-${mm}-${dd}`;
+    if (input.type === 'date') {
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(String(value))) {
+        const [mm, dd, yyyy] = String(value).split('/');
+        value = `${yyyy}-${mm}-${dd}`;
+      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+        return false;
+      }
+    }
+    // A native <input type="month"> strictly requires YYYY-MM.
+    if (input.type === 'month' && !/^\d{4}-\d{2}$/.test(String(value))) {
+      return false;
+    }
+    // A native <input type="number"> strictly requires numeric characters.
+    if (input.type === 'number' && !/^-?\d+(?:\.\d+)?$/.test(String(value).trim())) {
+      return false;
     }
     try {
       if (input.tagName === 'SELECT') {
         const wanted = String(value).trim().toLowerCase();
+        const monthNum = MONTH_NAMES[wanted];
         const option = [...input.options].find((item) => {
           const text = item.text.trim().toLowerCase();
-          return item.value.trim().toLowerCase() === wanted || text === wanted
+          const val = item.value.trim().toLowerCase();
+          return val === wanted || text === wanted
+            || (monthNum && (val === monthNum || val === String(Number(monthNum)) || text === monthNum || text === String(Number(monthNum))))
             || (wanted === 'yes' && /^(yes|y)\b/.test(text))
             || (wanted === 'no' && /^(no|n)\b/.test(text))
             || (wanted === 'decline' && /decline|prefer not|do not wish/.test(text));
@@ -1636,10 +1886,15 @@
 
       const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      if (setter) {
-        setter.call(input, value);
-      } else {
-        input.value = value;
+      try {
+        if (setter) {
+          setter.call(input, value);
+        } else {
+          input.value = value;
+        }
+      } catch (e) {
+        hamzoohLog('warn', 'Failed setting input value directly', { value, err: e.message });
+        return false;
       }
 
       input.dispatchEvent(new Event('focus', { bubbles: true, composed: true }));
@@ -1664,6 +1919,10 @@
       const selected = input.options[input.selectedIndex];
       const text = (selected?.text || input.value || '').trim();
       return !text || isEmptyChoiceText(text) || /choose/i.test(text);
+    }
+    if (isCustomDropdownControl(input)) {
+      const widget = getDropdownWidgetFor(input);
+      return !dropdownHasValue(widget);
     }
     if (type === 'radio' || type === 'checkbox') return !input.checked;
     return !String(input.value || '').trim();
@@ -1815,6 +2074,38 @@
         year: us[3].length === 2 ? `20${us[3]}` : us[3],
       };
     }
+    const my = text.match(/^(\d{1,2})[-/](\d{4})$/);
+    if (my) {
+      return {
+        month: my[1].padStart(2, '0'),
+        day: '01',
+        year: my[2],
+      };
+    }
+    const ym = text.match(/^(\d{4})[-/](\d{1,2})$/);
+    if (ym) {
+      return {
+        month: ym[2].padStart(2, '0'),
+        day: '01',
+        year: ym[1],
+      };
+    }
+    const nameYear = text.match(/^([a-zA-Z]+)\s+(\d{4})$/);
+    if (nameYear && MONTH_NAMES[nameYear[1].toLowerCase()]) {
+      return {
+        month: MONTH_NAMES[nameYear[1].toLowerCase()],
+        day: '01',
+        year: nameYear[2],
+      };
+    }
+    const monthOnly = MONTH_NAMES[text.toLowerCase()];
+    if (monthOnly) {
+      return {
+        month: monthOnly,
+        day: '01',
+        year: String(new Date().getFullYear()),
+      };
+    }
     return null;
   }
 
@@ -1904,9 +2195,33 @@
     return String(Math.round(monthly < 100000 ? monthly * 12 : monthly));
   }
 
+  // "Expected Salary Currency" needs a currency code; the salary hint used to
+  // answer it with 360000. Derived from the candidate's own country/profile,
+  // never invented.
+  function currencyForProfile(profile) {
+    const p = profile || {};
+    const explicit = p.currency || p.salaryCurrency
+      || p.jobPreferences?.currency || p.preferences?.currency;
+    if (explicit) return String(explicit).trim().toUpperCase();
+    const where = `${p.country || ''} ${p.location || ''}`.toLowerCase();
+    if (/india|\binr\b|rupee/.test(where)) return 'INR';
+    if (/united states|\busa\b|\busd\b|dollar/.test(where)) return 'USD';
+    if (/united kingdom|\bgbp\b|pound/.test(where)) return 'GBP';
+    if (/\beur\b|euro|germany|netherlands|ireland|france|spain/.test(where)) return 'EUR';
+    if (/singapore|\bsgd\b/.test(where)) return 'SGD';
+    if (/canada|\bcad\b/.test(where)) return 'CAD';
+    if (/australia|\baud\b/.test(where)) return 'AUD';
+    if (/uae|dubai|\baed\b|dirham/.test(where)) return 'AED';
+    return '';
+  }
+
   function sensitiveProfileAnswer(question, profile) {
     const q = String(question || '').toLowerCase();
     const p = profile || {};
+    // A currency picker is not a salary question even though it says "salary".
+    if (/\bcurrency\b|salary.?currency|currency.?code/.test(q)) {
+      return currencyForProfile(p);
+    }
     // "Work Authorization Country" / "Citizenship" contain the work-auth wording
     // but expect a country, not Yes/No. A yes/no sentence that merely mentions
     // the country ("Are you legally authorized to work in the country/region of
@@ -1970,8 +2285,27 @@
     const q = String(question || '').toLowerCase();
     const known = sensitiveProfileAnswer(question, profile);
     if (known) return known;
-    if (/privacy|acknowledge|agree|consent|terms|i understand|i certify/.test(q) && !isSensitiveQuestion(q)) return 'yes';
+    if (/privacy|acknowledge|agree|consent|terms|i understand|i certify|text\/sms|sms updates?|text updates?|personal data/.test(q) && !isSensitiveQuestion(q)) return 'yes';
     if (isEeoQuestion(q)) return 'decline';
+    if (/(?:end|graduation|completion|passing)\s*(?:date\s*)?month/i.test(q)) return '05';
+    if (/(?:end|graduation|completion|passing)\s*(?:date\s*)?year/i.test(q)) {
+      const years = (Array.isArray(profile.education) ? profile.education : [])
+        .map((item) => String(item?.graduationYear || item?.endYear || item?.dates || '').match(/(19|20)\d{2}/)?.[0])
+        .filter(Boolean);
+      return years[0] || '2027';
+    }
+    if (/(?:start|admission|joining)\s*(?:date\s*)?month/i.test(q) && !isJoiningDateQuestion(q)) return '08';
+    if (/(?:start|admission|joining)\s*(?:date\s*)?year/i.test(q) && !isJoiningDateQuestion(q)) {
+      const years = (Array.isArray(profile.education) ? profile.education : [])
+        .map((item) => String(item?.dates || '').match(/\b(19|20)\d{2}\b/)?.[0])
+        .filter(Boolean);
+      return years[0] || '2023';
+    }
+    if (/willing to be based|come to the office|work from office|hybrid|on-?site|in-office/i.test(q)) return 'yes';
+    if (/full-?time internship|internship for \d+|available for \d+ (?:months?|weeks?)|duration of \d+/i.test(q)) return 'yes';
+    if (/no objection certificate|\bnoc\b/i.test(q)) return 'yes';
+    if (/engineering blog|read our (?:engineering )?blog|company blog/i.test(q)) return 'yes';
+    if (/willing to relocate|relocate yourself|open to relocation/i.test(q)) return 'yes';
     // Safe, non-personal field defaults common across ATS forms. These are
     // preferences, not personal/legal facts, so the agent answers them itself.
     if (/phone (device )?type|device type|phone type|telephone type/i.test(q)) return 'Mobile';
@@ -1990,9 +2324,19 @@
       if (flag === true || /^(yes|true|y|1)$/i.test(String(flag || ''))) return 'yes';
       if (flag === false || /^(no|false|n|0)$/i.test(String(flag || ''))) return 'no';
     }
-    if (/employed by|worked (for|at)|previously employed|ever been employed/.test(q)) {
+    if (/employed by|worked (for|at)|work(?:ing)? (?:for|at)|previously employed|ever been employed|current employer/.test(q)) {
       if (workedHere) return 'yes';
-      if (company && (q.includes(String(company).toLowerCase()) || /this company|the company/.test(q))) return 'no';
+      // "Do you currently work for PwC?" names an employer the job is not at;
+      // the candidate's own history decides it, so it never needs a prompt.
+      const named = String((q.match(/(?:work(?:ing|ed)?|employ(?:ed)?)\s+(?:for|at|by)\s+([^?.,;:()]{2,60})/) || [])[1] || '').trim();
+      const target = named || String(company || '').trim().toLowerCase();
+      if (target) {
+        const workedThere = [...experienceList, ...internshipsList].some((item) => {
+          const c = String(item?.company || '').toLowerCase();
+          return c && (c.includes(target) || target.includes(c));
+        });
+        return workedThere ? 'yes' : 'no';
+      }
     }
     return '';
   }
@@ -2046,6 +2390,21 @@
     }
     if (/employment type|job type/.test(q)) {
       return find(/full.?time/i) || '';
+    }
+    if (/willing to relocate|relocate yourself|open to relocation/i.test(q)) {
+      return find(/willing to (?:self-?fund )?my relocation|willing to relocate/i)
+        || find(/based in|do(?: not|n't) need relocation/i)
+        || find(/^(yes|y)\b/i)
+        || '';
+    }
+    if (/no objection certificate|\bnoc\b/i.test(q)) {
+      return find(/^(yes|y)\b/i) || find(/able to provide|will provide/i) || 'yes';
+    }
+    if (/full-?time internship|internship for \d+|available for \d+/i.test(q)) {
+      return find(/^(yes|y)\b/i) || find(/able to do|available/i) || 'yes';
+    }
+    if (/willing to be based|come to the office|at least \d+ days/i.test(q)) {
+      return find(/^(yes|y)\b/i) || 'yes';
     }
     return '';
   }
@@ -2117,6 +2476,24 @@
     return false;
   }
 
+  function closeOpenDropdown(widget) {
+    try {
+      const modal = findLinkedInModal() || widget?.closest?.('.artdeco-modal, [role="dialog"]');
+      if (modal) {
+        if (widget) {
+          widget.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+          widget.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+        }
+        const header = modal.querySelector('.jobs-easy-apply-modal__header, .artdeco-modal__header, h2, h3');
+        if (header) {
+          header.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+      } else {
+        document.body.click();
+      }
+    } catch {}
+  }
+
   async function fillCustomDropdowns(wantedByQuestion, answers, profile, company, pending = null) {
     // If an apply modal is open, search ONLY inside the modal!
     const modal = findLinkedInModal() || queryAllDeep('.jobs-easy-apply-modal, [role="dialog"], .artdeco-modal').find((m) => visible(m));
@@ -2124,13 +2501,14 @@
       return; // Never scan dropdowns on LinkedIn outside the Easy Apply modal!
     }
     const root = modal || document;
-    const widgets = queryAllDeep('[data-automation-id*="select"], [data-automation-id*="dropdown"], [data-automation-id="sourceDropdown"], [role="combobox"], [aria-haspopup="listbox"], [class*="select__control"], [class*="dropdown"]', root)
+    const rawWidgets = queryAllDeep(DROPDOWN_WIDGET_SELECTOR, root)
       .filter((el) => {
         if (!visible(el) || el.tagName === 'SELECT') return false;
         if (el.closest('header, nav, [role="navigation"], [class*="search-global"], [class*="msg-overlay"], [class*="msg-conversation"], [class*="msg-form"], [class*="global-nav"]')) return false;
         return true;
       });
-    for (const widget of widgets.slice(0, 20)) {
+    const widgets = rawWidgets.filter((el) => !rawWidgets.some((other) => other !== el && other.contains(el))).slice(0, 50);
+    for (const widget of widgets) {
       const question = questionFor(widget);
       // Already answered correctly in an earlier pass: never touch it again.
       if (dropdownHasValue(widget)) continue;
@@ -2142,26 +2520,26 @@
       const hint = isSensitiveQuestion(question) ? null : FIELD_HINTS.find((item) => item.test.test(question));
       let wanted = (taskMode() ? null : findBestAnswer(question, answers))
         || chooseFromProfile(question, profile, company)
-        || (hint ? profileValue(profile, hint.key, pending.jobTitle || '', company) : '')
+        || (hint ? profileValue(profile, hint.key, pending?.jobTitle || '', company) : '')
         || wantedByQuestion.get(question);
       try {
-        widget.click();
-        await sleep(250);
+        openDropdownWidget(widget);
+        await sleep(350);
         // Only look inside a real opened popup. Scanning the whole document on
         // Workday picks up the step navigation ("step 2 of 7") as fake options.
-        const popup = queryAllDeep('[role="listbox"], [role="menu"], [data-automation-id="menu"], [class*="dropdown-menu"], [class*="menu-list"]')
+        const popup = queryAllDeep('[role="listbox"], [role="menu"], [data-automation-id="menu"], [class*="select__menu"], [class*="select__list"], [class*="dropdown-menu"], [class*="menu-list"]')
           .find((node) => visible(node));
         const optionRoot = popup || root;
         const readOptions = () => {
           // Scan every visible dropdown/menu container so nested submenus
           // (Workday "Job Sites" -> "LinkedIn") are included, while page
           // navigation and step lists are excluded.
-          const containers = queryAllDeep('[role="listbox"], [role="menu"], [class*="dropdown"], [class*="menu"]').filter((node) => visible(node));
+          const containers = queryAllDeep('[role="listbox"], [role="menu"], [class*="select__menu"], [class*="select__list"], [class*="dropdown"], [class*="menu"]').filter((node) => visible(node));
           const scopes = containers.length ? containers : [optionRoot];
           const seen = new Set();
           const out = [];
           for (const scope of scopes) {
-            queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [role="menuitem"], [class*="option"], li', scope)
+            queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [role="menuitem"], [class*="select__option"], [class*="option"], li', scope)
               .forEach((node) => {
                 if (seen.has(node) || !visible(node) || isNoisePrompt(node.innerText || '')) return;
                 if (node.closest('nav, [role="navigation"], header')) return;
@@ -2184,7 +2562,7 @@
           if (searchInput && visible(searchInput)) {
             let guess = wanted || '';
             if (!guess) {
-              const ai = await inferAnswerWithAI(question, [], profile, pending.jobTitle, pending.company, pending.resumeText, pending);
+              const ai = await inferAnswerWithAI(question, [], profile, pending?.jobTitle, pending?.company, pending?.resumeText, pending);
               guess = ai?.answer || '';
             }
             if (guess) {
@@ -2205,7 +2583,7 @@
                   || (wantedLower === 'mobile' && /mobile|cell/.test(text));
               });
               if (hit) {
-                try { hit.click(); } catch {}
+                clickOptionNode(hit);
                 hamzoohLog('log', 'searchable dropdown filled', question.slice(0, 80));
                 await sleep(150);
                 continue;
@@ -2219,7 +2597,7 @@
                 const fresh = readOptions();
                 const fallback = pickBestOption(fresh)?.node || fresh[0];
                 if (fallback) {
-                  try { fallback.click(); } catch {}
+                  clickOptionNode(fallback);
                   hamzoohLog('log', 'searchable dropdown fallback', question.slice(0, 80));
                   await sleep(150);
                   continue;
@@ -2230,7 +2608,7 @@
         }
 
         if (!options.length || !optTexts.length || isNoisePrompt(question)) {
-          document.body.click();
+          closeOpenDropdown(widget);
           await sleep(100);
           if (isNoisePrompt(question)) skipped.push({ field: 'custom dropdown', reason: 'The page did not expose a real question for this control.' });
           continue;
@@ -2243,18 +2621,18 @@
           const before = options.slice();
           const picked = pickBestOption(options, profile);
           if (picked) {
-            try { picked.node.click(); } catch {}
+            clickOptionNode(picked.node);
             await sleep(600);
             const more = readOptions().filter((node) => !before.includes(node));
             const leaf = more.length ? pickBestOption(more, profile) : null;
-            if (leaf) { try { leaf.node.click(); } catch {} await sleep(300); }
+            if (leaf) { clickOptionNode(leaf.node); await sleep(300); }
           }
           // Workday search comboboxes only commit when the chosen leaf is in
           // the filtered list — use the decision we just made, never a
           // hardcoded answer that may not exist among the options.
           const searchInput = widgetControl(widget);
           const preferred = String(picked?.text || wanted || '').trim();
-          if (searchInput && !widgetHasValue(widget) && preferred) {
+          if (searchInput && !dropdownHasValue(widget) && preferred) {
             try { setNativeValue(searchInput, preferred); } catch {}
             await sleep(700);
             const listed = readOptions();
@@ -2263,10 +2641,10 @@
               const p = preferred.toLowerCase();
               return t === p || t.includes(p) || p.includes(t);
             }) || pickBestOption(listed, profile)?.node;
-            if (hit) { try { hit.click(); } catch {} await sleep(250); }
+            if (hit) { clickOptionNode(hit); await sleep(250); }
           }
-          if (!widgetHasValue(widget) && picked) {
-            try { picked.node.click(); } catch {}
+          if (!dropdownHasValue(widget) && picked) {
+            clickOptionNode(picked.node);
             await sleep(200);
           }
           hamzoohLog('log', 'logistics question answered', `${question.slice(0, 50)} -> ${preferred || 'first option'}`);
@@ -2316,39 +2694,31 @@
           }
         }
         if (!wanted) {
-          document.body.click();
+          closeOpenDropdown(widget);
           await sleep(100);
           skipped.push({ field: (question || 'Custom dropdown').slice(0, 80), reason: 'No matching profile value or saved answer for this dropdown.' });
           continue;
         }
-        const hit = options.find((o) => {
-          const t = o.innerText.trim().toLowerCase();
-          const w = String(wanted).toLowerCase();
-          return t === w || t.includes(w) || w.includes(t) || (w === 'yes' && /^(yes|y)\b/.test(t)) || (w === 'no' && /^(no|n)\b/.test(t)) || (w === 'decline' && /decline|prefer not/.test(t));
-        });
+        const hit = matchDropdownOption(options, wanted);
         if (hit) {
           // Click the option, and if it opens a submenu ("Job Sites >") follow
           // it down until the value actually commits.
           const beforeClick = options.slice();
-          try { hit.click(); } catch {}
+          clickOptionNode(hit);
           await sleep(500);
-          for (let depth = 0; depth < 3 && !widgetHasValue(widget); depth += 1) {
+          for (let depth = 0; depth < 3 && !dropdownHasValue(widget); depth += 1) {
             const nested = readOptions().filter((node) => !beforeClick.includes(node));
             if (!nested.length) break;
-            const nestedHit = nested.find((o) => {
-              const t = o.innerText.trim().toLowerCase();
-              const w = String(wanted).toLowerCase();
-              return t === w || t.includes(w) || w.includes(t) || (w === 'decline' && /decline|prefer not/.test(t));
-            }) || nested[0];
-            try { nestedHit.click(); } catch {}
+            const nestedHit = matchDropdownOption(nested, wanted) || nested[0];
+            clickOptionNode(nestedHit);
             await sleep(450);
           }
-          if (widgetHasValue(widget)) {
+          if (dropdownHasValue(widget)) {
             hamzoohLog('log', 'custom dropdown filled', question.slice(0, 80));
           } else {
             // The click landed but the widget never committed a value. Reporting
             // it as filled hid a required field that the page then rejected.
-            document.body.click();
+            closeOpenDropdown(widget);
             await sleep(100);
             skipped.push({ field: (question || 'Custom dropdown').slice(0, 80), reason: `Picked "${wanted}" but this dropdown did not keep the value.` });
           }
@@ -2357,7 +2727,7 @@
           // in a country list written differently, "Yes" in a country list) must
           // not be dropped silently — that leaves a required field empty and the
           // page rejects Next. Ask the candidate to pick from the real options.
-          document.body.click();
+          closeOpenDropdown(widget);
           await sleep(100);
           let chosen = '';
           if (taskMode()) {
@@ -2373,14 +2743,14 @@
             if (chosen && promptResult?.remember) await rememberAnswer(answers, question, chosen, optTexts);
           }
           if (chosen) {
-            try { widget.click(); } catch {}
+            openDropdownWidget(widget);
             await sleep(350);
             const fresh = readOptions();
             const retry = matchDropdownOption(fresh, chosen);
             if (retry) {
-              try { retry.click(); } catch {}
+              clickOptionNode(retry);
               await sleep(400);
-              if (widgetHasValue(widget)) {
+              if (dropdownHasValue(widget)) {
                 hamzoohLog('log', 'custom dropdown filled after asking', question.slice(0, 80));
                 await sleep(150);
                 continue;
@@ -2400,14 +2770,14 @@
   // Visible option nodes of an opened custom dropdown (Workday listbox, search
   // combobox, ...). Only visible containers are scanned so step navigation and
   // the page menu never show up as choices.
-  function dropdownOptions() {
-    const containers = queryAllDeep('[role="listbox"], [role="menu"], [data-automation-id="menu"], [class*="dropdown"], [class*="menu"]')
+  function dropdownOptions(widget = null) {
+    const containers = queryAllDeep('[role="listbox"], [role="menu"], [data-automation-id="menu"], [class*="select__menu"], [class*="select__list"], [class*="menu-list"], [class*="dropdown-menu"], [class*="dropdown"], [class*="menu"]')
       .filter((node) => visible(node));
     const scopes = containers.length ? containers : [document];
     const seen = new Set();
     const out = [];
     for (const scope of scopes) {
-      queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [role="menuitem"], [class*="option"], li', scope)
+      queryAllDeep('[data-automation-id="menu-item"], [data-automation-id="promptOption"], [role="option"], [role="menuitem"], [class*="select__option"], [class*="option"], li', scope)
         .forEach((node) => {
           if (seen.has(node) || !visible(node) || isNoisePrompt(node.innerText || '')) return;
           if (node.closest('nav, [role="navigation"], header')) return;
@@ -2421,13 +2791,31 @@
   function matchDropdownOption(nodes, wanted) {
     const w = String(wanted || '').trim().toLowerCase();
     if (!w) return null;
+    const cleanWanted = cleanCountryName(w);
+    const monthNum = MONTH_NAMES[w];
     return nodes.find((node) => {
       const t = String(node.innerText || '').trim().toLowerCase();
-      return t === w || t.includes(w) || w.includes(t)
-        || (w === 'yes' && /^(yes|y)\b/.test(t))
-        || (w === 'no' && /^(no|n)\b/.test(t))
-        || (w === 'decline' && /decline|prefer not|do not wish/.test(t));
+      if (!t) return false;
+      if (t === w || t === cleanWanted) return true;
+      if (monthNum && (t === monthNum || t === String(Number(monthNum)))) return true;
+      if (MONTH_NAMES[t] && (MONTH_NAMES[t] === w || String(Number(MONTH_NAMES[t])) === w)) return true;
+      if (w === 'yes' && /^(yes|y|agree)\b/i.test(t)) return true;
+      if (w === 'no' && /^(no|n|disagree)\b/i.test(t)) return true;
+      if (w === 'decline' && /decline|prefer not|do not wish/i.test(t)) return true;
+      if (cleanWanted === 'india' && /\bindia\b|\b\+91\b/i.test(t)) return true;
+      if (w.length > 3 && (t.includes(w) || w.includes(t) || t.includes(cleanWanted))) return true;
+      return false;
     }) || null;
+  }
+
+  // Peek the options of a closed custom dropdown by briefly opening it.
+  async function peekDropdownOptions(widget) {
+    if (!widget) return [];
+    openDropdownWidget(widget);
+    await sleep(250);
+    const opts = dropdownOptions(widget);
+    const texts = opts.map((o) => (o.innerText || o.textContent || '').trim()).filter((t) => t && !isNoisePrompt(t));
+    return [...new Set(texts)];
   }
 
   // Commit a value into a custom (non-<select>) dropdown. An answer given in the
@@ -2436,40 +2824,43 @@
   async function selectCustomOption(widget, wanted) {
     const target = String(wanted || '').trim();
     if (!widget || !target) return false;
-    const trigger = dropdownControl(widget) || widget;
-    try { widget.scrollIntoView({ block: 'center' }); } catch {}
-    try { trigger.click(); } catch {}
+    openDropdownWidget(widget);
     await sleep(350);
-    let hit = matchDropdownOption(dropdownOptions(), target);
+    let hit = matchDropdownOption(dropdownOptions(widget), target);
     if (!hit) {
       const searchInput = widget.matches?.('input, textarea') ? widget : widget.querySelector?.('input, textarea');
       if (searchInput && visible(searchInput)) {
-        setNativeValue(searchInput, target);
-        await sleep(800);
-        hit = matchDropdownOption(dropdownOptions(), target);
+        try { searchInput.focus(); } catch {}
+        try { setNativeValue(searchInput, target); } catch {}
+        await sleep(500);
+        hit = matchDropdownOption(dropdownOptions(widget), target);
       }
     }
     if (!hit) {
-      try { document.body.click(); } catch {}
+      closeOpenDropdown(widget);
       return false;
     }
-    try { hit.click(); } catch {}
-    await sleep(450);
+    clickOptionNode(hit);
+    await sleep(350);
     for (let depth = 0; depth < 3 && !dropdownHasValue(widget); depth += 1) {
-      const nested = dropdownOptions().filter((node) => node !== hit);
+      const nested = dropdownOptions(widget).filter((node) => node !== hit);
       if (!nested.length) break;
       const leaf = matchDropdownOption(nested, target) || nested[0];
-      try { leaf.click(); } catch {}
-      await sleep(400);
+      clickOptionNode(leaf);
+      await sleep(300);
     }
     if (!dropdownHasValue(widget)) {
-      try { document.body.click(); } catch {}
+      closeOpenDropdown(widget);
       return false;
     }
     return true;
   }
 
   function radioGroupKey(input, question, type = 'radio') {
+    // Every option of a "select all that apply" checkbox list answers ONE
+    // question. Keying by the input name split such a list into one group per
+    // option, so each checkbox was asked (and left unchecked) separately.
+    if (type === 'checkbox') return `checkbox:${question || input.name || input.id || ''}`;
     return `${type}:${input.name || question || input.id || ''}`;
   }
 
@@ -2585,12 +2976,26 @@
   function attachResume(input, file) {
     if (!file || !input) return false;
     try {
+      const tracker = input._valueTracker;
+      if (tracker) {
+        try { tracker.setValue(''); } catch {}
+      }
       const transfer = new DataTransfer();
       transfer.items.add(file);
       input.files = transfer.files;
+
+      // Trigger React synthetic event handlers directly if present
+      const reactKey = Object.keys(input).find((k) => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
+      if (reactKey && typeof input[reactKey]?.onChange === 'function') {
+        try {
+          input[reactKey].onChange({ target: input, currentTarget: input, bubbles: true });
+        } catch (e) {
+          hamzoohLog('warn', 'React onChange invocation failed', e.message);
+        }
+      }
     } catch { return false; }
-    ['focus', 'click', 'input', 'change', 'blur'].forEach((type) => {
-      try { input.dispatchEvent(new Event(type, { bubbles: true, cancelable: true })); } catch {}
+    ['input', 'change'].forEach((type) => {
+      try { input.dispatchEvent(new Event(type, { bubbles: true, cancelable: true, composed: true })); } catch {}
     });
     return Boolean(input.files && input.files.length);
   }
@@ -2754,11 +3159,21 @@
     const modal = findLinkedInModal() || document;
     const file = await ensureResumeFile(pending);
     const stem = String(pending?.resumeName || file?.name || '').replace(/\.[^.]+$/, '').toLowerCase();
+    const companyClean = String(pending?.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
     const matchesTailored = (row) => {
       const text = String(row.innerText || '').toLowerCase();
       if (!text) return false;
-      if (stem.length >= 5 && text.includes(stem)) return true;
       if (file?.name && text.includes(String(file.name).toLowerCase())) return true;
+      if (stem.length >= 5 && text.includes(stem)) return true;
+      // Match by company keyword if company has at least 4 letters (e.g. "rapidclaims")
+      if (companyClean.length >= 4 && text.replace(/[^a-z0-9]/g, '').includes(companyClean)) return true;
+      // Match prefix (LinkedIn cuts off with ellipsis "..." at ~25-30 chars, e.g. "NELLURU-RapidClaims-Bengalu-...")
+      const prefix = stem.slice(0, 20);
+      if (prefix.length >= 8 && text.includes(prefix)) return true;
+      // Match significant word parts (e.g. candidate name + company name)
+      const parts = stem.split(/[-_\s.]+/).filter((p) => p.length >= 4);
+      if (parts.length >= 2 && parts.slice(0, 2).every((p) => text.includes(p))) return true;
       return false;
     };
 
@@ -2775,7 +3190,8 @@
 
     // 2. Upload the tailored PDF — the normal path.
     if (file) {
-      let input = allFileInputs().find((el) => !el.disabled) || null;
+      let input = queryAllDeep('input[type="file"]', modal).find((el) => !el.disabled)
+        || allFileInputs().find((el) => !el.disabled) || null;
       if (!input) {
         const uploadBtn = queryAllDeep('button, a, label', modal).find((el) => visible(el)
           && /^(upload resume|upload (a )?(cv|resume)|choose file)$/i.test((el.innerText || '').trim()));
@@ -2783,7 +3199,8 @@
           await realClick(uploadBtn);
           const startedAt = Date.now();
           while (Date.now() - startedAt < 3000 && !allFileInputs().length) await sleep(150);
-          input = allFileInputs().find((el) => !el.disabled) || null;
+          input = queryAllDeep('input[type="file"]', modal).find((el) => !el.disabled)
+            || allFileInputs().find((el) => !el.disabled) || null;
         }
       }
       if (input) {
@@ -2820,11 +3237,15 @@
     }
 
     // 3. Last resort only: say plainly that an existing resume was used.
-    const fallback = linkedInResumeOptionRows(modal)[0];
-    if (fallback) {
-      await chooseLinkedInResumeOption(fallback);
+    // Prefer a generic candidate resume over a resume tailored for a different company!
+    const nonOtherCompanyRow = linkedInResumeOptionRows(modal).find((r) => {
+      const t = String(r.innerText || '').toLowerCase();
+      return !/-tailored-|-tai-\.\.\./i.test(t);
+    }) || linkedInResumeOptionRows(modal)[0];
+    if (nonOtherCompanyRow) {
+      await chooseLinkedInResumeOption(nonOtherCompanyRow);
       runEvent('resume_fallback_existing', {
-        label: String(fallback.innerText || '').replace(/\s+/g, ' ').slice(0, 140),
+        label: String(nonOtherCompanyRow.innerText || '').replace(/\s+/g, ' ').slice(0, 140),
       }, 'Tailored resume could not be uploaded — selected an existing resume');
       sendProgress('resume_fallback', '⚠️ Tailored resume could not be uploaded — selected an existing resume for this step.');
       return true;
@@ -2832,21 +3253,59 @@
     return false;
   }
 
-  // Premium/upsell cards inside the Easy Apply modal can cover the Next button.
-  // Dismiss the small "Dismiss/Not now" controls, but never the apply modal's
-  // own close button (that would throw the application away).
-  async function dismissBlockingUpsells() {
-    const buttons = queryAllDeep('button, [role="button"]', document).filter((el) => visible(el)
-      && /^(dismiss|no thanks|not now|maybe later|got it|skip|✕|×)$/i
-        .test((el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()));
-    for (const btn of buttons.slice(0, 4)) {
-      const modal = findLinkedInModal();
-      if (modal && modal.contains(btn) && btn.closest('.jobs-easy-apply-modal__header, [data-test-modal-header]')) continue;
+  function handleSaveApplicationPrompt() {
+    const dialogs = queryAllDeep('.artdeco-modal, [role="dialog"]');
+    const saveDialog = dialogs.find((el) => {
+      const text = String(el.innerText || '').toLowerCase();
+      return text.includes('save this application') || text.includes('save to return to this application later');
+    });
+    if (saveDialog && visible(saveDialog)) {
+      // Find the dismiss 'X' button on this confirmation dialog to stay in the application:
+      const closeBtn = saveDialog.querySelector('.artdeco-modal__dismiss, [data-test-modal-close-btn], button[aria-label="Dismiss"]');
+      if (closeBtn) {
+        try {
+          closeBtn.click();
+          runEvent('save_dialog_dismissed', {}, 'Dismissed "Save this application?" confirmation to stay on application');
+          return true;
+        } catch {}
+      }
       try {
-        await realClick(btn);
-        await sleep(250);
-        runEvent('upsell_dismissed', { label: buttonText(btn) }, 'Dismissed a blocking promo/upsell');
+        saveDialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+        return true;
       } catch {}
+    }
+    return false;
+  }
+
+  // Premium/upsell cards inside the Easy Apply modal can cover the Next button.
+  // Dismiss ONLY small banner/toast/tooltip promotions, and NEVER the application modal's
+  // own close button or any dialog close button (which triggers "Save this application?").
+  async function dismissBlockingUpsells() {
+    handleSaveApplicationPrompt();
+
+    const modal = findLinkedInModal();
+    // Only search inside explicit promotional banners, toasts, and tooltips:
+    const promoContainers = queryAllDeep(
+      '.artdeco-toast, .artdeco-inline-feedback, .artdeco-hoverable-content, [class*="toast"], [class*="banner"], [class*="tooltip"], [class*="upsell"], [class*="promo"], .jobs-easy-apply-modal__ad',
+      document
+    );
+    for (const container of promoContainers) {
+      if (!visible(container)) continue;
+      // Never touch the main modal header or close controls!
+      if (modal && (container === modal || container.contains(modal) || container.closest('.jobs-easy-apply-modal__header, [data-test-modal-header]'))) continue;
+      const dismissBtn = queryAllDeep('button, [role="button"]', container).find((el) => {
+        if (!visible(el)) return false;
+        if (el.matches('.artdeco-modal__dismiss, [data-test-modal-close-btn], .jobs-easy-apply-modal__dismiss-button')) return false;
+        const text = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+        return /^(dismiss|no thanks|not now|maybe later|got it|skip|✕|×)$/i.test(text);
+      });
+      if (dismissBtn) {
+        try {
+          await realClick(dismissBtn);
+          await sleep(250);
+          runEvent('upsell_dismissed', { label: buttonText(dismissBtn) }, 'Dismissed a blocking promo/upsell');
+        } catch {}
+      }
     }
   }
 
@@ -3167,13 +3626,13 @@
     // Only VISIBLE text decides whether this is an Apply control. Aria-labels
     // on nav links ("Home", "Search for jobs to apply", "privacy notice")
     // produced false positives that broke Workday/Workable in the harness.
-    if (!/apply|interested|start application|begin application/i.test(visibleText) && !/\/apply|apply=/i.test(href)) return -1;
+    if (!/apply|interested|start application|begin application|complete (your )?application|continue (your )?application|resume (your )?application|finish (your )?application/i.test(visibleText) && !/\/apply|apply=/i.test(href)) return -1;
     if (/search for jobs|view all jobs|browse jobs|privacy|cookie|accept all|decline all|settings|language|english|manage settings|^home$/i.test(visibleText)) return -1;
     if (/apply (filter|to all|changes)|save (job|this)|share|sign in|log in|contact sales|attach file|create alert|job alert/i.test(text)) return -1;
     let score = 0;
-    if (/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply)$/i.test(visibleText)) score += 60;
+    if (/^(apply|apply now|apply for this job|apply for job|apply to this job|start application|begin application|continue to apply|easy apply|complete (your )?application|continue (your )?application|resume (your )?application|finish (your )?application)$/i.test(visibleText)) score += 60;
     else if (/\b(i'?m interested|i am interested)\b/i.test(visibleText)) score += 25;
-    else if (/\b(apply now|easy apply|apply for this job|start application|begin application)\b/i.test(visibleText)) score += 35;
+    else if (/\b(apply now|easy apply|apply for this job|start application|begin application|complete (your )?application|continue (your )?application|resume (your )?application|finish (your )?application)\b/i.test(visibleText)) score += 35;
     else if (/\bapply\b/i.test(visibleText)) score += 20;
     if (/apply/i.test(attrsText)) score += 15;
     if (/\/apply|apply=/i.test(href)) score += 30;
@@ -3307,6 +3766,24 @@
     return collectInputs().filter((i) => (i.getAttribute('type') || '') !== 'password').length >= 1;
   }
 
+  // A registration/profile step of an application (Siemens: Login/Registration
+  // → Profile information with Title, First name, Last name, Email and a
+  // password further down) is the application itself, not a sign-in wall.
+  // Naming a candidate is what a login screen never does.
+  function looksLikeApplicationForm() {
+    try {
+      const fields = collectInputs().filter((el) => {
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        if (type === 'password') return false;
+        return visible(el);
+      });
+      if (fields.length < 2) return false;
+      const text = String(document.body?.innerText || '').slice(0, 6000).toLowerCase();
+      if (/first name|last name|full name|surname|given name|phone|mobile|address|resume|curriculum|cover letter/.test(text)) return true;
+      return fields.length >= 3 && !queryAllDeep('input[type="password"]').some(visible);
+    } catch { return false; }
+  }
+
   // Portals that gate the application behind their own account (Wipro, Workday
   // tenants, Taleo) say "Please sign into your application" / "Sign in or Sign
   // up" before showing a single field. That is the candidate's step, not a
@@ -3328,6 +3805,9 @@
 
   function detectLoginWall() {
     try {
+      // An application/profile step is filled, never treated as a wall — even
+      // if a password box from its own registration form is on the page.
+      if (looksLikeApplicationForm()) return false;
       if (queryAllDeep('input[type="password"]').some(visible)) return true;
       const body = (document.body?.innerText || '').slice(0, 3500);
       return SIGNIN_GATE_RE.test(body);
@@ -3351,10 +3831,14 @@
 
   function detectAuthGate() {
     try {
+      const host = location.hostname;
+      // Identity providers always win.
+      if (host && AUTH_HOST_RE.test(host)) return true;
+      // A fillable application/profile step is the application itself, even when
+      // a nav link or a checkpoint says "Login / Registration".
+      if (looksLikeApplicationForm()) return false;
       const gateText = String(document.body?.innerText || '').slice(0, 2500);
       if (SIGNIN_GATE_RE.test(gateText)) return true;
-      const host = location.hostname;
-      if (host && AUTH_HOST_RE.test(host)) return true;
       if (AUTH_PATH_RE.test(location.pathname)) {
         // A path-only hit counts when the page really looks like a sign-in
         // screen, not when a job board merely lives under /login.
@@ -3505,6 +3989,66 @@
       await taskCheckpoint('login_required', 'Please sign into your application — automation continues automatically afterwards.', {});
     }
     await updatePending({ awaitingManualApply: true, loginHost: location.hostname, done: false });
+  }
+
+  // Registering on a portal ends with "Set your password". That is a step for
+  // the candidate (the agent must never invent or store a password), but it is
+  // NOT a reason to stop: it is announced on the page and the run continues by
+  // itself the moment the candidate presses Continue.
+  const SET_PASSWORD_RE = /set (your|a) (new )?password|create (your|a) (new )?password|choose (your|a) (new )?password|password confirmation|re-?enter (your )?password|your password must/i;
+
+  function needsAccountPassword() {
+    try {
+      const boxes = queryAllDeep('input[type="password"]').filter(visible);
+      if (!boxes.length) return false;
+      const body = String(document.body?.innerText || '').slice(0, 5000);
+      if (!SET_PASSWORD_RE.test(body) && boxes.length < 2) return false;
+      return boxes.some((el) => !String(el.value || '').trim());
+    } catch { return false; }
+  }
+
+  async function waitForCandidatePassword(pending) {
+    const label = pending?.company || location.hostname;
+    showTaskOverlay({
+      title: 'Set your password',
+      subtitle: label,
+      body: 'This step creates your candidate account. Type a password in both boxes here in this tab and press Continue — Hamzooh carries on filling the application by itself. Nothing to click in the dashboard.',
+      tone: 'linear-gradient(135deg,#4f46e5,#6366f1)',
+    });
+    sendProgress('password_needed', '🔑 Set your password in the job tab, then press Continue — automation continues automatically.');
+    if (taskMode()) {
+      await taskCheckpoint('waiting_for_user_input', 'Set your password in the job tab and press Continue. Hamzooh resumes the application automatically.', {
+        status: 'waiting_for_user_input',
+        data: { type: 'password' },
+      });
+    }
+    await updatePending({ awaitingManualApply: true, loginHost: location.hostname, done: false });
+
+    const signature = () => `${location.href}|${collectInputs()
+      .map((el) => `${el.name}:${el.id}:${el.getAttribute('type') || ''}`)
+      .join(',')}`;
+    const before = signature();
+    const startedAt = Date.now();
+    let pressed = false;
+    while (Date.now() - startedAt < 20 * 60 * 1000) {
+      await sleep(1200);
+      const boxes = queryAllDeep('input[type="password"]').filter(visible);
+      const filled = boxes.length > 0 && boxes.every((el) => String(el.value || '').length >= 4);
+      if (filled && !pressed) {
+        const advance = findAdvanceButton();
+        if (advance) {
+          pressed = true;
+          sendProgress('password_set', '🔓 Password entered — pressing Continue for you…');
+          try { await realClick(advance); } catch {}
+        }
+      }
+      if (!boxes.length || signature() !== before) {
+        hideTaskOverlay();
+        sendProgress('password_done', '✅ Password step complete — continuing the application.');
+        return true;
+      }
+    }
+    return false;
   }
 
   function buttonText(el) {
@@ -3911,7 +4455,63 @@
 
   // Phase 1g: always read the value back. If a framework rejected the
   // synthetic input event, fall back to trusted CDP text insertion.
+  // A native <select> must be filled by OPTION TEXT, not by assigning
+  // input.value: ATS forms use opaque option values ("IN"), so the old code
+  // left "Select an option" in place and the step was rejected.
+  function selectOptionByText(select, wanted) {
+    const want = squashValue(wanted);
+    if (!select || !select.options || !want) return null;
+    const options = [...select.options].filter((option) => option.value !== '' && !isEmptyChoiceText(option.text));
+    if (!options.length) return null;
+    const text = (option) => squashValue(option.text);
+    return options.find((option) => text(option) === want)
+      || options.find((option) => text(option).startsWith(want) || want.startsWith(text(option)))
+      || options.find((option) => text(option).includes(want) || want.includes(text(option)))
+      || options.find((option) => squashValue(option.value) === want)
+      || null;
+  }
+
+  function setNativeSelect(select, option) {
+    if (!select || !option) return false;
+    try {
+      if (select.value !== option.value) select.value = option.value;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return Boolean(select.value) && select.value === option.value;
+    } catch { return false; }
+  }
+
   async function setVerified(input, value) {
+    if (input.tagName === 'SELECT') {
+      const wanted = String(value == null ? '' : value).trim();
+      const option = selectOptionByText(input, wanted);
+      if (!option) {
+        runEvent('select_no_match', {
+          name: input.name || input.id || '',
+          value: wanted.slice(0, 60),
+          options: [...input.options].slice(0, 10).map((item) => item.text.trim()),
+        }, `No option matches "${wanted.slice(0, 40)}"`);
+        return false;
+      }
+      if (!setNativeSelect(input, option)) return false;
+      await sleep(80);
+      runEvent('select_option', {
+        name: input.name || input.id || '',
+        value: option.text.trim().slice(0, 60),
+      }, `Selected "${option.text.trim().slice(0, 40)}"`);
+      return true;
+    }
+    if (isCustomDropdownControl(input)) {
+      const widget = getDropdownWidgetFor(input);
+      const chosen = await selectCustomOption(widget, value);
+      if (chosen) {
+        runEvent('select_custom_option', {
+          name: input.name || input.id || '',
+          value: String(value).slice(0, 60),
+        }, `Selected custom option "${String(value).slice(0, 40)}"`);
+        return true;
+      }
+    }
     const target = normalizeValueForInput(input, value);
     if (!setNativeValue(input, target)) return false;
     await sleep(80);
@@ -4303,7 +4903,11 @@
       const input = unknown[i];
       const question = labelFor(input);
       if (!question) continue;
-      const options = input.tagName === 'SELECT' ? optionList(input).map((o) => o.text.trim()).filter(Boolean) : [];
+      let options = input.tagName === 'SELECT' ? optionList(input).map((o) => o.text.trim()).filter(Boolean) : [];
+      if (!options.length && isCustomDropdownControl(input)) {
+        const widget = getDropdownWidgetFor(input);
+        options = await peekDropdownOptions(widget);
+      }
       if (await fillUnknownField(input, question, options, answers, profile, pending, i, unknown.length)) filledCount += 1;
     }
 
@@ -4377,6 +4981,60 @@
     return groups;
   }
 
+  // Apply a decided answer to a radio/checkbox group. A group whose options are
+  // sentences ("None of the conditions above apply to me") is answered with the
+  // option TEXT, which the yes/no-only checkbox branch used to ignore — the
+  // field stayed empty and the run asked for an answer it had already decided.
+  function applyGroupChoice(group, wanted) {
+    const value = String(wanted || '').trim();
+    if (!value) return null;
+    const direct = group.items.find((item) => {
+      try { return applyChoice(item, value) && item.checked; } catch { return false; }
+    });
+    if (direct) return direct;
+    const squash = (text) => normalizeQuestion(text).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const target = squash(value);
+    if (!target) return null;
+    const ranked = group.items
+      .map((item) => ({ item, text: squash(optionTextFor(item)) }))
+      .filter((entry) => entry.text)
+      .map((entry) => ({
+        ...entry,
+        score: entry.text === target ? 3
+          : entry.text.includes(target) || target.includes(entry.text) ? 2
+            : questionSimilarity(entry.text, target) >= 0.6 ? 1 : 0,
+      }))
+      .sort((a, b) => b.score - a.score);
+    const best = ranked[0];
+    if (!best || best.score < 2) return null;
+    if (!best.item.checked) clickChoice(best.item);
+    return best.item.checked ? best.item : null;
+  }
+
+  // "Which specific conditions apply to you?" groups end with an explicit
+  // "None of the conditions above apply to me". When none of the other options
+  // names an employer that appears in the candidate's own history, that option
+  // is the correct answer and the run must not stop to ask.
+  function noneOfTheAboveChoice(group, profile) {
+    if (group.type !== 'checkbox' || group.items.length < 2) return null;
+    const none = group.items.find((item) => /^\s*none\b|none of the (above|these|following)|not applicable|none apply/i.test(optionTextFor(item) || ''));
+    if (!none) return null;
+    const history = JSON.stringify([
+      ...(Array.isArray(profile?.experience) ? profile.experience : []),
+      ...(Array.isArray(profile?.internships) ? profile.internships : []),
+    ]).toLowerCase();
+    const named = group.items
+      .filter((item) => item !== none)
+      .map((item) => String(optionTextFor(item) || ''))
+      .flatMap((text) => (text.match(/\b(?:at|for|of)\s+([A-Z][A-Za-z&.'-]{1,24}(?:\s+[A-Z][A-Za-z&.'-]{1,24}){0,2})/g) || []))
+      .map((phrase) => phrase.replace(/^(?:at|for|of)\s+/i, '').trim().toLowerCase())
+      .flatMap((name) => [name, name.split(' ')[0]])
+      .filter((name) => name.length > 2);
+    if (!named.length) return null;
+    if (named.some((name) => history.includes(name))) return null;
+    return none;
+  }
+
   async function resolveRequiredGroups(answers, pending, profile) {
     let resolved = 0;
     const groups = [...requiredGroupsOf().values()];
@@ -4421,6 +5079,14 @@
         if (wanted) TASK_ANSWERS_MAP[normalizeQuestion(question)] = wanted;
       }
       if (!wanted) {
+        const none = noneOfTheAboveChoice(group, profile);
+        if (none) {
+          wanted = optionTextFor(none);
+          runEvent('group_none_of_above', { question: question.slice(0, 120), option: wanted.slice(0, 120) },
+            `Selected "${wanted.slice(0, 60)}" — no listed condition matches the profile.`);
+        }
+      }
+      if (!wanted) {
         sendProgress('asking_user', `🔑 ${question.slice(0, 60)}`);
         const result = await askOrSkip(question, g, groups.length,
           optionTexts.filter(Boolean),
@@ -4437,7 +5103,7 @@
         skipped.push({ field: question.slice(0, 80), reason: 'Required choice was left unanswered.' });
         continue;
       }
-      const hit = group.items.find((item) => applyChoice(item, wanted));
+      const hit = applyGroupChoice(group, wanted);
       if (hit) {
         answers[question.toLowerCase().slice(0, 180)] = wanted;
         resolved += 1;
@@ -4646,6 +5312,18 @@
     if (pending.done) return;
     if (/\/error(\/|$)|\/500(\/|$)/i.test(location.pathname)) return;
 
+    // A company-profile / social page is never an application form. If one is
+    // opened by mistake, park the run with an explanation instead of clicking
+    // around a feed that has its own "Apply" buttons.
+    const profilePage = /^(www\.)?(linkedin\.com\/(company|in|school|showcase)|facebook\.com|twitter\.com|x\.com|instagram\.com|youtube\.com)/i
+      .test(`${location.hostname}${location.pathname}`) && !/linkedin\.com\/jobs/i.test(location.href);
+    if (profilePage) {
+      await finish('This tab opened a company profile page, not the job posting. Open the job page link (…/JobDetail/… or the employer’s apply page) and start Auto Apply again.', {
+        status: 'needs_attention', reasonCode: 'JOB_PAGE_NOT_FOUND', filledCount: 0, emptyCount: 0,
+      });
+      return;
+    }
+
     // 🎓 Train Mode: purely passive recording without ANY automation interfering!
     if (window.__HAMZOOH_TRAIN_MODE__ || pending?.trainMode) {
       window.__HAMZOOH_TRAIN_MODE__ = true;
@@ -4734,6 +5412,24 @@
       loginWall: detectLoginWall(),
     }, `Frame report: ${collectInputs().length} inputs, ${earlyApplyButtons.length} apply buttons`);
 
+    // "Set your password" is the candidate's step, announced on the page; the
+    // run waits for it and then continues by itself.
+    if (needsAccountPassword()) {
+      if (CURRENT_DRY_RUN) {
+        await finish('🔑 This step asks you to set a password — dry run stops here.', { status: 'needs_attention', reasonCode: 'PASSWORD_REQUIRED' });
+        return;
+      }
+      // The registration page often carries profile fields ABOVE the password
+      // boxes, so fill everything the agent can before handing over the password.
+      await fillFormPhase(profile, answers, pending).catch(() => null);
+      const done = await waitForCandidatePassword(pending);
+      if (done) return fillPage(profile, answers, { ...pending, url: location.href }, depth + 1);
+      await finish('🔑 Set your password in the job tab, then click Continue — the application resumes automatically.', {
+        status: 'needs_attention', reasonCode: 'PASSWORD_REQUIRED',
+      });
+      return;
+    }
+
     // Check if portal needs sign in or account creation.
     // Auto-fill if credentials exist in Vault, or display a helper banner to save them.
     if (detectAuthGate() || detectLoginWall()) {
@@ -4766,6 +5462,10 @@
       });
       return;
     }
+
+    // The form is here, so a leftover "sign in to continue" card must go.
+    const staleGate = document.getElementById('hamzooh-task-panel');
+    if (staleGate && /sign in|sign-in|log in/i.test(staleGate.textContent || '')) staleGate.remove();
 
     const siteBlock = detectSiteBlock();
     if (siteBlock) {
@@ -5255,7 +5955,7 @@
         const autoId = el.getAttribute('data-automation-id') || '';
         const text = buttonText(el);
         return /autofillWithResume/i.test(autoId)
-          || /autofill with resume|apply with resume|apply manually|use my last application|start application|continue application|resume application/i.test(text);
+          || /autofill with resume|apply with resume|apply manually|use my last application|start application|continue application|resume application|complete (your )?application|finish (your )?application/i.test(text);
       });
     } catch { return false; }
   }
@@ -5310,7 +6010,7 @@
     const isTop = window.top === window;
     const runAnswers = taskMode() ? {} : (stored.answers || {});
     let actionable = frameLooksActionable();
-    const loginWall = detectLoginWall() || detectAuthGate();
+    let loginWall = detectLoginWall() || detectAuthGate();
     // Tracking/preload iframes contain navigation links (and sometimes
     // "apply"-ish aria-labels) but no form. They must never enter the fill
     // pipeline: that is what stalled the Carousell LinkedIn run.
@@ -5333,13 +6033,35 @@
     // A frame with no form, no apply control and no file input has nothing to
     // do; record it and leave the run to the frame that owns the form.
     if (!actionable && !loginWall) {
-      runEvent('frame_skipped', {
-        url: location.href,
-        inputs: collectInputs().length,
-        fileInputs: allFileInputs().length,
-        top: window.top === window,
-      }, 'Frame skipped: no form or apply control');
-      return;
+      // A job posting can hydrate its entry control (Siemens: "Complete
+      // application") a moment after the script starts. Wait for it in the top
+      // frame instead of parking the whole run on an apparently empty page.
+      if (isTop && !CURRENT_DRY_RUN) {
+        window.__HAMZOOH_FILLER_BUSY__ = true;
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < 20000) {
+          await sleep(700);
+          if (frameLooksActionable() || detectLoginWall() || detectAuthGate()) break;
+        }
+        actionable = frameLooksActionable();
+        loginWall = loginWall || detectLoginWall() || detectAuthGate();
+        if (!actionable) window.__HAMZOOH_FILLER_BUSY__ = false;
+      }
+      if (!actionable && !loginWall) {
+        if (isTop && taskMode()) {
+          // Never go quiet: an idle run with no log line looks like a freeze.
+          await taskCheckpoint('page_not_actionable',
+            '🔍 Waiting for an application form or Apply button on this page — open the job tab if you want to help it along.',
+            { status: 'filling_application' }).catch(() => null);
+        }
+        runEvent('frame_skipped', {
+          url: location.href,
+          inputs: collectInputs().length,
+          fileInputs: allFileInputs().length,
+          top: window.top === window,
+        }, 'Frame skipped: no form or apply control');
+        return;
+      }
     }
 
     filling = true;
@@ -5366,8 +6088,8 @@
   window.__HAMZOOH_FORCE_TERMINAL__ = (reason) => {
     if (window.__HAMZOOH_TRAIN_MODE__ || TERMINAL_REPORTED || !CURRENT_RUN_ID) return;
     runEvent('watchdog_force_terminal', { reason: reason || '', url: location.href, top: window.top === window }, 'Watchdog forced a terminal state');
-    finish('⏱️ Automation timed out without reaching a form. The job tab is still open for manual review.', {
-      status: 'needs_attention', reasonCode: 'TIMEOUT_NO_TERMINAL', filledCount: 0, emptyCount: 0,
+    finish('⏱️ Stopped: this page never showed an application form or Apply button. The job tab is still open — click Auto Apply with AI again to retry.', {
+      status: 'failed', reasonCode: 'TIMEOUT_NO_TERMINAL', filledCount: 0, emptyCount: 0,
     });
   };
 

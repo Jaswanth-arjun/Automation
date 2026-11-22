@@ -3,6 +3,7 @@ import {
   AlertCircle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Info, Loader2,
   Mail, RefreshCw, Send, Sparkles, X,
 } from 'lucide-react';
+import CompanyLogo from './CompanyLogo';
 import { api } from '../lib/api';
 import { activityStore, APPLICATION_STATUS_OPTIONS } from '../lib/activityStore';
 import { firstName, formatDateTime } from '../lib/timeAgo';
@@ -32,11 +33,34 @@ function contactStatus(contact) {
 
 const statusClass = (label) => String(label || '').toLowerCase().replace(/[^a-z]+/g, '-');
 
+// LinkedIn conversations are listed by how far each one has gone, not by the
+// order the contacts were messaged: replied first, then seen without a reply,
+// then accepted, then just sent. Declined invitations sit last.
+const LINKEDIN_STAGE_ORDER = { replied: 0, seen: 1, accepted: 2, pending: 3, sent: 3, declined: 4 };
+
+function linkedInStage(contact) {
+  const status = String(contact?.linkedin?.status || 'pending').toLowerCase();
+  if (contact?.linkedinReply || status === 'replied') return 0;
+  return LINKEDIN_STAGE_ORDER[status] ?? 3;
+}
+
 function fallbackSummary(text) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   if (!clean) return 'No reply content yet.';
   const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
   return sentences.slice(0, 2).join(' ').slice(0, 260);
+}
+
+// A sent message plus a refreshed thread can carry the same line twice; the
+// panel shows each bubble once. Genuine repeats differ in timestamp.
+function dedupeThreadItems(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const key = `${item?.direction || ''}|${String(item?.text || '').trim()}|${item?.at || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function aiPayload(contact, row, reply) {
@@ -83,7 +107,12 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
     [row],
   );
   const liContacts = useMemo(
-    () => (row?.contacts || []).filter((contact) => contact.linkedin),
+    () => (row?.contacts || [])
+      .filter((contact) => contact.linkedin)
+      // Stable sort: contacts at the same stage keep the order they were added.
+      .map((contact, index) => ({ contact, index }))
+      .sort((a, b) => linkedInStage(a.contact) - linkedInStage(b.contact) || a.index - b.index)
+      .map((entry) => entry.contact),
     [row],
   );
   const contacts = tab === 'email' ? emailContacts : liContacts;
@@ -227,7 +256,9 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
         if (!alive) return;
         const loaded = Array.isArray(result?.messages) ? result.messages : [];
         setLiMessages(loaded);
-        setLiThreadNote(result?.noThread ? (result.notice || 'No LinkedIn conversation yet.') : '');
+        // Say "could not open the conversation" only when there is nothing to
+        // show. Above an existing thread it read as an error on a working pane.
+        setLiThreadNote(loaded.length ? '' : (result?.noThread ? (result.notice || 'No LinkedIn conversation yet.') : ''));
         // A failed background refresh is not worth an error banner when the
         // conversation is already on screen — the messages are what matters.
         setLiThreadError(loaded.length ? '' : (result?.refreshError || ''));
@@ -239,8 +270,10 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
             refresh: true,
           }).then((latest) => {
             if (!alive) return;
+            // Never replace a longer saved conversation with a short live read
+            // (the scrape can stop early when LinkedIn re-renders the list).
             if (Array.isArray(latest?.messages) && latest.messages.length) {
-              setLiMessages(latest.messages);
+              setLiMessages((current) => (latest.messages.length >= current.length ? latest.messages : current));
               setLiThreadError('');
             }
           }).catch(() => {});
@@ -313,7 +346,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       ]);
 
   const liHistory = liMessages.length
-    ? liMessages
+    ? dedupeThreadItems(liMessages)
     : [
         ...(selectedContact?.linkedin?.note ? [{ direction: 'out', author: 'You', text: selectedContact.linkedin.note, at: selectedContact.linkedin.sentAt }] : []),
         ...(selectedContact?.linkedinReply ? [{ direction: 'in', author: selectedContact.name, text: selectedContact.linkedinReply.body, at: selectedContact.linkedinReply.receivedAt }] : []),
@@ -459,7 +492,15 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       >
         <header className="atd-head">
           <div className="atd-head-main">
-            <span className="atd-mark">{row.companyMark}</span>
+            <CompanyLogo
+              job={{
+                company: row.company,
+                companyMark: row.companyMark,
+                companyLogoUrl: row.companyLogoUrl,
+                applyLink: row.applyLink,
+              }}
+              className="atd-mark"
+            />
             <div>
               <h3>{row.role}</h3>
               <p>

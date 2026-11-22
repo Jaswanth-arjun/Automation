@@ -12,14 +12,16 @@ import { adminJobStore } from '../lib/adminJobStore';
 import { profileStore, applicationStore, resumeStore, api, employeeStore, applyProgressStore, tailorReportStore, campaignPrefsStore, coverLetterStore } from '../lib/api';
 import CoverLetterModal from '../components/CoverLetterModal';
 import { getSelectedTemplateId } from '../lib/resumeTemplates';
+import { downloadCoverLetterPdf, openCoverLetterPdf } from '../lib/coverLetterPdf';
+import { calculateAtsScore } from '../lib/atsScore';
 import { calculateMatchScore } from '../lib/matchScore';
 import { useAuth } from '../lib/auth';
 import CampaignStatus from '../components/CampaignStatus';
 import { ResumeRichEditor } from '../components/JobAnalyzerModal';
 import { keywordAudit, scoreValue, scoreLabel, mapProfileForBackend, extractProfilePdf } from '../components/JobAnalyzerModal.helpers';
 import MatchScore from '../components/MatchScore';
-import AutoApplyTaskPanel from '../components/AutoApplyTaskPanel';
-import SavedAnswersModal from '../components/SavedAnswersModal';
+import AutoApplyTaskPanel, { AutoApplyActivityFeed } from '../components/AutoApplyTaskPanel';
+import { AUTOMATION_PHASES } from '../lib/autoApplyNarrative';
 
 const Linkedin = ({ size = 16, style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -101,6 +103,20 @@ function buildResumeChecks({ text, pageCount, matchedCount, totalKeywords }) {
   ];
 }
 
+// Tone for the inline auto-apply console header, derived from the live task.
+function autoConsoleHeader({ task, applying, result }) {
+  const status = task?.status || '';
+  const tone = (bg, fg, border, label) => ({ bg, fg, border, label });
+  if (status === 'submitted' || result?.status === 'submitted') return tone('#ecfdf5', '#047857', '#bbf7d0', 'Submitted');
+  if (status === 'cancelled') return tone('#f4f4f1', '#5b6470', '#e5e5e0', 'Cancelled');
+  if (status === 'failed' || result?.status === 'failed') return tone('#fef2f2', '#b91c1c', '#fecaca', 'Failed');
+  if (status === 'waiting_for_approval') return tone('#eff6ff', '#1d4ed8', '#dbeafe', 'Action needed');
+  if (status === 'waiting_for_user_input') return tone('#fffbeb', '#b45309', '#fde68a', 'Answer needed');
+  if (status === 'paused') return tone('#fffbeb', '#b45309', '#fde68a', 'Paused');
+  if (result?.status === 'needs_attention') return tone('#fffbeb', '#b45309', '#fde68a', 'Needs you');
+  return tone('#eef7f2', '#047857', '#cdeadd', applying ? 'Live' : 'Ready');
+}
+
 export default function Apply() {
   const { jobId } = useParams();
   const navigate = useNavigate();
@@ -159,6 +175,7 @@ export default function Apply() {
   const [autoApplyProgress, setAutoApplyProgress] = useState([]);
   const [autoApplyResult, setAutoApplyResult] = useState(null);
   const [showAutoApplyModal, setShowAutoApplyModal] = useState(false);
+  const autoConsoleRef = useRef(null);
   const [autoRunId, setAutoRunId] = useState('');
   const [runLogState, setRunLogState] = useState('idle');
   const [needsUser, setNeedsUser] = useState(null);
@@ -168,7 +185,6 @@ export default function Apply() {
   const [taskAnswerDrafts, setTaskAnswerDrafts] = useState({});
   const [taskAnswerConsent, setTaskAnswerConsent] = useState({});
   const [taskBusy, setTaskBusy] = useState('');
-  const [showAnswersModal, setShowAnswersModal] = useState(false);
   const handledTaskTerminalRef = useRef('');
   const [tailoredPdfBase64, setTailoredPdfBase64] = useState(null);
   const [tailoredFileName, setTailoredFileName] = useState('');
@@ -183,6 +199,7 @@ export default function Apply() {
   // Cover Letter state
   const [coverLetter, setCoverLetter] = useState(() => coverLetterStore.get(jobId));
   const [isGeneratingCoverLetter, setIsGeneratingCoverLetter] = useState(false);
+  const [isDownloadingCoverLetter, setIsDownloadingCoverLetter] = useState(false);
   const [showCoverLetterModal, setShowCoverLetterModal] = useState(false);
   const [coverLetterModalMode, setCoverLetterModalMode] = useState('view');
 
@@ -919,6 +936,28 @@ ${firstName}`;
     }
   };
 
+  // Cover letter: same Download PDF / View actions as the tailored resume
+  const handleDownloadCoverLetter = async () => {
+    if (!coverLetter || isDownloadingCoverLetter) return;
+    setIsDownloadingCoverLetter(true);
+    try {
+      await downloadCoverLetterPdf(coverLetter, { company: job?.company || '', jobTitle: job?.title || '' });
+    } catch (err) {
+      alert('Could not download the cover letter PDF: ' + (err?.message || 'Server error'));
+    } finally {
+      setIsDownloadingCoverLetter(false);
+    }
+  };
+
+  const handleViewCoverLetter = async () => {
+    if (!coverLetter) return;
+    try {
+      await openCoverLetterPdf(coverLetter, { company: job?.company || '', jobTitle: job?.title || '' });
+    } catch (err) {
+      alert('Could not open the cover letter PDF: ' + (err?.message || 'Server error'));
+    }
+  };
+
   // Check extension availability and sync answers on mount
   useEffect(() => {
     let alive = true;
@@ -1404,8 +1443,17 @@ ${firstName}`;
     setNeedsUser(null);
   };
 
-  const applyLink = () => [job?.applyLink, job?.url, job?.sourceUrl]
-    .map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
+  // A company/social profile page is never the application, so it is only used
+  // when nothing else was stored for this job.
+  const PROFILE_PAGE_URL = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:linkedin\.com\/(?:company|in|school|showcase)|facebook\.com|twitter\.com|x\.com|instagram\.com)\b/i;
+  const applyLink = () => {
+    const candidates = [job?.applyLink, job?.url, job?.sourceUrl]
+      .map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u));
+    return candidates.find((u) => !PROFILE_PAGE_URL.test(u)) || candidates[0] || '';
+  };
+  const applyTargetHost = (() => {
+    try { return new URL(applyLink()).hostname.replace(/^www\./, ''); } catch { return ''; }
+  })();
 
   const pollBackendRun = (statusPath, kind) => {
     let lastStepCount = 0;
@@ -1734,6 +1782,15 @@ ${firstName}`;
   };
 
   // Close auto-apply modal and cleanup
+  // The run console is part of the page now, so bring it into view on start.
+  useEffect(() => {
+    if (!showAutoApplyModal) return;
+    const node = autoConsoleRef.current;
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [showAutoApplyModal]);
+
   const handleCloseAutoApplyModal = () => {
     setShowAutoApplyModal(false);
     setAutoApplyProgress([]);
@@ -1791,9 +1848,24 @@ ${firstName}`;
     totalKeywords,
   });
   const failedChecks = resumeChecks.filter((check) => !check.ok);
+  // A real ATS score: keyword coverage plus the parsable structure, contact
+  // block, links, measurable impact, verbs, length and title alignment. Using
+  // keyword overlap alone made every tailored resume show the same number.
+  const atsScoreResult = calculateAtsScore({
+    resumeText: tailoredText,
+    jobKeywords: Array.isArray(ats.jobKeywords) ? ats.jobKeywords : [],
+    matchedKeywords: ats.matchedKeywordsAfter || ats.matchedKeywords || [],
+    partialKeywords: ats.partialKeywordsAfter || [],
+    jobTitle: job?.title || tailorResult?.job?.title || '',
+    pageCount: chosenFormat?.pageCount ?? null,
+  });
+  const atsScore = atsScoreResult.score;
   // Tailor summary card: one label column, one row of same-sized actions per target.
   const tailorGroupLabel = { width: '96px', flexShrink: 0, fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#8a8f88' };
   const tailorActionBtn = { padding: '0 13px', height: '34px', fontSize: '12.5px', fontWeight: '700', gap: '6px', borderRadius: '9px' };
+  // The right-aligned action of each row (Re-tailor / Regenerate) shares one
+  // size so the two rows read as a single block.
+  const tailorRowEndBtn = { ...tailorActionBtn, height: '38px', minWidth: '138px', padding: '0 18px', fontSize: '13px', justifyContent: 'center', marginLeft: 'auto' };
 
   const jobProgress = applyProgressStore.get(jobId || job?.id);
   const resumeReady = Boolean(tailorResult || jobResume);
@@ -1801,7 +1873,7 @@ ${firstName}`;
   const STEPS = [
     { key: 'tailor', label: 'Tailor Resume', icon: Sparkles, done: Boolean(tailorResult || jobResume || jobProgress.tailor) },
     { key: 'referral', label: 'Send Referral Request (Email)', icon: Mail, done: sendSuccess || Boolean(jobProgress.referral) },
-    { key: 'linkedin', label: 'Connect on LinkedIn with Note', icon: Linkedin, done: liIsRunning || Boolean(jobProgress.linkedin) },
+    { key: 'linkedin', label: 'Connect on LinkedIn', icon: Linkedin, done: liIsRunning || Boolean(jobProgress.linkedin) },
     { key: 'apply', label: 'Direct Apply', icon: Zap, done: submitted || Boolean(jobProgress.apply) },
   ];
 
@@ -1831,7 +1903,7 @@ ${firstName}`;
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {Boolean(job.companyLogoUrl || job.logo || job.company) && (
             <img
-              src={job.companyLogoUrl || job.logo || `https://logo.clearbit.com/${(job.company || '').toLowerCase().replace(/[^a-z0-9]/g, '')}.com`}
+              src={job.companyLogoUrl || job.logo || `https://logos.hunter.io/${(job.company || '').toLowerCase().replace(/[^a-z0-9]/g, '')}.com`}
               alt={job.company}
               onError={(e) => {
                 e.target.style.display = 'none';
@@ -2462,7 +2534,7 @@ ${firstName}`;
                   boxShadow: '0 4px 14px rgba(68, 92, 245, 0.12)',
                   transition: 'all 0.2s'
                 }}
-                title="Go to 2. Connect on LinkedIn with Note"
+                title="Go to 2. Connect on LinkedIn"
               >
                 <span>NEXT</span>
                 <ChevronRight size={18} />
@@ -2966,7 +3038,7 @@ ${firstName}`;
                     <button className="btn-ghost" onClick={() => setEditorState({ formatId, format: chosenFormat })} style={tailorActionBtn}>
                       <Pencil size={15} /> Edit
                     </button>
-                    <button className="btn-ghost" onClick={handleTailorResume} disabled={isTailoring} style={{ ...tailorActionBtn, marginLeft: 'auto' }}>
+                    <button className="btn-ghost" onClick={handleTailorResume} disabled={isTailoring} style={tailorRowEndBtn}>
                       {isTailoring ? <RefreshCw size={15} className="spin" /> : <Sparkles size={15} />}
                       {isTailoring ? 'Re-tailoring...' : 'Re-tailor'}
                     </button>
@@ -2979,13 +3051,19 @@ ${firstName}`;
                   <span style={tailorGroupLabel}>Cover letter</span>
                   {coverLetter ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: '1 1 260px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '999px', padding: '4px 10px', fontSize: '11px', fontWeight: '700', color: '#047857' }}>
-                        <CheckCircle2 size={12} /> Ready
-                      </span>
-                      <button className="btn-ghost" onClick={() => { setCoverLetterModalMode('view'); setShowCoverLetterModal(true); }} style={tailorActionBtn}>
+                      <button
+                        className="btn-accent"
+                        onClick={handleDownloadCoverLetter}
+                        disabled={isDownloadingCoverLetter}
+                        title="Download this cover letter as a PDF"
+                        style={tailorActionBtn}
+                      >
+                        {isDownloadingCoverLetter ? <RefreshCw size={15} className="spin" /> : <Download size={15} />} Download PDF
+                      </button>
+                      <button className="btn-ghost" onClick={handleViewCoverLetter} title="Open the cover letter PDF in a new tab" style={tailorActionBtn}>
                         <Eye size={15} /> View
                       </button>
-                      <button className="btn-ghost" onClick={() => { setCoverLetterModalMode('edit'); setShowCoverLetterModal(true); }} style={tailorActionBtn}>
+                      <button className="btn-ghost" onClick={() => { setCoverLetterModalMode('edit'); setShowCoverLetterModal(true); }} title="Edit the cover letter text" style={tailorActionBtn}>
                         <Pencil size={15} /> Edit
                       </button>
                       <button
@@ -2993,7 +3071,7 @@ ${firstName}`;
                         onClick={handleGenerateCoverLetter}
                         disabled={isGeneratingCoverLetter}
                         title="Generate a fresh cover letter for this role"
-                        style={{ ...tailorActionBtn, marginLeft: 'auto' }}
+                        style={tailorRowEndBtn}
                       >
                         {isGeneratingCoverLetter ? <RefreshCw size={15} className="spin" /> : <FileText size={15} />}
                         {isGeneratingCoverLetter ? 'Regenerating...' : 'Regenerate'}
@@ -3056,17 +3134,17 @@ ${firstName}`;
                   <p>{scoreLabel(beforeScore, afterScore)}</p>
                   <span style={{ fontSize: '11px', color: '#94a3b8' }}>Resume keyword coverage</span>
                 </div>
-                <div className="ats-comparison-side improved">
+                <div className="ats-comparison-side improved" title={atsScoreResult.summary}>
                   <div>
-                    <strong>Keyword coverage</strong>
-                    <span>{matchedCount}/{totalKeywords ?? '—'} job keywords in the resume</span>
+                    <strong>ATS score</strong>
+                    <span>{matchedCount}/{totalKeywords ?? '—'} job keywords · {resumeChecks.filter((check) => check.ok).length}/{resumeChecks.length} resume checks</span>
                   </div>
                   <div className="ats-score-ring after">
                     <svg width="74" height="74" viewBox="0 0 36 36">
                       <path stroke="#dbe3ee" strokeWidth="3.5" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                      <path stroke="#10b981" strokeWidth="3.5" strokeDasharray={`${afterScore ?? 0}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                      <path stroke="#10b981" strokeWidth="3.5" strokeDasharray={`${atsScore}, 100`} strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
                     </svg>
-                    <strong>{afterScore === null ? 'N/A' : `${afterScore}%`}</strong>
+                    <strong>{atsScore}%</strong>
                   </div>
                 </div>
               </div>
@@ -3274,196 +3352,70 @@ ${firstName}`;
             </p>
           </div>
 
-          {/* Tailored resume summary */}
-          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px 18px', marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: resumeReady ? '#ecfdf5' : '#fef2f2', color: resumeReady ? '#059669' : '#b91c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {resumeReady ? <FileText size={19} /> : <AlertCircle size={19} />}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <strong style={{ display: 'block', fontSize: '13px', color: '#0f172a' }}>
-                  {resumeReady ? (resumeReadyName || 'Tailored resume ready') : 'No tailored resume yet'}
-                </strong>
-                <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                  {resumeReady
-                    ? `This resume will be attached to your application${tailorResult && afterScore !== null ? ` · ${afterScore}% keyword coverage` : ''}`
-                    : 'Tailor your resume first to cover more of this job’s keywords, or apply with your active resume.'}
-                </span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              {resumeReady && (
-                <button
-                  type="button"
-                  className="btn-accent"
-                  onClick={() => {
-                    const b64 = tailoredPdfBase64 || jobResume?.pdfBase64 || activeResume?.pdfBase64;
-                    downloadPdf(b64, resumeReadyName);
-                  }}
-                  style={{ padding: '9px 16px', fontSize: '12.5px', gap: '6px', whiteSpace: 'nowrap' }}
-                  title="Download this tailored PDF to your computer's Downloads folder"
-                >
-                  <Download size={14} /> Download PDF
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => setActiveTab('tailor')}
-                style={{ padding: '9px 16px', fontSize: '12.5px', gap: '6px', whiteSpace: 'nowrap' }}
-              >
-                <Sparkles size={14} /> {resumeReady ? 'View report / re-tailor' : 'Tailor resume'}
-              </button>
-            </div>
-          </div>
-
-          {/* Extension Status & Auto-Submit Settings */}
-          <div style={{ background: extensionReady ? '#ecfdf5' : '#fef2f2', border: `1px solid ${extensionReady ? '#a7f3d0' : '#fecaca'}`, borderRadius: '12px', padding: '14px 20px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: extensionReady ? '#059669' : '#dc2626', flexShrink: 0 }} />
-              <span style={{ fontSize: '13px', fontWeight: '700', color: extensionReady ? '#064e3b' : '#991b1b' }}>
-                {extensionReady ? 'Hamzooh Apply extension connected' : 'Extension not detected — load it in chrome://extensions'}
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => setShowAnswersModal(true)}
-                style={{ background: '#fff', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '7px 12px', fontSize: '12px', fontWeight: 700, color: '#065f46', cursor: 'pointer' }}
-              >
-                Saved answers
-              </button>
-              <span style={{ fontSize: '12.5px', color: '#064e3b', fontWeight: '600' }}>Final submission always requires your confirmation.</span>
-            </div>
-          </div>
-
-          {/* Final Direct Apply CTA */}
-          <div style={{ background: '#171817', color: '#ffffff', borderRadius: '14px', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
-            <div>
-              <h4 style={{ fontSize: '16px', fontWeight: '800', margin: '0 0 4px', color: '#fff' }}>
-                {submitted ? '✅ Application Submitted!' : 'Ready to Submit Direct Application?'}
-              </h4>
-              <p style={{ fontSize: '12.5px', color: '#aaa', margin: 0 }}>
-                {submitted
-                  ? `HAMZOOH auto-applied to ${job.company} successfully.`
-                  : `Opens the job in a new tab, fills the form, and asks you before submitting.`}
-              </p>
-            </div>
-
-            <button
-              className="btn-accent"
-              onClick={handleAutoApply}
-              disabled={autoApplying || submitted}
-              style={{
-                background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
-                borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
-                fontSize: '14px', padding: '12px 24px', gap: '8px',
-                opacity: autoApplying ? 0.7 : 1,
-                cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {autoApplying ? (
-                <><Loader size={16} className="spin" /> Auto-Applying...</>
-              ) : submitted ? (
-                <><CheckCircle2 size={16} /> Applied Successfully</>
-              ) : (
-                <><Zap size={16} /> Auto Apply with AI</>
-              )}
-            </button>
-          </div>
-
-          {/* Stage navigation */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #e8e8e3' }}>
-            <button
-              type="button"
-              onClick={() => setActiveTab('linkedin')}
-              style={{ background: '#ffffff', color: '#64748b', border: '1px solid #cbd5e0', borderRadius: '30px', padding: '11px 22px', fontSize: '12.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-            >
-              <ArrowLeft size={16} /> Back to LinkedIn
-            </button>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#94a3b8' }}>Step 4 of 4</span>
-          </div>
-        </div>
-      )}
-
-      <SavedAnswersModal open={showAnswersModal} onClose={() => setShowAnswersModal(false)} />
-
-      {/* ═══ AUTO-APPLY PROGRESS MODAL ═══ */}
-      {showAutoApplyModal && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '20px'
-        }}>
-          <div style={{
-            background: '#ffffff', borderRadius: '20px', width: '100%', maxWidth: autoTask ? '680px' : '560px',
-            maxHeight: '85vh', overflow: 'hidden', boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
-            display: 'flex', flexDirection: 'column'
-          }}>
-            {/* Modal Header */}
-            <div style={{
-              background: autoApplyResult?.status === 'submitted' ? 'linear-gradient(135deg, #059669, #10b981)'
-                : autoApplyResult?.status === 'failed' ? 'linear-gradient(135deg, #dc2626, #ef4444)'
-                  : autoApplyResult?.status === 'needs_attention' ? 'linear-gradient(135deg, #d97706, #f59e0b)'
-                    : 'linear-gradient(135deg, #171817, #2a2c2a)',
-              padding: '24px 28px', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {autoApplying ? (
-                  <div style={{
-                    width: '40px', height: '40px', borderRadius: '12px',
-                    background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    <Loader size={22} className="spin" />
-                  </div>
-                ) : autoApplyResult?.status === 'submitted' ? (
-                  <div style={{
-                    width: '40px', height: '40px', borderRadius: '12px',
-                    background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    <CheckCircle2 size={22} />
-                  </div>
-                ) : (
-                  <div style={{
-                    width: '40px', height: '40px', borderRadius: '12px',
-                    background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    <AlertCircle size={22} />
-                  </div>
-                )}
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>
-                    {autoTask?.status === 'waiting_for_approval' ? 'Review & Approve Application'
-                      : autoTask?.status === 'waiting_for_user_input' ? 'Additional Information Required'
-                        : autoTask?.status === 'paused' ? 'Application Paused'
-                          : autoTask?.status === 'submitted' ? 'Application Submitted!'
-                            : autoTask?.status === 'cancelled' ? 'Application Cancelled'
-                              : autoTask?.status === 'failed' ? 'Auto-Apply Failed'
-                                : autoApplying ? 'Auto-Applying with AI...'
-                                  : autoApplyResult?.status === 'submitted' ? 'Application Submitted!'
-                                    : autoApplyResult?.status === 'needs_attention' ? 'Needs Your Attention'
-                                      : 'Auto-Apply Failed'}
-                  </h3>
-                  <p style={{ margin: '2px 0 0', fontSize: '12px', opacity: 0.85 }}>
-                    {job?.title} at {job?.company}
-                  </p>
-                </div>
-              </div>
-              {!autoApplying && (
-                <button onClick={handleCloseAutoApplyModal} style={{
-                  background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '10px',
-                  width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', color: '#fff'
+          {/* Auto-apply console: the run surface lives right here, not in a popup */}
+          <div ref={autoConsoleRef} style={{ border: '1px solid #e5e5e0', borderRadius: '16px', overflow: 'hidden', marginBottom: '18px', background: '#ffffff' }}>
+            {showAutoApplyModal ? (
+              <>
+            {/* Console header: light surface, status tinted */}
+            {(() => {
+              const header = autoConsoleHeader({ task: autoTask, applying: autoApplying, result: autoApplyResult });
+              const title = autoTask?.status === 'waiting_for_approval' ? 'Review & approve the application'
+                : autoTask?.status === 'waiting_for_user_input' ? 'One answer needed to continue'
+                  : autoTask?.status === 'paused' ? 'Application paused'
+                    : autoTask?.status === 'submitted' ? 'Application submitted'
+                      : autoTask?.status === 'cancelled' ? 'Application cancelled'
+                        : autoTask?.status === 'failed' ? 'Auto apply stopped'
+                          : autoApplying ? 'Auto-applying with AI'
+                            : autoApplyResult?.status === 'submitted' ? 'Application submitted'
+                              : autoApplyResult?.status === 'needs_attention' ? 'Needs your attention'
+                                : 'Auto apply stopped';
+              const good = header.fg === '#047857';
+              return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+                  padding: '13px 16px', borderBottom: '1px solid #ecece7', background: '#fcfcfa',
                 }}>
-                  <X size={16} />
-                </button>
-              )}
-            </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: 0 }}>
+                    <span style={{
+                      width: '32px', height: '32px', borderRadius: '10px', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: header.bg, color: header.fg, border: `1px solid ${header.border}`,
+                    }}>
+                      {autoApplying ? <Loader size={16} className="spin" /> : good ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <h3 style={{ margin: 0, fontSize: '14.5px', fontWeight: '800', color: '#171817' }}>{title}</h3>
+                        <span style={{
+                          fontSize: '9.5px', fontWeight: '800', letterSpacing: '0.07em', textTransform: 'uppercase',
+                          color: header.fg, background: header.bg, border: `1px solid ${header.border}`,
+                          borderRadius: '999px', padding: '2px 7px',
+                        }}>
+                          {header.label}
+                        </span>
+                      </div>
+                      <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {job?.title} · {job?.company}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCloseAutoApplyModal}
+                    aria-label="Close"
+                    style={{
+                      background: '#ffffff', border: '1px solid #e5e5e0', borderRadius: '9px',
+                      width: '30px', height: '30px', flexShrink: 0, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', cursor: 'pointer', color: '#6b7280',
+                    }}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              );
+            })()}
 
             {/* Progress Steps */}
-            <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: '18px 20px' }}>
               {autoTask && (
                 <AutoApplyTaskPanel
                   task={autoTask}
@@ -3496,48 +3448,32 @@ ${firstName}`;
                 </div>
               )}
 
-              {!autoTask && (<div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {autoApplyProgress.map((step, i) => (
-                  <div key={i} style={{
-                    display: 'flex', alignItems: 'flex-start', gap: '10px',
-                    padding: '10px 14px', borderRadius: '10px',
-                    background: i === autoApplyProgress.length - 1 && autoApplying ? '#f0fdf4' : '#f8fafc',
-                    border: i === autoApplyProgress.length - 1 && autoApplying ? '1px solid #a7f3d0' : '1px solid #e5e7eb',
-                    transition: 'all 0.3s ease'
-                  }}>
+              {!autoTask && (
+                <div>
+                  {autoApplying && (
                     <div style={{
-                      width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0,
-                      background: step.step === 'error' ? '#fee2e2'
-                        : step.step === 'needs_attention' ? '#fef3c7'
-                          : step.step === 'submitted' ? '#d1fae5'
-                            : '#e0f2fe',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '12px'
+                      display: 'flex', alignItems: 'flex-start', gap: '11px', padding: '13px 15px', borderRadius: '12px',
+                      background: '#eff6ff', border: '1px solid #dbeafe', marginBottom: '16px'
                     }}>
-                      {step.step === 'submitted' ? '✅'
-                        : step.step === 'error' ? '❌'
-                          : step.step === 'needs_attention' ? '⚠️'
-                            : i === autoApplyProgress.length - 1 && autoApplying ? '⏳' : '✓'}
-                    </div>
-                    <div>
-                      <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#1a202c' }}>
-                        {step.message}
-                      </p>
-                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                        {new Date(step.timestamp).toLocaleTimeString()}
+                      <span style={{
+                        width: '26px', height: '26px', borderRadius: '50%', flexShrink: 0, background: '#ffffff',
+                        border: '1px solid #dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}>
+                        <Loader size={14} className="spin" style={{ color: '#2563eb' }} />
                       </span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>
+                          Working in the tab it opened
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '2px', lineHeight: 1.45 }}>
+                          Hamzooh fills the form there and reports each meaningful step below — switch tabs only if it asks you something.
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
-
-                {autoApplying && autoApplyProgress.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '30px', color: '#6b7280' }}>
-                    <Loader size={28} className="spin" style={{ marginBottom: '12px', color: '#059669' }} />
-                    <p style={{ margin: 0, fontWeight: '600' }}>Opening job page in a new tab...</p>
-                    <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Hamzooh will fill the form directly in your browser!</p>
-                  </div>
-                )}
-              </div>)}
+                  )}
+                  <AutoApplyActivityFeed steps={autoApplyProgress} />
+                </div>
+              )}
 
               {/* Extension Info Note */}
               {autoApplying && !autoTask && autoApplyProgress.length > 0 && (
@@ -3546,7 +3482,7 @@ ${firstName}`;
                   background: '#f0fdf4', border: '1px solid #bbf7d0',
                   fontSize: '12px', color: '#166534', fontWeight: '600'
                 }}>
-                  💡 If Hamzooh needs additional information, a pop-up will appear directly on the job page in the new tab. Switch to that tab to respond.
+                  💡 If Hamzooh needs something only you can answer, a prompt appears on the job page in the new tab. Switch to that tab to respond — this panel keeps reporting progress.
                 </div>
               )}
 
@@ -3607,7 +3543,7 @@ ${firstName}`;
 
             {/* Modal Footer */}
             <div style={{
-              padding: '16px 28px', borderTop: '1px solid #e5e7eb',
+              padding: '12px 20px', borderTop: '1px solid #e5e7eb', background: '#fcfcfb',
               display: 'flex', justifyContent: 'flex-end', gap: '10px'
             }}>
               {(autoApplyResult?.status === 'needs_attention' || autoTask?.status === 'waiting_for_user_input') && (
@@ -3642,6 +3578,92 @@ ${firstName}`;
                 </button>
               )}
             </div>
+              </>
+            ) : (
+              <div style={{ padding: '18px 20px 16px', background: 'linear-gradient(180deg, #fbfbfa 0%, #ffffff 100%)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: '800', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9a9f97' }}>Automation preview</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', fontSize: '10.5px', fontWeight: '700', color: '#047857', background: '#ecfdf5', border: '1px solid #bdf0d6', borderRadius: '999px', padding: '3px 10px 3px 8px' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 0 3px rgba(16,185,129,0.16)' }} />
+                    Live progress shows here
+                  </span>
+                </div>
+
+                <div style={{ position: 'relative' }}>
+                  <div aria-hidden="true" style={{ position: 'absolute', top: '13px', left: '9%', right: '9%', height: '2px', background: 'repeating-linear-gradient(90deg, #d9f0e2 0 9px, transparent 9px 15px)' }} />
+                  <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '6px' }}>
+                    {AUTOMATION_PHASES.map((phase, index) => (
+                      <div key={phase.id} title={phase.detail} style={{ textAlign: 'center', padding: '0 4px' }}>
+                        <span style={{
+                          width: '28px', height: '28px', borderRadius: '50%', margin: '0 auto',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: '#ffffff',
+                          border: index === 3 ? '1.5px solid #10b981' : '1.5px solid #e2e6e1',
+                          boxShadow: index === 3 ? '0 0 0 4px rgba(16,185,129,0.10)' : '0 1px 2px rgba(15,23,42,0.04)',
+                          fontSize: '11px', fontWeight: '800', color: index === 3 ? '#047857' : '#5b6470',
+                        }}>{index + 1}</span>
+                        <div style={{ fontSize: '11.5px', fontWeight: '700', color: '#1b1f24', lineHeight: 1.35, marginTop: '8px' }}>{phase.title}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: '6px', marginTop: '16px', fontSize: '11px', color: '#7a8078', textAlign: 'center', flexWrap: 'wrap', lineHeight: 1.5 }}>
+                  <Lock size={11} style={{ marginTop: '2px', flexShrink: 0 }} />
+                  <span>
+                    {applyTargetHost ? <>Opens <strong style={{ color: '#3f463f', fontWeight: 700 }}>{applyTargetHost}</strong> in a new tab · </> : null}
+                    you approve every answer before anything is sent.
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Final Direct Apply CTA */}
+          <div style={{ background: '#171817', color: '#ffffff', borderRadius: '14px', padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+            <div>
+              <h4 style={{ fontSize: '16px', fontWeight: '800', margin: '0 0 4px', color: '#fff' }}>
+                {submitted ? '✅ Application Submitted!' : 'Ready to Submit Direct Application?'}
+              </h4>
+              <p style={{ fontSize: '12.5px', color: '#aaa', margin: 0 }}>
+                {submitted
+                  ? `HAMZOOH auto-applied to ${job.company} successfully.`
+                  : `Opens the job in a new tab, fills the form, and asks you before submitting.`}
+              </p>
+            </div>
+
+            <button
+              className="btn-accent"
+              onClick={handleAutoApply}
+              disabled={autoApplying || submitted}
+              style={{
+                background: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
+                borderColor: submitted ? '#059669' : autoApplying ? '#6b7280' : '#22a65b',
+                fontSize: '14px', padding: '12px 24px', gap: '8px',
+                opacity: autoApplying ? 0.7 : 1,
+                cursor: (autoApplying || submitted) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {autoApplying ? (
+                <><Loader size={16} className="spin" /> Auto-Applying...</>
+              ) : submitted ? (
+                <><CheckCircle2 size={16} /> Applied Successfully</>
+              ) : (
+                <><Zap size={16} /> Auto Apply with AI</>
+              )}
+            </button>
+          </div>
+
+          {/* Stage navigation */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #e8e8e3' }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('linkedin')}
+              style={{ background: '#ffffff', color: '#64748b', border: '1px solid #cbd5e0', borderRadius: '30px', padding: '11px 22px', fontSize: '12.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            >
+              <ArrowLeft size={16} /> Back to LinkedIn
+            </button>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: '#94a3b8' }}>Step 4 of 4</span>
           </div>
         </div>
       )}
@@ -3651,6 +3673,10 @@ ${firstName}`;
         @keyframes shimmer {
           0% { background-position: -200% 0; }
           100% { background-position: 200% 0; }
+        }
+        @keyframes pulseDot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.45; transform: scale(0.82); }
         }
       `}</style>
 

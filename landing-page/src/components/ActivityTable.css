@@ -226,6 +226,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Keeps the last rows clear of the fixed bottom-right RAG assistant, which
+     otherwise covers their action buttons. */
+  padding-bottom: clamp(104px, 15vh, 156px);
 }
 
 /* Grid layout definition shared identically between header and card rows.
@@ -1206,6 +1209,10 @@
   min-height: 0;
   overflow-y: auto;
   padding: 22px 28px 36px;
+  /* The fixed RAG assistant sits over the drawer's bottom-right corner and was
+     covering the reply composer's Send button. This gap lets the composer
+     scroll clear of the mascot. */
+  padding-bottom: clamp(120px, 18vh, 168px);
 }
 
 .atd-note {
@@ -1920,4 +1927,28 @@
   .atd-send {
     justify-content: center;
   }
+}
+
+/* ---------- Company logos in the tracker ---------- */
+/* Tracker rows, compact cards and the drawer header use the same logo source
+   as the Jobs / Top Matches cards; the letter mark stays as the fallback. */
+img.row-company-avatar,
+img.atd-mark,
+img.activity-mark {
+  object-fit: contain;
+  background: #fff;
+  padding: 5px;
+  box-sizing: border-box;
+}
+
+img.row-company-avatar {
+  border-color: #ececec;
+}
+
+img.activity-mark {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  border: 1px solid #ececec;
 }

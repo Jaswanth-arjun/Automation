@@ -92,3 +92,72 @@ test('buildJobDraft keeps a full title and the posting body', () => {
   assert.equal(draft.location, 'Bengaluru, India');
   assert.equal(draft.type, 'Internship');
 });
+
+// A SAP SuccessFactors career site puts its consent banner, language switcher,
+// careers menu and metadata block straight into the page text.
+const SUCCESSFACTORS_PAGE = [
+  'Accept All Cookies',
+  'Language',
+  'العَرَبِيَّة (السعودية)',
+  'Deutsch (Deutschland)',
+  'English (United States)',
+  'Español (España)',
+  'Français (France)',
+  '日本語 (日本)',
+  'Polski',
+  'Português (Brasil)',
+  '简体中文 (中国大陆)',
+  '• Life at Wipro',
+  '• Early Careers',
+  '• Experienced Professionals',
+  '• Benelux',
+  '• Brazil',
+  '• India',
+  '• Poland',
+  '',
+  '## Job Description',
+  '',
+  'Start applying with LinkedIn',
+  'Start',
+  'Please wait...',
+  'Job Title:',
+  '',
+  '## Developer L1',
+  '',
+  'City:',
+  'Hyderabad',
+  'State/Province:',
+  'Telangana',
+  'Posting Start Date:',
+  '11/12/26',
+  'Wipro Limited is a leading technology services and consulting company.',
+  '',
+  '## Role Purpose',
+  '',
+  'The purpose of this role is to support basic development activities by assisting in coding and unit testing under close guidance from team members.',
+  '',
+  '## Areas of responsibility',
+  '',
+  'Coding and Configuration-Assist in basic coding under close guidance from Developer.',
+].join('\n');
+
+test('successfactors page keeps only the posting and lifts its metadata block', () => {
+  const draft = buildJobDraft({
+    posting: { title: 'DEVELOPER L1', company: 'Wipro', description: SUCCESSFACTORS_PAGE },
+    meta: { title: 'DEVELOPER L1', company: 'Wipro', location: 'Hyderabad' },
+    openUrl: 'https://careers.wipro.com/job/Hyderabad-DEVELOPER-L1/218041-en_US/',
+  });
+
+  for (const junk of ['Accept All Cookies', 'Deutsch (Deutschland)', 'English (United States)', 'Please wait', 'Start applying with LinkedIn', 'Job Title:', 'State/Province:', 'Life at Wipro']) {
+    assert.ok(!draft.description.includes(junk), `expected "${junk}" to be removed, got:\n${draft.description}`);
+  }
+  assert.deepEqual(draft.jobDetails, [
+    { label: 'Job title', value: 'Developer L1' },
+    { label: 'City', value: 'Hyderabad' },
+    { label: 'State', value: 'Telangana' },
+    { label: 'Posted on', value: '11/12/26' },
+  ]);
+  assert.ok(draft.description.includes('## Role Purpose'), 'real section headings must survive');
+  assert.ok(draft.description.includes('support basic development activities'), 'real posting prose must survive');
+  assert.equal(draft.location, 'Hyderabad, India');
+});

@@ -5,6 +5,7 @@ import {
   X, RefreshCw, AlertCircle, Sparkles, Search, ExternalLink,
 } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
+import CompanyLogo from '../components/CompanyLogo';
 import {
   buildTrackerEntries, fetchTrackerSources, applyEmailStatusUpdates, matchesTrackerFilter,
   TRACKER_FILTERS, TRACKER_STATUS_META, STAGE_ORDER, STAGE_LABELS,
@@ -23,6 +24,16 @@ const LinkedinMark = ({ size = 13 }) => (
     <circle cx="4" cy="4" r="2" />
   </svg>
 );
+
+// "RVS iGlobal Pvt Ltd" and "RVS iGlobal" are the same employer: legal
+// suffixes are ignored when borrowing a company's logo from another posting.
+function companyKeyOf(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\b(inc|llc|ltd|limited|pvt|private|corp|corporation|co|technologies|technology|solutions|systems|labs|group|holdings|company|india)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
 
 function pdfObjectUrl(base64) {
   if (!base64) return '';
@@ -176,9 +187,26 @@ export default function Applications() {
       const job = entry.jobId
         ? allJobs.find((item) => item.id === entry.jobId)
         : allJobs.find((item) => item.applyLink && item.applyLink === entry.jobUrl);
-      if (!job) return entry;
+      if (!job) {
+        // No linked posting: borrow the logo of another posting from the same
+        // company. The match score is never taken from it.
+        const sameCompany = allJobs.find((item) => companyKeyOf(item.company) === companyKeyOf(entry.company));
+        return sameCompany
+          ? {
+            ...entry,
+            companyLogoUrl: sameCompany.companyLogoUrl || sameCompany.logo || '',
+            logoLink: sameCompany.applyLink || entry.jobUrl || '',
+          }
+          : entry;
+      }
       const result = calculateMatchScore(profile, job, { userId });
-      return typeof result?.score === 'number' ? { ...entry, matchScore: result.score } : entry;
+      // Carry the linked job's logo/link so the row can show the real company mark.
+      return {
+        ...entry,
+        ...(typeof result?.score === 'number' ? { matchScore: result.score } : null),
+        companyLogoUrl: job.companyLogoUrl || job.logo || '',
+        logoLink: job.applyLink || entry.jobUrl || '',
+      };
     });
   }, [trackable, statusFilter, query, user]);
 
@@ -349,7 +377,15 @@ export default function Applications() {
               return (
                 <article key={entry.key} className="jt-row">
                   <div className="jt-row-main">
-                    <div className="jt-logo">{entry.companyMark}</div>
+                    <CompanyLogo
+                      className="jt-logo"
+                      job={{
+                        company: entry.company,
+                        companyMark: entry.companyMark,
+                        companyLogoUrl: entry.companyLogoUrl,
+                        applyLink: entry.logoLink || entry.jobUrl,
+                      }}
+                    />
 
                     <div className="jt-ident">
                       <div className="jt-title-row">

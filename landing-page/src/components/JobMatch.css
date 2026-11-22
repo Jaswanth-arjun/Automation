@@ -679,6 +679,9 @@
 /* footer */
 
 .jm-foot {
+  /* A page-level footer rule once floated this strip over the description. */
+  position: static;
+  inset: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;

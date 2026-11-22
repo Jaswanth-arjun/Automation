@@ -34,6 +34,7 @@ const EMPTY_JOB = {
   preferredSkills: [],
   skills: [],
   description: '',
+  jobDetails: [],
 };
 
 export default function AdminJobs() {
@@ -175,6 +176,7 @@ export default function AdminJobs() {
       preferredSkills: job.preferredSkills || [],
       skills: job.skills || [],
       description: job.description || '',
+      jobDetails: job.jobDetails || [],
     });
     setEditingId(job.id);
     setFormOpen(true);

@@ -4,6 +4,7 @@ import {
   MessageCircle, RefreshCw, Search, Sparkles, Target, X,
 } from 'lucide-react';
 import EmptyState from './EmptyState';
+import CompanyLogo from './CompanyLogo';
 import ActivityDrawer, { LinkedInIcon } from './ActivityDrawer';
 import {
   activityStore, appBucket, buildActivityRows, fetchActivitySources, norm,
@@ -28,6 +29,15 @@ const slug = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g,
 
 function companyMark(company) {
   return String(company || '?').trim().charAt(0).toUpperCase();
+}
+
+// "Twilio Inc" and "Twilio" are the same employer: ignore legal suffixes when
+// linking a tracker row back to the job that carries its logo.
+function companyKey(value) {
+  return norm(String(value || ''))
+    .replace(/\b(inc|llc|ltd|limited|pvt|private|corp|corporation|co|technologies|technology|solutions|systems|labs|group|holdings|company|india)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutreach }) {
@@ -77,11 +87,19 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
     const built = buildActivityRows(sources, activityStore.getOverlay());
     return built.map((row) => {
       const job = jobs.find(
-        (item) => norm(item.company) === norm(row.company) && norm(item.title) === norm(row.role),
+        (item) => companyKey(item.company) === companyKey(row.company) && norm(item.title) === norm(row.role),
       );
+      // A tracker role often reads slightly differently from the job title, so
+      // the logo may come from another posting of the same company.
+      const companyJob = job || jobs.find((item) => companyKey(item.company) === companyKey(row.company));
       return {
         ...row,
         jobId: job?.id ?? row.app?.jobId,
+        // The same logo the Jobs/Top Matches cards show, found through the job
+        // this tracker row belongs to; rows without a job fall back to the
+        // company name inside CompanyLogo.
+        companyLogoUrl: companyJob?.companyLogoUrl || companyJob?.logo || row.app?.logo || '',
+        applyLink: companyJob?.applyLink || companyJob?.sourceUrl || '',
         matchScore: job?.matchResult?.score ?? row.app?.matchScore ?? row.matchScore,
       };
     });
@@ -287,9 +305,15 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                       {/* 1. Company Column */}
                       <div className="col-cell col-company">
                         <div className="row-company-wrap">
-                          <span className="row-company-avatar">
-                            {row.companyMark || companyMark(row.company)}
-                          </span>
+                          <CompanyLogo
+                            job={{
+                              company: row.company,
+                              companyMark: row.companyMark || companyMark(row.company),
+                              companyLogoUrl: row.companyLogoUrl,
+                              applyLink: row.applyLink,
+                            }}
+                            className="row-company-avatar"
+                          />
                           <div className="row-company-text">
                             <strong className="row-company-name" title={row.company}>{row.company}</strong>
                             {hasReply ? (
@@ -387,7 +411,15 @@ export default function ActivityTable({ jobs = [], matchedCount = 0, onStartOutr
                     onClick={() => toggleExpanded(row.id)}
                     aria-expanded={open}
                   >
-                    <span className="activity-mark">{row.companyMark || companyMark(row.company)}</span>
+                    <CompanyLogo
+                      job={{
+                        company: row.company,
+                        companyMark: row.companyMark || companyMark(row.company),
+                        companyLogoUrl: row.companyLogoUrl,
+                        applyLink: row.applyLink,
+                      }}
+                      className="activity-mark"
+                    />
                     <span className="activity-card-title">
                       <strong>{row.role}</strong>
                       <small>{row.company}</small>

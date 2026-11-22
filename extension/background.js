@@ -70,12 +70,40 @@ function looksLikeJobUrl(raw) {
   }
 }
 
+// Social / company-profile hosts. A careers page links these in its footer and
+// share bar, so they must never be mistaken for the employer's apply form.
+const SOCIAL_HOSTS = /(^|\.)(linkedin|twitter|x|facebook|fb|instagram|youtube|tiktok|pinterest|threads|glassdoor|crunchbase|wikipedia)\.(com|co|org|net)$/i;
+
+const PROFILE_PAGE_URL = /^https?:\/\/(?:[a-z0-9-]+\.)?linkedin\.com\/(?:company|in|school|showcase)\b|^https?:\/\/(?:www\.)?(?:facebook|twitter|x|instagram|youtube)\.com\//i;
+
+function isSocialHost(raw) {
+  const host = hostname(raw);
+  return !host || SOCIAL_HOSTS.test(host);
+}
+
+// A deep link that already names one posting (…/JobDetail/530239,
+// …/jobs/view/123, …/requisition/456). Such a URL IS the application page, so
+// it must be opened as given instead of being re-resolved from page markup.
+function looksLikeJobDetail(raw) {
+  try {
+    const url = new URL(raw);
+    if (isErrorUrl(raw)) return false;
+    const segments = url.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+    const tail = segments[segments.length - 1] || '';
+    const jobWord = /jobdetail|job-detail|job-details|\/jobs?\b|\/job\/|requisition|posting|position|vacanc|opening|apply/i.test(url.pathname);
+    const hasId = /\d{4,}/.test(`${tail}${url.search}`) || /^[a-z0-9-]{12,}$/i.test(tail);
+    return jobWord && (hasId || segments.length >= 3);
+  } catch {
+    return false;
+  }
+}
+
 function applyLinkFromHtml(html, baseUrl) {
   const matches = [...String(html || '').matchAll(/href=["']([^"']+)["']/gi)].map((item) => item[1]);
   for (const href of matches) {
     try {
       const next = new URL(href, baseUrl).toString();
-      if (isErrorUrl(next)) continue;
+      if (isErrorUrl(next) || isSocialHost(next)) continue;
       if (isApplyHost(next)) return next;
     } catch {}
   }
@@ -85,17 +113,29 @@ function applyLinkFromHtml(html, baseUrl) {
 async function resolveJobUrl(raw) {
   const start = String(raw || '').trim();
   if (!start || isErrorUrl(start)) throw new Error('That address is an error page, not the job posting.');
-  if (isApplyHost(start) || looksLikeJobUrl(start)) return start;
+  // A company/school/profile URL is not a posting (LinkedIn job URLs still are).
+  if (PROFILE_PAGE_URL.test(start)) {
+    throw new Error('That link points at a company profile page, not the job posting. Paste the job page URL (…/JobDetail/… or the employer’s apply page).');
+  }
+  if (isApplyHost(start) || looksLikeJobUrl(start) || looksLikeJobDetail(start)) return start;
+  if (isSocialHost(start)) throw new Error('That link points at a social page, not the job posting. Paste the job page URL.');
   try {
     const response = await fetch(start, { redirect: 'follow' });
     const finalUrl = response.url || start;
     if (isErrorUrl(finalUrl)) throw new Error('That job site sent an error page instead of the posting.');
-    if (isApplyHost(finalUrl) || looksLikeJobUrl(finalUrl)) return finalUrl;
-    const html = await response.text();
-    const applyUrl = applyLinkFromHtml(html, finalUrl);
-    if (applyUrl) return applyUrl;
+    if (isSocialHost(finalUrl)) return start;
+    // A redirect onto one posting is the real application page.
+    if (isApplyHost(finalUrl) || looksLikeJobUrl(finalUrl) || looksLikeJobDetail(finalUrl)) return finalUrl;
+    // Only a shallow landing page (…/careers) may be followed to an ATS apply
+    // link. A real posting path is opened exactly as the candidate gave it.
+    const pathSegments = new URL(finalUrl).pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+    if (pathSegments.length <= 1) {
+      const html = await response.text();
+      const applyUrl = applyLinkFromHtml(html, finalUrl);
+      if (applyUrl) return applyUrl;
+    }
   } catch (err) {
-    if (looksLikeJobUrl(start)) return start;
+    if (looksLikeJobUrl(start) || looksLikeJobDetail(start)) return start;
     throw err;
   }
   return start;

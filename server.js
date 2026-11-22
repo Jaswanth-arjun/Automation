@@ -43,6 +43,7 @@ import { fillPageGaps, fitResumeToOnePage, modernResumeHtml, renderFittedResumeP
 import { renderCoverLetterPdf } from './lib/cover-letter-pdf.js';
 import { extractJobPostingJsonLd, extractJobPostingDescriptionHtml, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
+import { aiMaintenanceMiddleware } from './lib/ai-failure.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
 import { AsyncLocalStorage } from 'async_hooks';
@@ -373,7 +374,8 @@ app.disable('x-powered-by');
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Hamzooh-Maintenance');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -382,6 +384,13 @@ app.use(express.json({
   limit: '15mb',
   verify: (req, res, buf) => { req.rawBody = buf; },
 }));
+
+// ─── AI provider failures belong to the operator, not the user ───
+// When the configured AI API key is rate-limited, out of quota, revoked or the
+// provider is unreachable, the raw provider message must never reach a user.
+// Every API error that describes a key/provider failure is replaced with the
+// maintenance notice, and the dashboard shows one popup for it.
+app.use(aiMaintenanceMiddleware());
 // Baseline hardening: never sniff content types, never leak the app URL to
 // third parties, and never let another origin frame the dashboard.
 app.use((req, res, next) => {
@@ -572,6 +581,19 @@ app.post('/api/jobs/import', async (req, res) => {
   }
 });
 
+// The metadata block of a posting ("Job ID", "City", "Posted on" …), shown on
+// the job page as structured facts instead of loose text in the description.
+function cleanJobDetails(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => ({
+      label: String(item?.label || '').trim().slice(0, 40),
+      value: String(item?.value || '').trim().slice(0, 160),
+    }))
+    .filter((item) => item.label && item.value)
+    .slice(0, 10);
+}
+
 function cleanOwner(value) {
   if (!value || typeof value !== 'object') return null;
   const id = String(value.id || '').trim();
@@ -587,7 +609,7 @@ app.put('/api/jobs/:id', (req, res) => {
   const idx = jobs.findIndex((job) => String(job.id) === id);
   if (idx === -1) return res.status(404).json({ error: 'Job not found.' });
 
-  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description, sourceUrl, postedBy } = req.body || {};
+  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description, sourceUrl, jobDetails, postedBy } = req.body || {};
   const job = jobs[idx];
   jobs[idx] = {
     ...job,
@@ -599,6 +621,7 @@ app.put('/api/jobs/:id', (req, res) => {
     ...(Array.isArray(goodToHaveSkills) ? { goodToHaveSkills } : {}),
     ...(applyLink ? { applyLink } : {}),
     ...(description ? { description } : {}),
+    ...(Array.isArray(jobDetails) ? { jobDetails: cleanJobDetails(jobDetails) } : {}),
     ...(sourceUrl !== undefined ? { sourceUrl: String(sourceUrl || '') } : {}),
     ...(cleanOwner(postedBy) ? { postedBy: cleanOwner(postedBy) } : {}),
     updatedAt: new Date().toISOString(),
@@ -608,7 +631,7 @@ app.put('/api/jobs/:id', (req, res) => {
 });
 
 app.post('/api/jobs', (req, res) => {
-  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description, sourceUrl, postedBy } = req.body || {};
+  const { logo, role, company, filters, mustHaveSkills, goodToHaveSkills, applyLink, description, sourceUrl, jobDetails, postedBy } = req.body || {};
   if (!role || !company || !applyLink || !description) {
     return res.status(400).json({ error: 'role, company, applyLink, and description are required.' });
   }
@@ -640,6 +663,7 @@ app.post('/api/jobs', (req, res) => {
     goodToHaveSkills: Array.isArray(goodToHaveSkills) ? goodToHaveSkills : [],
     applyLink,
     description,
+    jobDetails: cleanJobDetails(jobDetails),
     ...(sourceUrl ? { sourceUrl: String(sourceUrl) } : {}),
     ...(cleanOwner(postedBy) ? { postedBy: cleanOwner(postedBy) } : {}),
     postedAt: new Date().toISOString(),
@@ -2045,6 +2069,28 @@ app.get('/api/contact/thread', async (req, res) => {
 });
 
 /**
+ * A saved thread can hold each message twice (a row plus its inner body node),
+ * and those copies are already on disk for every user who read one. Collapse
+ * them on the way out so a repaired conversation shows each line once.
+ */
+function dedupeLinkedInThread(messages) {
+  const clockOf = (value) => {
+    const match = String(value || '').match(/(\d{1,2}):(\d{2})\s*([ap]m)?/i);
+    return match ? `${match[1]}:${match[2]}${match[3] ? match[3].toLowerCase() : ''}` : '';
+  };
+  const unique = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const text = String(message?.text || '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const duplicate = unique.some((entry) => entry.direction === message.direction
+      && String(entry.text || '').replace(/\s+/g, ' ').trim() === text
+      && (entry.at === message.at || !entry.at || !message.at || clockOf(entry.at) === clockOf(message.at)));
+    if (!duplicate) unique.push(message);
+  }
+  return unique;
+}
+
+/**
  * Live LinkedIn conversation with one contact (read from the user's own account).
  */
 app.post('/api/linkedin/thread', async (req, res) => {
@@ -2071,7 +2117,7 @@ app.post('/api/linkedin/thread', async (req, res) => {
     const cache = readCache();
     const cachedThread = cache[cacheKey];
     if (cachedThread && !refresh) {
-      return res.json({ messages: cachedThread.messages || [], cached: true, syncedAt: cachedThread.syncedAt });
+      return res.json({ messages: dedupeLinkedInThread(cachedThread.messages), cached: true, syncedAt: cachedThread.syncedAt });
     }
 
     // Whichever engine already owns the Chrome profile must hand over its
@@ -2086,10 +2132,10 @@ app.post('/api/linkedin/thread', async (req, res) => {
 
     const result = await readLinkedInThread(name, existingBrowser, String(profileUrl || ''));
     if (result.code === 'no_thread') {
-      return res.json({ messages: cachedThread?.messages || [], cached: Boolean(cachedThread), noThread: !cachedThread, notice: result.error });
+      return res.json({ messages: dedupeLinkedInThread(cachedThread?.messages), cached: Boolean(cachedThread), noThread: !cachedThread, notice: result.error });
     }
     if (result.error) {
-      if (cachedThread) return res.json({ messages: cachedThread.messages || [], cached: true, refreshError: result.error });
+      if (cachedThread) return res.json({ messages: dedupeLinkedInThread(cachedThread.messages), cached: true, refreshError: result.error });
       return res.status(502).json({ error: result.error });
     }
     const byId = new Map();
@@ -2097,7 +2143,7 @@ app.post('/api/linkedin/thread', async (req, res) => {
       const key = message.id || `${message.at || ''}|${message.direction || ''}|${message.text || message.body || ''}`;
       byId.set(key, message);
     }
-    const messages = [...byId.values()].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    const messages = dedupeLinkedInThread([...byId.values()]).sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
     fs.mkdirSync(cacheDir, { recursive: true });
     cache[cacheKey] = { personName: name, profileUrl: String(profileUrl || ''), messages, syncedAt: new Date().toISOString() };
     fs.writeFileSync(cacheFile, JSON.stringify(cache, null, 2), 'utf8');
@@ -2356,7 +2402,9 @@ function extractJobMetadata(html, rawUrl, plainText = '', domLogo = '') {
     // e.g. angelone.mynexthire.com -> "Angel One" (NOT mynexthire, NOT Cloudflare)
     // An ATS host (ibqbjb.fa.ocs.oraclecloud.com) carries a tenant id, never a name.
     const hostLabels = hostname.split('.').filter(Boolean);
-    const atsHost = hostLabels.some((label) => ATS_HOST_HINTS.has(label));
+    // "careers.<brand>.com" is the employer's own site, not an ATS tenant host:
+    // the brand label is what names the company (careers.wipro.com → Wipro).
+    const atsHost = hostLabels.some((label) => ATS_HOST_HINTS.has(label) && label !== 'careers');
     const ogSiteName = metaContent(html, ['og:site_name', 'application-name']);
     const siteSegment = urlObj.pathname.match(/\/sites\/([^/]+)/i)?.[1] || '';
     if (hostname.includes('greenhouse.io') || hostname.includes('lever.co') || hostname.includes('ashbyhq.com') || hostname.includes('myworkdayjobs.com')) {
@@ -2445,7 +2493,7 @@ function extractJobMetadata(html, rawUrl, plainText = '', domLogo = '') {
       logo = ogImage;
     } else if (domain && !atsHost) {
       // An ATS tenant host has no public logo to look up.
-      logo = `https://logo.clearbit.com/${domain}`;
+      logo = `https://logos.hunter.io/${domain}`;
     }
     const shareImage = /(?:social|share|banner|opengraph|og[-_]?image|preview|hero)/i.test(logo || '');
     if (domLogo && /^https?:\/\//i.test(domLogo) && (atsHost || !logo || shareImage)) {
@@ -2455,7 +2503,7 @@ function extractJobMetadata(html, rawUrl, plainText = '', domLogo = '') {
       let brandHost = '';
       try { brandHost = new URL(logo).hostname.replace(/^www\./, ''); } catch { brandHost = ''; }
       const rootDomain = brandHost.split('.').slice(-2).join('.');
-      if (rootDomain && rootDomain.includes('.')) logo = `https://logo.clearbit.com/${rootDomain}`;
+      if (rootDomain && rootDomain.includes('.')) logo = `https://logos.hunter.io/${rootDomain}`;
     }
 
 
@@ -3554,7 +3602,7 @@ Job description: ${jobText.slice(0, 16000)}`;
     }
     const finalTitle = cleanTitleText(fetched.posting.title || parsed.title);
     const finalCompany = fetched.posting.company || hostCompany || 'Target company';
-    const finalLogo = fetched.meta?.logo || (finalCompany && finalCompany !== 'Company' ? `https://logo.clearbit.com/${finalCompany.toLowerCase().replace(/[^a-z0-9]/g, '')}.com` : '');
+    const finalLogo = fetched.meta?.logo || (finalCompany && finalCompany !== 'Company' ? `https://logos.hunter.io/${finalCompany.toLowerCase().replace(/[^a-z0-9]/g, '')}.com` : '');
     const finalLocation = fetched.meta?.location || 'Hybrid';
 
     const finalPlainText = resumePlainText(safeProfile, atsSafeFitted);
@@ -6159,8 +6207,9 @@ app.post('/api/applications/auto-apply/start', async (req, res) => {
   try {
     let active = await getActiveTask(user.id);
     // A task whose browser tab stopped reporting is orphaned. Do not let it
-    // block a new application forever - close it and start the requested one.
-    if (active && active.url !== payload.url && isTaskStale(active)) {
+    // block a new application forever - close it and start the requested one,
+    // including a retry of the very same job after a dead run.
+    if (active && isTaskStale(active)) {
       await abandonTask(active.id, user.id, `Superseded by a new application for ${payload.job?.company || payload.job?.title || payload.url}.`);
       active = await getActiveTask(user.id);
     }

@@ -220,6 +220,21 @@ export default function JobDetail() {
             </a>
           )}
 
+          {/* Structured facts pulled from the posting's metadata block */}
+          {isAdmin && job.jobDetails?.length > 0 && (
+            <div className="job-detail-facts">
+              <h4>Job details</h4>
+              <dl>
+                {job.jobDetails.map((item) => (
+                  <div key={item.label}>
+                    <dt>{item.label}</dt>
+                    <dd>{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
           {/* Must have / Good to have skills header (for admin jobs) */}
           {isAdmin && (
             <div style={{ margin: '16px 0', padding: '16px', background: '#fafaf7', borderRadius: '10px', border: '1px solid #eee' }}>

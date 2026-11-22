@@ -1,4 +1,6 @@
 import React from 'react';
+import { FileText } from 'lucide-react';
+import { automationPhases, automationNow, buildActivityFeed, relativeTime } from '../lib/autoApplyNarrative';
 
 /**
  * Live state for an autonomous application task.
@@ -13,41 +15,15 @@ const ACTIVE_STATUSES = new Set([
   'filling_application', 'submitting',
 ]);
 
-const STATUS_LABELS = {
-  initializing: 'Initializing',
-  connecting_browser: 'Connecting to your browser',
-  analyzing_job: 'Analyzing job and resume',
-  preparing_application: 'Preparing the application',
-  filling_application: 'Filling the application',
-  waiting_for_user_input: 'Waiting for your answer',
-  waiting_for_approval: 'Ready for your approval',
-  submitting: 'Submitting approved application',
-  submitted: 'Submitted and verified',
-  paused: 'Paused',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
+const TONES = {
+  error: { fg: '#b91c1c', bg: '#fef2f2', border: '#fecaca' },
+  warn: { fg: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+  success: { fg: '#047857', bg: '#ecfdf5', border: '#bbf7d0' },
+  info: { fg: '#1d4ed8', bg: '#eff6ff', border: '#dbeafe' },
 };
 
-const STATUS_COLORS = {
-  submitted: '#059669',
-  waiting_for_approval: '#0d9488',
-  waiting_for_user_input: '#d97706',
-  paused: '#d97706',
-  failed: '#dc2626',
-  cancelled: '#6b7280',
-};
-
-function statusColor(status) {
-  return STATUS_COLORS[status] || '#171817';
-}
-
-function formatTime(value) {
-  if (!value) return '';
-  try {
-    return new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
+function nowTone(tone) {
+  return TONES[tone] || TONES.info;
 }
 
 function money(value) {
@@ -74,6 +50,9 @@ export default function AutoApplyTaskPanel({
   if (!task) return null;
 
   const status = task.status || 'initializing';
+  const now = automationNow(task);
+  const tone = nowTone(now.tone);
+  const running = ACTIVE_STATUSES.has(status);
   const usage = task.usage || {};
   const limits = usage.limits || task.limits || {};
   const pendingQuestions = (task.questions || []).filter((question) => question.status === 'pending');
@@ -85,56 +64,103 @@ export default function AutoApplyTaskPanel({
     && pendingQuestions.length === 0
     && subtractMissing.length === 0;
 
+  const phases = automationPhases(status);
+  const activeIndex = Math.max(0, phases.findIndex((phase) => phase.state === 'active'));
+  const currentPhase = phases[activeIndex] || phases[phases.length - 1] || { title: '' };
+  const tokens = Number(usage.inputTokens || 0) + Number(usage.outputTokens || 0);
+
   return (
     <div>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
-        flexWrap: 'wrap', padding: '12px 14px', borderRadius: '12px',
-        background: '#f8fafc', border: '1px solid #e2e8f0', marginBottom: '14px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{
-            width: '10px', height: '10px', borderRadius: '50%',
-            background: statusColor(status), boxShadow: `0 0 0 4px ${statusColor(status)}22`,
-          }} />
-          <div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a' }}>
-              {STATUS_LABELS[status] || status}
-            </div>
-            <div style={{ fontSize: '11.5px', color: '#64748b' }}>
-              {task.job?.title || 'Application'}{task.job?.company ? ` · ${task.job.company}` : ''}
-            </div>
-          </div>
+      {/* Where the run is inside the five stages */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', gap: '4px', flex: 1, minWidth: 0 }}>
+          {phases.map((phase) => (
+            <span
+              key={phase.id}
+              style={{
+                flex: 1, height: '5px', borderRadius: '999px',
+                background: phase.state === 'done' ? '#10b981' : phase.state === 'active' ? '#86efac' : '#ecece7',
+              }}
+            />
+          ))}
         </div>
-        <div style={{ fontSize: '11.5px', color: '#475569', fontWeight: 600, textAlign: 'right' }}>
-          {usage.calls || 0} AI call{Number(usage.calls) === 1 ? '' : 's'} · {money(usage.costUsd)}
-          {task.agent?.lastAction?.model && (
-            <div style={{ fontWeight: 500, color: '#94a3b8', marginTop: '2px' }}>
-              {task.agent.lastAction.model} · {task.agent.lastAction.role || 'primary'}{Number(usage.escalations) > 0 ? ` · ${usage.escalations} escalation${Number(usage.escalations) === 1 ? '' : 's'}` : ''}
-            </div>
+        <span
+          title={currentPhase.title}
+          style={{
+            fontSize: '10.5px', fontWeight: '700', color: '#8a8f88', whiteSpace: 'nowrap',
+            maxWidth: '52%', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}
+        >
+          Step {activeIndex + 1}/{phases.length} · {currentPhase.title}
+        </span>
+      </div>
+
+      {/* What the automation is doing right now */}
+      <div style={{
+        display: 'flex', gap: '13px', alignItems: 'stretch',
+        padding: '14px 16px', borderRadius: '14px', background: '#ffffff',
+        border: `1px solid ${tone.border}`, boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+        marginBottom: '12px',
+      }}>
+        <span style={{ width: '4px', borderRadius: '999px', flexShrink: 0, background: tone.fg, opacity: 0.9 }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {running && (
+              <span style={{
+                width: '7px', height: '7px', borderRadius: '50%', background: tone.fg,
+                animation: 'pulseDot 1.4s ease-in-out infinite', flexShrink: 0,
+              }} />
+            )}
+            <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#171817', lineHeight: 1.35 }}>{now.title}</div>
+          </div>
+          {now.detail && (
+            <div style={{ fontSize: '12px', color: '#5b6470', marginTop: '3px', lineHeight: 1.55 }}>{now.detail}</div>
           )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '9px', fontSize: '10.5px', color: '#9aa0a6' }}>
+            <span>{usage.calls || 0} AI call{Number(usage.calls) === 1 ? '' : 's'}</span>
+            <span>{money(usage.costUsd)}</span>
+            {tokens > 0 && <span>{tokens.toLocaleString()} tokens</span>}
+            {limits.maxCostUsd ? <span>budget {money(limits.maxCostUsd)}</span> : null}
+          </div>
         </div>
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: '10px', padding: '10px 14px', fontSize: '12.5px', marginBottom: '12px' }}>
-          {error}
+        <div style={{
+          display: 'flex', gap: '9px', alignItems: 'flex-start',
+          background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b',
+          borderRadius: '10px', padding: '10px 13px', fontSize: '12px', lineHeight: 1.5, marginBottom: '12px',
+        }}>
+          <span style={{
+            width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0, marginTop: '1px',
+            background: '#fee2e2', color: '#b91c1c', fontSize: '11px', fontWeight: '800',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>!</span>
+          <span>{error}</span>
         </div>
       )}
 
       {task.selectedResume?.name && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', fontSize: '12px', color: '#166534', marginBottom: '12px' }}>
-          <span><strong>Resume:</strong> {task.selectedResume.name}</span>
-          <span>{task.selectedResume.reasoning || 'Selected for this job.'}</span>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap',
+          padding: '9px 12px', background: '#fafaf7', border: '1px solid #ecece7',
+          borderRadius: '10px', fontSize: '11.5px', color: '#5b6470', marginBottom: '12px',
+        }}>
+          <FileText size={13} style={{ color: '#059669', flexShrink: 0 }} />
+          <span style={{ fontWeight: '700', color: '#171817', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {task.selectedResume.name}
+          </span>
+          <span style={{ color: '#9aa0a6' }}>·</span>
+          <span>{task.selectedResume.reasoning || 'Selected for this application'}</span>
         </div>
       )}
 
       {pendingQuestions.length > 0 && (
-        <div style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 800, color: '#92400e', marginBottom: '4px' }}>
+        <div style={{ border: '1px solid #fde68a', background: '#fffbeb', borderRadius: '14px', padding: '14px', marginBottom: '12px' }}>
+          <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#92400e', marginBottom: '4px' }}>
             Additional information required
           </div>
-          <div style={{ fontSize: '11.5px', color: '#a16207', marginBottom: '10px' }}>
+          <div style={{ fontSize: '11.5px', color: '#a16207', marginBottom: '10px', lineHeight: 1.5 }}>
             The agent will not guess personal or legal facts. Answer here and it continues from its checkpoint.
           </div>
           {pendingQuestions.map((question) => {
@@ -142,7 +168,7 @@ export default function AutoApplyTaskPanel({
             const sensitive = question.sensitive || /authori[sz]ed|sponsor|visa|salary|disab|criminal|gender|race|veteran|age|ssn|passport/i.test(question.question);
             return (
               <div key={question.id} style={{ background: '#fff', borderRadius: '10px', padding: '12px', border: '1px solid #fde68a', marginBottom: '10px' }}>
-                <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#1f2937', lineHeight: 1.45 }}>
+                <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#1f2937', lineHeight: 1.45 }}>
                   {question.question}
                 </div>
                 {Array.isArray(question.options) && question.options.length > 0 && (
@@ -198,18 +224,18 @@ export default function AutoApplyTaskPanel({
       )}
 
       {task.review && (
-        <div style={{ border: '1px solid #a7f3d0', background: '#f0fdf4', borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 800, color: '#065f46', marginBottom: '8px' }}>
+        <div style={{ border: '1px solid #d7f0e3', background: '#f7fdfa', borderRadius: '14px', padding: '14px', marginBottom: '12px' }}>
+          <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#065f46', marginBottom: '10px' }}>
             Application review
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 14px', fontSize: '12px', color: '#064e3b' }}>
-            <span><strong>Company:</strong> {task.review.company || task.job?.company || '—'}</span>
-            <span><strong>Role:</strong> {task.review.title || task.job?.title || '—'}</span>
-            <span><strong>Resume:</strong> {task.review.resumeName || task.selectedResume?.name || '—'}</span>
-            <span><strong>Fields filled:</strong> {task.review.filledCount || 0}</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px 16px', fontSize: '12px', color: '#065f46' }}>
+            <span><strong style={{ color: '#86a99b', fontWeight: 700 }}>Company</strong><div style={{ fontWeight: 700 }}>{task.review.company || task.job?.company || '—'}</div></span>
+            <span><strong style={{ color: '#86a99b', fontWeight: 700 }}>Role</strong><div style={{ fontWeight: 700 }}>{task.review.title || task.job?.title || '—'}</div></span>
+            <span><strong style={{ color: '#86a99b', fontWeight: 700 }}>Resume</strong><div style={{ fontWeight: 700 }}>{task.review.resumeName || task.selectedResume?.name || '—'}</div></span>
+            <span><strong style={{ color: '#86a99b', fontWeight: 700 }}>Fields filled</strong><div style={{ fontWeight: 700 }}>{task.review.filledCount || 0}</div></span>
           </div>
           {task.review.url && (
-            <div style={{ fontSize: '11.5px', color: '#047857', marginTop: '6px', wordBreak: 'break-all' }}>
+            <div style={{ fontSize: '11px', color: '#0f766e', marginTop: '8px', wordBreak: 'break-all' }}>
               {task.review.url}
             </div>
           )}
@@ -260,7 +286,7 @@ export default function AutoApplyTaskPanel({
             type="button"
             disabled={Boolean(busy)}
             onClick={onPause}
-            style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontWeight: 700, fontSize: '12.5px', cursor: 'pointer' }}
+            style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e2e6e1', background: '#fff', color: '#3f463f', fontWeight: 700, fontSize: '12.5px', cursor: 'pointer' }}
           >
             {busy === 'pause' ? 'Pausing…' : 'Pause'}
           </button>
@@ -290,7 +316,7 @@ export default function AutoApplyTaskPanel({
             type="button"
             disabled={Boolean(busy)}
             onClick={onCancel}
-            style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontWeight: 700, fontSize: '12.5px', cursor: 'pointer' }}
+            style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #fecaca', background: '#fff', color: '#b91c1c', fontWeight: 700, fontSize: '12.5px', cursor: 'pointer' }}
           >
             {busy === 'cancel' ? 'Cancelling…' : 'Cancel Application'}
           </button>
@@ -303,28 +329,70 @@ export default function AutoApplyTaskPanel({
         </div>
       )}
 
-      <div style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600, marginBottom: '6px' }}>
-        Activity
+      <AutoApplyActivityFeed steps={task.steps || []} />
+    </div>
+  );
+}
+
+/**
+ * Plain-English activity timeline shared by the task panel and the run popup.
+ * Internal steps are dropped by the narrative helpers, so this never reads like
+ * a terminal log.
+ */
+export function AutoApplyActivityFeed({ steps = [], limit = 8, emptyText = 'The first step appears as soon as the application tab opens.' }) {
+  const feed = buildActivityFeed(steps, limit);
+  return (
+    <div style={{ border: '1px solid #efefea', borderRadius: '14px', background: '#ffffff', padding: '13px 15px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '10px', marginBottom: '11px' }}>
+        <span style={{ fontSize: '10px', fontWeight: '800', letterSpacing: '0.09em', textTransform: 'uppercase', color: '#9aa0a6' }}>
+          What it has done
+        </span>
+        {feed.length > 0 && (
+          <span style={{ fontSize: '10px', color: '#b0b5ba' }}>{feed.length} update{feed.length === 1 ? '' : 's'}</span>
+        )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', maxHeight: '240px', overflowY: 'auto' }}>
-        {(task.steps || []).slice(-14).reverse().map((step, index) => (
-          <div key={`${step.at}-${index}`} style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', padding: '8px 11px', borderRadius: '9px', background: index === 0 ? '#f0fdf4' : '#f8fafc', border: `1px solid ${index === 0 ? '#bbf7d0' : '#e5e7eb'}` }}>
-            <span style={{ fontSize: '12px' }}>{step.level === 'error' ? '❌' : step.level === 'warn' ? '⚠️' : '•'}</span>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '12px', color: '#1f2937', fontWeight: 600, lineHeight: 1.4 }}>{step.message}</div>
-              <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '2px' }}>
-                {formatTime(step.at)}{step.step ? ` · ${step.step}` : ''}
+      <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+        {feed.length === 0 && (
+          <div style={{ fontSize: '11.5px', color: '#9aa0a6', lineHeight: 1.5 }}>{emptyText}</div>
+        )}
+        {feed.map((item, index) => {
+          const dot = item.tone === 'error' ? '#dc2626'
+            : item.tone === 'warn' ? '#d97706'
+              : item.tone === 'success' ? '#059669'
+                : '#94a3b8';
+          const isLatest = index === 0;
+          const isLast = index === feed.length - 1;
+          return (
+            <div key={`${item.key}-${index}`} style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '8px', flexShrink: 0 }}>
+                <span style={{
+                  width: '7px', height: '7px', borderRadius: '50%', marginTop: '6px', background: dot,
+                  boxShadow: isLatest ? `0 0 0 3px ${dot}22` : undefined,
+                }} />
+                {!isLast && <span style={{ flex: 1, width: '1.5px', background: '#efefea', marginTop: '4px' }} />}
+              </div>
+              <div style={{ minWidth: 0, flex: 1, paddingBottom: isLast ? 0 : '13px' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                  <span style={{
+                    fontSize: '12.5px', lineHeight: 1.45,
+                    fontWeight: isLatest ? 800 : 600,
+                    color: isLatest ? '#171817' : '#4b544c',
+                  }}>
+                    {item.title}
+                  </span>
+                  {item.at && (
+                    <span style={{ fontSize: '10px', color: '#b0b5ba', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {relativeTime(item.at)}
+                    </span>
+                  )}
+                </div>
+                {item.detail && (
+                  <div style={{ fontSize: '11.5px', color: '#8a8f88', marginTop: '2px', lineHeight: 1.5 }}>{item.detail}</div>
+                )}
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ marginTop: '12px', fontSize: '11px', color: '#94a3b8', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-        <span>AI calls: {usage.calls || 0}</span>
-        <span>Tokens: {(Number(usage.inputTokens || 0) + Number(usage.outputTokens || 0)).toLocaleString()}</span>
-        <span>Cost: {money(usage.costUsd)}</span>
-        {limits.maxCostUsd ? <span>Budget: {money(limits.maxCostUsd)}</span> : null}
+          );
+        })}
       </div>
     </div>
   );

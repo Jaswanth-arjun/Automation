@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Upload, FileText, Trash2, CheckCircle, Clock, Plus, X, Eye, LayoutTemplate } from 'lucide-react';
 import { resumeStore, profileStore, api } from '../lib/api';
 import { RESUME_TEMPLATES, getSelectedTemplateId, setSelectedTemplateId } from '../lib/resumeTemplates';
@@ -415,6 +415,13 @@ export default function ResumeManager() {
   const handleSetActive = (id) => setResumes(resumeStore.setActive(id));
   const handleRemove = (id) => setResumes(resumeStore.remove(id));
 
+  // The version currently in use is always the first card; the rest keep
+  // their stored order.
+  const orderedResumes = useMemo(
+    () => [...resumes].sort((a, b) => Number(Boolean(b.isActive)) - Number(Boolean(a.isActive))),
+    [resumes],
+  );
+
   return (
     <div className="page-resume">
       <header className="page-header">
@@ -542,15 +549,15 @@ export default function ResumeManager() {
           </p>
         ) : (
           <div className="resume-list">
-            {resumes.map(r => (
+            {orderedResumes.map(r => (
               <article key={r.id} className={`resume-card ${r.isActive ? 'active' : ''}`} onClick={() => openPdf(r.pdfBase64)} style={{ cursor: r.pdfBase64 ? 'pointer' : 'default' }}>
-                <div className="resume-card-icon"><FileText size={24} /></div>
-                <div className="resume-card-info">
-                  <strong>{r.name}</strong>
-                  <div className="resume-card-meta">
-                    <span>{r.size}</span>
-                    <span><Clock size={12} /> {new Date(r.uploadedAt).toLocaleDateString()}</span>
-                  </div>
+                <div className="resume-card-head">
+                  <div className="resume-card-icon"><FileText size={20} /></div>
+                  <strong className="resume-card-name">{r.name}</strong>
+                </div>
+                <div className="resume-card-meta">
+                  <span>{r.size}</span>
+                  <span><Clock size={12} /> {new Date(r.uploadedAt).toLocaleDateString()}</span>
                 </div>
                 <div className="resume-card-actions" onClick={(event) => event.stopPropagation()}>
                   {r.pdfBase64 && (

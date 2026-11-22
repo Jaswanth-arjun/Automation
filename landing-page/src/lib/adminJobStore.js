@@ -74,6 +74,7 @@ export const adminJobStore = {
       preferredSkills: goodToHave,
       skills: allSkills.length ? allSkills : ['Software Development'],
       description: apiJob.description || '',
+      jobDetails: Array.isArray(apiJob.jobDetails) ? apiJob.jobDetails : [],
       createdAt: apiJob.postedAt || new Date().toISOString(),
       postedDaysAgo,
       source: 'admin',
@@ -149,6 +150,7 @@ export const adminJobStore = {
       goodToHaveSkills: job.preferredSkills || [],
       applyLink: job.applyLink || '',
       description: job.description || '',
+      jobDetails: Array.isArray(job.jobDetails) ? job.jobDetails : [],
       sourceUrl: job.sourceUrl || '',
       postedBy: job.postedBy || null,
     };
@@ -274,6 +276,7 @@ export const adminJobStore = {
           goodToHaveSkills: edited.preferredSkills || [],
           applyLink: edited.applyLink || '',
           description: edited.description || '',
+          jobDetails: Array.isArray(edited.jobDetails) ? edited.jobDetails : [],
           sourceUrl: edited.sourceUrl || '',
         }),
       }).catch((err) => console.warn('Backend job update failed:', err.message));

@@ -73,7 +73,7 @@ button {
   color: #fff
 }
 
-nav {
+body > nav {
   height: 74px;
   display: flex;
   align-items: center;
@@ -1443,7 +1443,7 @@ h2 em {
   font: 8px 'DM Mono'
 }
 
-footer {
+body > footer {
   border-top: 1px solid #393d39;
   position: absolute;
   bottom: 0;
@@ -1457,19 +1457,19 @@ footer {
   font-size: 10px
 }
 
-footer .brand {
+body > footer .brand {
   color: #fff;
   font-size: 18px
 }
 
-footer div {
+body > footer div {
   margin-left: auto;
   display: flex;
   gap: 20px
 }
 
 @media(max-width:800px) {
-  nav {
+  body > nav {
     padding: 0 6vw
   }
 
@@ -1641,7 +1641,7 @@ footer div {
     width: 270px
   }
 
-  footer {
+  body > footer {
     left: 6vw;
     right: 6vw;
     display: grid;
@@ -1649,7 +1649,7 @@ footer div {
     gap: 15px
   }
 
-  footer div {
+  body > footer div {
     grid-column: 1/3;
     margin: 0;
     gap: 15px
@@ -1663,7 +1663,7 @@ footer div {
 }
 
 /* Editorial homepage treatment: responds to cursor position without heavy canvas effects. */
-nav {
+body > nav {
   height: 82px;
   padding: 0 28px;
   top: 30px;
@@ -1818,7 +1818,7 @@ nav {
 }
 
 @media(max-width:800px) {
-  nav {
+  body > nav {
     top: 10px;
     width: calc(100% - 24px);
     height: 62px;
@@ -3583,6 +3583,9 @@ nav.mobile-nav {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+  /* Keeps the last row's Apply/bookmark buttons clear of the fixed bottom-right
+     RAG assistant, which otherwise sits right on top of them. */
+  padding-bottom: clamp(104px, 15vh, 156px);
 }
 
 @media (max-width: 1200px) {
@@ -4163,21 +4166,36 @@ nav.mobile-nav {
 }
 
 /* Resume */
+/* Saved PDFs sit side by side as cards instead of one full-width line each. */
 .resume-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 12px
 }
 
 .resume-card {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 18px 20px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fff;
   transition: .15s
+}
+
+.resume-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0
+}
+
+.resume-card-name {
+  font-size: 13.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere
 }
 
 .resume-card.active {
@@ -4191,6 +4209,11 @@ nav.mobile-nav {
 
 .resume-card-info {
   flex: 1
+}
+
+.resume-card-meta {
+  flex-wrap: wrap;
+  row-gap: 4px
 }
 
 .resume-card-info strong {
@@ -4215,7 +4238,9 @@ nav.mobile-nav {
 .resume-card-actions {
   display: flex;
   align-items: center;
-  gap: 8px
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto
 }
 
 .status-badge {
@@ -4949,6 +4974,115 @@ nav.mobile-nav {
 .job-source-link:hover {
   color: #9a3412;
   border-bottom-color: #9a3412;
+}
+
+/* Maintenance notice — shown only for masked AI API-key/provider failures. */
+.mnt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(23, 24, 23, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.mnt-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(460px, 100%);
+  padding: 20px 22px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(23, 24, 23, 0.24);
+}
+
+.mnt-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #fff3e8;
+  color: #ea580c;
+}
+
+.mnt-copy h2 {
+  margin: 0 6px 6px 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #171817;
+}
+
+.mnt-copy p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #5a5750;
+}
+
+.mnt-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8a877e;
+  cursor: pointer;
+}
+
+.mnt-close:hover {
+  background: #f4f2ec;
+  color: #171817;
+}
+
+.job-detail-facts {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  background: #fafaf7;
+  border: 1px solid #eee;
+  border-radius: 10px;
+}
+
+.job-detail-facts h4 {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a877e;
+}
+
+.job-detail-facts dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+
+.job-detail-facts dt {
+  font-size: 11.5px;
+  color: #8a877e;
+  margin-bottom: 2px;
+}
+
+.job-detail-facts dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #171817;
 }
 
 .admin-import-card {

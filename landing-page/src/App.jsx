@@ -20,6 +20,7 @@ import SavedJobs from './pages/SavedJobs';
 import Subscription from './pages/Subscription';
 import VideoLoader from './components/VideoLoader';
 import DashboardRAGEntrance from './components/DashboardRAGEntrance';
+import MaintenanceNotice from './components/MaintenanceNotice';
 
 // The admin panel is a separate page served by the API server. While running
 // the Vite dev server on :5173, /admin only exists on :3000.
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <GlobalAssistant />
+        <MaintenanceNotice />
       </AuthProvider>
     </BrowserRouter>
   );
