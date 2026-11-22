@@ -364,8 +364,10 @@ test('router keeps Auto Apply on the paid OpenAI lane and everything else on the
     strict: process.env.AI_STRICT_LANES,
     freeProvider: process.env.AI_FREE_PROVIDER,
     freeModel: process.env.AI_FREE_MODEL,
+    openaiEnabled: process.env.OPENAI_ENABLED,
   };
   try {
+    process.env.OPENAI_ENABLED = 'true';
     process.env.OPENAI_API_KEY = 'test-openai-key';
     process.env.BYNARA_API_KEY = 'test-nara-key';
     process.env.AI_PROVIDER_ORDER = 'nara,radox,openai';
@@ -399,6 +401,7 @@ test('router keeps Auto Apply on the paid OpenAI lane and everything else on the
       AI_STRICT_LANES: original.strict,
       AI_FREE_PROVIDER: original.freeProvider,
       AI_FREE_MODEL: original.freeModel,
+      OPENAI_ENABLED: original.openaiEnabled,
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -558,8 +561,10 @@ test('paid OpenAI is opt-in and reserved for Auto Apply only', () => {
     paidEnabled: process.env.AI_PAID_ENABLED,
     order: process.env.AI_PROVIDER_ORDER,
     primaryOpenai: process.env.AI_MODEL_PRIMARY_OPENAI,
+    openaiEnabled: process.env.OPENAI_ENABLED,
   };
   try {
+    process.env.OPENAI_ENABLED = 'true';
     process.env.AI_PROVIDER_ORDER = 'nara,openai';
     process.env.OPENAI_API_KEY = 'sk-test-paid';
     process.env.BYNARA_API_KEY = 'coa-test-free';
@@ -596,6 +601,7 @@ test('paid OpenAI is opt-in and reserved for Auto Apply only', () => {
       AI_PAID_ENABLED: saved.paidEnabled,
       AI_PROVIDER_ORDER: saved.order,
       AI_MODEL_PRIMARY_OPENAI: saved.primaryOpenai,
+      OPENAI_ENABLED: saved.openaiEnabled,
     })) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

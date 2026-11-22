@@ -93,6 +93,7 @@ test('two disjoint lanes: nara+gpt-6-luna for the app, OpenAI only for Auto Appl
     AI_FREE_PROVIDER: 'nara',
     AI_FREE_MODEL: 'gpt-6-luna',
     AI_PAID_PROVIDER: 'openai',
+    OPENAI_ENABLED: 'true',
     AI_MODEL_PRIMARY_OPENAI: 'gpt-4.1',
     AI_MODEL_FAST_OPENAI: 'gpt-4.1-mini',
     AI_MODEL_VISION_OPENAI: 'gpt-4o-mini',
