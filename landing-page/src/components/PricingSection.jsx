@@ -87,8 +87,8 @@ export default function PricingSection({ onGetStarted }) {
 
   const planFree = data?.plans?.find((p) => p.id === 'free');
   const planPro = data?.plans?.find((p) => p.id === 'pro');
-  const freeModel = planFree?.aiModel || 'gemini-2.5-flash';
-  const proModel = planPro?.aiModel || 'gemini-2.5-pro';
+  const freeModel = planFree?.aiModel || 'Standard AI';
+  const proModel = planPro?.aiModel || 'Hamzooh Ultra AI';
 
   const freeRows = [
     { label: 'AI resume/cover letter tailoring', value: `${unlimited(freeLimits.resume_tailor)} / month` },
