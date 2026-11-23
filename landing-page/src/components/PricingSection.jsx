@@ -96,7 +96,7 @@ export default function PricingSection({ onGetStarted }) {
     { label: 'LinkedIn campaigns', value: `${unlimited(freeLimits.linkedin_campaign)} / month` },
     { label: 'Referral requests', value: `${unlimited(freeLimits.linkedin_request)} / month` },
     { label: 'Chrome auto-apply', value: `${unlimited(freeLimits.auto_apply)} / month` },
-    { label: 'Contacts per company', value: `${contactFree} unlocked` },
+    { label: 'Contacts per company', value: `Up to ${contactFree} unlocked` },
     { label: 'AI model', value: freeModel },
     { label: 'Interview alerts', value: 'In-app' },
   ];
@@ -139,7 +139,7 @@ export default function PricingSection({ onGetStarted }) {
     {
       group: 'Referral outreach',
       rows: [
-        ['Contacts per company', `${contactFree} unlocked`, 'All unlocked'],
+        ['Contacts per company', `Up to ${contactFree} unlocked`, 'All unlocked'],
         ['Hunter.io + admin verified emails', '—', 'Included'],
         ['LinkedIn campaigns', `${unlimited(freeLimits.linkedin_campaign)} / month`, 'Unlimited'],
         ['LinkedIn requests', `${unlimited(freeLimits.linkedin_request)} / month`, '~100 / week'],
