@@ -32,6 +32,7 @@ import AutoApplyWalkthrough from '../components/AutoApplyWalkthrough';
 import OutreachWalkthrough from '../components/OutreachWalkthrough';
 import FrameLift from '../components/FrameLift';
 import ResumeTailoringDemo from '../components/ResumeTailoringDemo';
+import PricingSection from '../components/PricingSection';
 import './Landing.css';
 
 /* ================= helpers ================= */
@@ -1466,25 +1467,6 @@ function Reviews() {
   );
 }
 
-function FreeBand({ onGetStarted }) {
-  return (
-    <div className="hmz-free">
-      <div className="hmz-freeinner">
-        <span className="hmz-kicker">PRICING</span>
-        <h2>Start free. <em>Pay nothing to start.</em></h2>
-        <div className="hmz-freeticks">
-          {['Unlimited job links + match scores', 'AI resume tailor (3 formats)', 'Gmail + LinkedIn outreach', 'Application tracker + vault', 'No credit card · Disconnect anytime'].map((t) => (
-            <span key={t}><Check size={14} />{t}</span>
-          ))}
-        </div>
-        <MagneticWrap strength={0.4}>
-          <button className="hmz-cta big yellow" onClick={onGetStarted}>Get my first referral <ArrowUpRight size={16} /></button>
-        </MagneticWrap>
-      </div>
-    </div>
-  );
-}
-
 function Faq() {
   const [open, setOpen] = useState(0);
   return (
@@ -1655,7 +1637,7 @@ export default function Landing() {
         <WaveDivider color="#0B1533" />
         <Workflow />
         <Reviews />
-        <FreeBand onGetStarted={() => go()} />
+        <PricingSection onGetStarted={() => go()} />
         <Faq />
         <FinalCta onGetStarted={() => go()} />
         <Footer />
