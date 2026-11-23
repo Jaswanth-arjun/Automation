@@ -338,7 +338,7 @@ export default function Dashboard() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
               {[
-                'Unlimited AI Resume Tailoring for any job link',
+                'Unlimited AI Resume/Cover Letter Tailoring for any job link',
                 'Unlimited 24/7 LinkedIn Automated Connection Requests',
                 'Personalized AI Outreach Emails via Gmail',
                 'Priority Gemini AI Processing Speed',

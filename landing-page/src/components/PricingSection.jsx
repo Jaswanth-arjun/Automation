@@ -91,7 +91,7 @@ export default function PricingSection({ onGetStarted }) {
   const proModel = planPro?.aiModel || 'gemini-2.5-pro';
 
   const freeRows = [
-    { label: 'AI resume tailoring', value: `${unlimited(freeLimits.resume_tailor)} / month` },
+    { label: 'AI resume/cover letter tailoring', value: `${unlimited(freeLimits.resume_tailor)} / month` },
     { label: 'AI communication', value: `${unlimited(freeLimits.ai_comm)} / month` },
     { label: 'LinkedIn campaigns', value: `${unlimited(freeLimits.linkedin_campaign)} / month` },
     { label: 'Referral requests', value: `${unlimited(freeLimits.linkedin_request)} / month` },
@@ -102,7 +102,7 @@ export default function PricingSection({ onGetStarted }) {
   ];
 
   const proRows = [
-    { label: 'AI resume tailoring', value: `${unlimited(proLimits.resume_tailor)} / month` },
+    { label: 'AI resume/cover letter tailoring', value: `${unlimited(proLimits.resume_tailor)} / month` },
     { label: 'AI communication', value: `${unlimited(proLimits.ai_comm)} / month` },
     { label: 'LinkedIn campaigns', value: 'Unlimited' },
     { label: 'Referral requests', value: '~100 / week' },
@@ -124,7 +124,7 @@ export default function PricingSection({ onGetStarted }) {
     {
       group: 'Profile & resume',
       rows: [
-        ['AI resume tailoring', `${unlimited(freeLimits.resume_tailor)} / month`, `${unlimited(proLimits.resume_tailor)} / month`],
+        ['AI resume/cover letter tailoring', `${unlimited(freeLimits.resume_tailor)} / month`, `${unlimited(proLimits.resume_tailor)} / month`],
         ['ATS report + one-page PDF', 'Every tailor', 'Every tailor'],
         ['Resume templates', 'All available', 'All available'],
       ],
