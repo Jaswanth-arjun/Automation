@@ -223,15 +223,59 @@ async function doCheckReplies() {
     } catch (e) { toast('Error scanning Gmail replies', 'error'); }
 }
 
-// ─── Upload Page ──────────────────────────────────────────────────
+// ─── Upload / Import Page ──────────────────────────────────────────────────
 function renderUploadPage() {
     const page = document.getElementById('page-upload');
     page.innerHTML = `
         <div class="page-header">
-            <h1>PDF Contact Import Engine</h1>
-            <p>Upload candidate/HR list PDFs. The system automatically parses, deduplicates, and saves contacts to your live database.</p>
+            <h1>Import & Add Contacts</h1>
+            <p>Paste email IDs directly for instant outreach, or upload candidate/HR list PDFs.</p>
         </div>
+
+        <!-- Quick Paste Emails Card -->
+        <div class="card" style="margin-bottom: 24px; border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(0,0,0,0.06);">
+            <div class="card-header" style="border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px;">
+                <div>
+                    <h2 style="display:flex;align-items:center;gap:8px;">
+                        <span>📋</span> Quick Paste Emails (Direct 1-Click Outreach)
+                    </h2>
+                    <p style="color:var(--text-secondary);font-size:13.5px;margin-top:4px;">
+                        Copy-paste any list of emails below (one per line, or separated by commas/spaces). Send personalized templates 1-by-1 to all recipients with one click.
+                    </p>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom: 14px;">
+                <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px;">Paste Email Addresses:</label>
+                <textarea id="paste-emails-input" rows="6" placeholder="e.g.&#10;recruiter1@google.com&#10;talent@amazon.com&#10;hr.lead@microsoft.com" style="width:100%;font-family:'JetBrains Mono',monospace;font-size:13px;padding:12px;line-height:1.5;border-radius:8px;"></textarea>
+            </div>
+            <div class="form-row" style="margin-bottom: 16px;">
+                <div class="form-group" style="flex:1;">
+                    <label style="font-size:12.5px;color:var(--text-secondary);">Default Job Title (optional)</label>
+                    <input type="text" id="paste-default-title" value="Talent Acquisition" placeholder="HR Manager / Recruiter">
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label style="font-size:12.5px;color:var(--text-secondary);">Default Company (optional - auto-detected from domain if empty)</label>
+                    <input type="text" id="paste-default-company" placeholder="e.g. Tech Corp (leave blank for auto)">
+                </div>
+            </div>
+            <div class="btn-group" style="gap:12px; flex-wrap:wrap;">
+                <button class="btn btn-outline" onclick="handleQuickPaste(false)">
+                    📥 Save to Outreach Queue
+                </button>
+                <button class="btn btn-primary" onclick="handleQuickPaste(true)">
+                    ⚡ 1-Click Send All (1-by-1)
+                </button>
+            </div>
+            <div id="paste-results" style="margin-top: 14px;"></div>
+        </div>
+
+        <!-- PDF Upload Card -->
         <div class="card">
+            <div class="card-header" style="margin-bottom: 12px;">
+                <h2 style="display:flex;align-items:center;gap:8px;">
+                    <span>📄</span> Import from PDF File
+                </h2>
+            </div>
             <div class="upload-zone" id="upload-zone" onclick="document.getElementById('pdf-input').click()">
                 <div class="upload-icon">
                     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -239,7 +283,7 @@ function renderUploadPage() {
                 <h3>Drop your PDF contact sheet here or click to browse</h3>
                 <p>Intelligent parser extracts Name, Email, Job Title, and Company with instant duplicate detection</p>
             </div>
-            <input type="file" id="pdf-input" accept=".pdf">
+            <input type="file" id="pdf-input" accept=".pdf" style="display:none">
         </div>
         <div id="extraction-results"></div>`;
     
@@ -250,6 +294,65 @@ function renderUploadPage() {
     zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
     zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('dragover'); if (e.dataTransfer.files[0]) uploadPDF(e.dataTransfer.files[0]); });
     input.addEventListener('change', () => { if (input.files[0]) uploadPDF(input.files[0]); });
+}
+
+async function handleQuickPaste(autoSend) {
+    const raw = document.getElementById('paste-emails-input').value.trim();
+    if (!raw) {
+        toast('Please paste at least one email address', 'warning');
+        return;
+    }
+    const title = document.getElementById('paste-default-title').value.trim();
+    const company = document.getElementById('paste-default-company').value.trim();
+    const resBox = document.getElementById('paste-results');
+    resBox.innerHTML = '<div class="loading-overlay" style="padding:10px;"><div class="spinner"></div> Processing email list...</div>';
+
+    try {
+        const res = await fetch(`${API}/api/quick-paste-contacts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ raw_text: raw, default_title: title, default_company: company })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Failed to process emails');
+        }
+        const data = await res.json();
+        resBox.innerHTML = `<div class="badge badge-sent" style="padding:8px 14px;font-size:13px;display:inline-block;margin-top:6px;">
+            ✓ Added ${data.added} new contacts (${data.existing} existing/duplicates skipped).
+        </div>`;
+        toast(`Imported ${data.added} email(s) successfully!`, 'success');
+
+        const targetIds = data.all_uncontacted_ids && data.all_uncontacted_ids.length > 0 
+            ? data.all_uncontacted_ids 
+            : data.contact_ids;
+
+        if (autoSend) {
+            if (targetIds.length === 0) {
+                toast('All pasted emails have already been contacted!', 'info');
+                return;
+            }
+            if (!state.authStatus || !state.authStatus.is_authenticated) {
+                toast('Please connect your Gmail account in Settings before sending.', 'error');
+                showPage('settings');
+                return;
+            }
+            // Trigger 1-click execution using global executeSend
+            if (typeof executeSend === 'function') {
+                executeSend(targetIds);
+            } else {
+                showPage('send');
+            }
+        } else {
+            // Take user to outreach queue after a brief moment
+            setTimeout(() => {
+                showPage('send');
+            }, 800);
+        }
+    } catch (e) {
+        resBox.innerHTML = `<p style="color:var(--danger);font-size:13.5px;margin-top:6px;">Error: ${escapeHtml(e.message)}</p>`;
+        toast(e.message, 'error');
+    }
 }
 
 async function uploadPDF(file) {

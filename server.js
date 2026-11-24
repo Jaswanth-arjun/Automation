@@ -16,13 +16,12 @@ import { db } from './lib/db.js';
 import { handleRagChat } from './lib/rag-assistant.js';
 import { ragEngine, buildSystemPrompt } from './lib/rag-assistant-engine.js';
 
-import { askFreeLLM, askNara, askNvidia, askRadox } from './lib/ai-provider.js';
 import { AutoApplyEngine } from './lib/auto-apply-engine.js';
 import { VisionAgent } from './lib/vision-agent.js';
 import { BlueprintEngine } from './lib/blueprint-engine.js';
 import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, saveVaultCredential, findVaultCredential } from './lib/vault-manager.js';
 import { inferFromProfile, sensitiveCategory, applicationLogisticsAnswer, policyAnswer } from './lib/apply-intelligence.js';
-import { executeModel, getUsageSummary, modelConfig, providerStatus, probeModels, parseModelJson as parseAiJson, roleForTask, routeCooldownSnapshot, keyPoolSnapshot } from './lib/model-router.js';
+import { executeModel, getUsageSummary, modelConfig, providerStatus, probeModels, parseModelJson as parseAiJson, roleForTask, routeCooldownSnapshot, keyPoolSnapshot, isPaidOpenAiActive, AiBusyError } from './lib/model-router.js';
 import { listAnswers, saveAnswer, updateAnswer, deleteAnswer, lookupAnswer, questionCategory, isSensitiveCategory } from './lib/answer-memory.js';
 import {
   TASK_STATUS, createTask, getTask, getTaskView, getActiveTask, getLatestTaskForJob, listTasks,
@@ -36,13 +35,14 @@ import {
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer-core';
 import { registerAdminAccess } from './lib/admin-access.js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
 import { renderCoverLetterPdf } from './lib/cover-letter-pdf.js';
 import { extractJobPostingJsonLd, extractJobPostingDescriptionHtml, validateJobDescription, keywordsFromJob, calculateKeywordCoverage, keywordMatches, parseModelJson, validateTailoredResume } from './lib/job-analysis.js';
 import { buildJobDraft } from './lib/job-import.js';
+import { remember, hashKey } from './lib/job-cache.js';
+import { userApplyLock } from './lib/user-lock.js';
 import { aiMaintenanceMiddleware } from './lib/ai-failure.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
@@ -1238,146 +1238,92 @@ async function fetchGoogleUserInfo(accessToken) {
   return userRes.json();
 }
 
-let cachedGeminiKeyFromFile;
-function getGeminiKey() {
-  if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY.trim();
-  if (cachedGeminiKeyFromFile !== undefined) return cachedGeminiKeyFromFile;
-  const files = [path.join(__dirname, '.env'), path.join(__dirname, 'Hamzooh', '.env'), path.join(__dirname, 'MailMind AI', '.env')];
-  let found = '';
-  for (const file of files) {
-    if (!fs.existsSync(file)) continue;
-    const match = fs.readFileSync(file, 'utf8').match(/^GEMINI_API_KEY=(.*)$/m);
-    if (match && match[1].trim() && !match[1].includes('your_gemini')) { found = match[1].trim(); break; }
-  }
-  cachedGeminiKeyFromFile = found;
-  return found;
+/**
+ * Phase A — one AI entry point for every text feature.
+ *
+ * `askGemini()` used to fan out to OpenAI/Radox/Nara/Gemini/NVIDIA/FreeLLM by
+ * itself, so resume tailoring, cover letters and mail never touched the quota
+ * counter, cache or per-provider scheduler in lib/model-router.js.
+ *
+ * Now every call goes through executeModel():
+ *   - development (OPENAI_ENABLED=false) → free Nara pool, $0 spent,
+ *   - production free plan → gpt-4o-mini, metered by guardFeature(),
+ *   - production Pro plan → gpt-4.1 / vision / reasoning models,
+ *   - identical prompts are de-duplicated and optionally cached.
+ */
+async function askModel(prompt, {
+  role = 'primary',
+  json = false,
+  maxTokens = 3000,
+  temperature = 0.1,
+  cacheKey = '',
+  cacheTtlMs = 0,
+  userId = '',
+  taskId = '',
+  budget = {},
+} = {}) {
+  const plan = aiTierStorage.getStore();
+  // 'legacy' means premium billing is off (full access), so it gets the Pro
+  // model in production just like a paid account.
+  const tier = plan === 'free' ? 'free' : 'pro';
+  const result = await executeModel({
+    role,
+    messages: [{ role: 'user', content: String(prompt || '') }],
+    maxTokens,
+    temperature,
+    json,
+    userId,
+    taskId,
+    budget,
+    tier,
+    // Development: isPaidOpenAiActive() is false, so this stays on the free
+    // lane. Production: the paid lane is enabled and the tier picks the model.
+    paid: isPaidOpenAiActive(),
+    cacheKey,
+    cacheTtlMs,
+  });
+  return result.text;
 }
 
-async function askGemini(prompt) {
-  const providerErrors = [];
-  const recordProviderError = (provider, error) => {
-    const message = String(error?.message || error || 'Unknown provider error')
-      .replace(/(?:sk-[a-z0-9_-]+|cc_op_[a-z0-9_-]+|AQ\.[a-z0-9_-]+)/gi, '[redacted]')
-      .slice(0, 220);
-    providerErrors.push(`${provider}: ${message}`);
-    console.warn(`${provider} unavailable:`, message);
-  };
-  const isTransient = (error) => /\b(408|425|429|500|502|503|504)\b|timeout|timed out|abort|temporarily unavailable|service unavailable/i.test(String(error?.message || error));
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  // Plan-aware engine: Free runs the fast model, Pro runs the premium one.
-  const tier = aiTierStorage.getStore();
-  const planModel = tier === 'pro' ? 'gemini-2.5-pro' : tier === 'free' ? 'gemini-2.5-flash' : '';
-  const flashFirst = tier === 'free';
-
-  // RadoxAI / Coarena is the primary high-speed OpenAI-compatible provider.
-  const radoxEnabled = String(process.env.ENABLE_RADOX_FALLBACK || 'true').toLowerCase() !== 'false';
-  if (radoxEnabled && (process.env.RADOX_API_KEY || process.env.RADOXAI_API_KEY)) {
-    const rawModel = String(process.env.RADOX_MODEL || 'gpt-6-luna').replace(/\./g, '-');
-    const radoxModels = [...new Set([rawModel, 'gpt-6-luna', 'deepseek-v4.1-flash-1017', 'gemini-3.8-flash'])];
-    for (const rModel of radoxModels) {
-      try {
-        return await askRadox([{ role: 'user', content: prompt }], { model: rModel, maxTokens: 3000, temperature: 0.1 });
-      } catch (radoxError) {
-        recordProviderError(`RadoxAI (${rModel})`, radoxError);
-      }
-    }
-  } else if (!radoxEnabled) {
-    providerErrors.push('RadoxAI: disabled by ENABLE_RADOX_FALLBACK=false');
-  }
-
-  // Nara Router fallback.
-  if (process.env.BYNARA_API_KEY || process.env.NARA_API_KEY) {
-    const rawNara = String(process.env.BYNARA_MODEL || 'gpt-6-luna').replace(/\./g, '-');
-    const naraModels = [...new Set([rawNara, 'gpt-6-luna'])];
-    for (const naraModel of naraModels) {
-      try {
-        return await askNara([{ role: 'user', content: prompt }], { model: naraModel, maxTokens: 3000, temperature: 0.1 });
-      } catch (naraError) {
-        recordProviderError(`Nara (${naraModel})`, naraError);
-        // Do not block on non-transient auth/not found errors
-        if (!isTransient(naraError)) break;
-      }
-    }
-  }
-
-  // Gemini is the primary tailoring provider. Prefer generally-available
-  // Flash text models: preview Pro/image/TTS models commonly consume a
-  // different quota or are unavailable to new API projects.
-  const apiKey = getGeminiKey();
-  let geminiError = null;
-  if (apiKey) {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const requestedModel = String(process.env.GEMINI_MODEL || '').trim().replace(/^models\//, '') || planModel;
-    let modelNames = requestedModel ? [requestedModel] : [];
-    try {
-      // Do not guess model IDs: model availability is account/project specific
-      // and retired IDs return 404 even when the API key itself is valid.
-      const catalogResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
-      if (catalogResponse.ok) {
-        const catalog = await catalogResponse.json();
-        const available = (catalog.models || [])
-          .filter((item) => (item.supportedGenerationMethods || []).includes('generateContent'))
-          .map((item) => String(item.name || '').replace(/^models\//, ''))
-          .filter((name) => /^gemini-/i.test(name) && !/embedding|aqa|robotics|image|tts|audio|computer/i.test(name));
-        if (!requestedModel) {
-          const preferPro = flashFirst ? false : String(process.env.GEMINI_PREFER_PRO || 'true').toLowerCase() !== 'false';
-          const rank = (name) => {
-            const flash = /flash/i.test(name) ? (preferPro ? 10 : 40) : 0;
-            const preview = /preview/i.test(name) ? -20 : 0;
-            const pro = /pro/i.test(name) ? (preferPro ? 50 : -10) : 0;
-            const number = Number((name.match(/gemini-(\d+(?:\.\d+)?)/i) || [])[1] || 0);
-            return flash + number + preview + pro;
-          };
-          modelNames = [...new Set(available)].sort((a, b) => rank(b) - rank(a));
-        } else if (!available.includes(requestedModel)) {
-          console.warn(`Configured Gemini model ${requestedModel} is not available to this API key; using an available catalog model.`);
-          modelNames = [...new Set(available)];
-        }
-      }
-    } catch (catalogError) {
-      console.warn('Could not read Gemini model catalog; using configured/default candidates:', String(catalogError.message || catalogError).slice(0, 180));
-    }
-    if (!modelNames.length) modelNames = ['gemini-2.5-flash', 'gemini-2.0-flash'];
-
-    for (const modelName of modelNames) {
-      try {
-        const model = genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        if (text?.trim()) return text.trim();
-        geminiError = new Error(`Gemini ${modelName} returned an empty response.`);
-      } catch (err) {
-        geminiError = err;
-        recordProviderError(`Gemini ${modelName}`, err);
-        // 429 is project/key quota exhaustion, not a model-specific failure.
-        // Retrying every catalog model only creates a long noisy startup and
-        // cannot increase the remaining quota.
-        if (/\b429\b|too many requests|quota/i.test(String(err.message || err))) break;
-      }
-    }
-  } else {
-    geminiError = new Error('Gemini API key is not configured.');
-    providerErrors.push('Gemini: API key is not configured');
-  }
-
-  // NVIDIA is the first fallback for Gemini quota failures. It uses the same
-  // OpenAI-compatible chat format and is suitable for the JSON resume prompt.
+/** The billing user behind the current request, or null for anonymous calls. */
+function aiActionUser(req) {
   try {
-    return await askNvidia([{ role: 'user', content: prompt }], { maxTokens: 2200, temperature: 0.1 });
-  } catch (nvidiaError) {
-    recordProviderError('NVIDIA', nvidiaError);
+    return accessFromRequest(req).user || null;
+  } catch {
+    return null;
   }
+}
 
-  // FreeLLMAPI is the final fallback. It is useful as an availability
-  // fallback, but should not silently replace the configured Pro model.
-  try {
-    return await askFreeLLM([{ role: 'user', content: prompt }]);
-  } catch (freeError) {
-    recordProviderError('FreeLLMAPI', freeError);
-    const detail = providerErrors.join(' | ');
-    throw new Error(`All configured AI providers failed. ${detail}`);
+/** Give a metered AI credit back when the request never produced a result. */
+function refundAiAction(req, featureKey) {
+  const user = aiActionUser(req);
+  if (user) refundFeature(user, featureKey, 1);
+}
+
+/**
+ * Never leak a provider message or a raw 500 for capacity problems.
+ * 503 + Retry-After lets the dashboard retry smoothly instead of showing a
+ * crash; real bugs keep their own status.
+ */
+function sendAiError(res, err, fallbackMessage = 'The AI engine is unavailable right now.') {
+  const busy = err?.code === 'AI_BUSY'
+    || err?.code === 'AI_PROVIDERS_FAILED'
+    || err?.code === 'NO_AI_PROVIDER'
+    || err?.status === 503
+    || err instanceof AiBusyError;
+  const budget = err?.code === 'AI_BUDGET_EXCEEDED';
+  if (busy || budget) {
+    const retryAfterMs = Number(err?.retryAfterMs) || (busy ? 8000 : 60000);
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil(retryAfterMs / 1000))));
+    return res.status(busy ? 503 : 429).json({
+      error: busy
+        ? 'The AI engine is busy right now. Please retry in a few seconds.'
+        : 'This application has used its AI allowance for now.',
+      code: busy ? 'AI_BUSY' : 'AI_BUDGET_EXCEEDED',
+      retryAfterMs,
+    });
   }
+  return res.status(500).json({ error: err?.message || fallbackMessage });
 }
 
 function decodeGmailBody(payload) {
@@ -1869,11 +1815,24 @@ app.post('/api/ai/mail/summarize', async (req, res) => {
     const { subject, from, body } = req.body || {};
     const textBody = String(body || '').trim();
     if (!textBody || textBody.length < 100) {
+      // No model call was made, so the AI communication credit is not spent.
+      refundAiAction(req, FEATURE_KEYS.AI_COMM);
       return res.json({ text: textBody, fallback: true, note: 'This email is short, so the full text is shown.' });
     }
-    const text = await askGemini(`Summarize this received email in 4 short bullet points. Mention who it is from, what they want, and any deadline or next step.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${textBody.slice(0, 6000)}`);
+    const text = await askModel(`Summarize this received email in 4 short bullet points. Mention who it is from, what they want, and any deadline or next step.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${textBody.slice(0, 6000)}`, {
+      role: 'fast',
+      maxTokens: 400,
+      temperature: 0.2,
+      // The same email is summarized again whenever the drawer reopens.
+      cacheKey: `mail-summary:${from}:${subject}:${textBody.slice(0, 6000)}`,
+      cacheTtlMs: 60 * 60 * 1000,
+      userId: resolveUser(req)?.id || '',
+    });
     res.json({ text });
   } catch (err) {
+    console.warn('[ai/mail/summarize] fallback:', err?.message || err);
+    // A template instead of AI output must not burn a Free user's credit.
+    refundAiAction(req, FEATURE_KEYS.AI_COMM);
     const textBody = String(req.body?.body || '').trim();
     const fallback = textBody.split(/\r?\n/).filter(Boolean).slice(0, 3).join(' ') || textBody;
     res.json({ text: fallback, fallback: true, note: 'AI is unavailable — showing the email text instead of a summary.' });
@@ -1937,10 +1896,18 @@ app.post('/api/ai/mail/reply', async (req, res) => {
   if (!guardFeature(req, res, FEATURE_KEYS.AI_COMM)) return;
   const { subject, from, email, body } = req.body || {};
   try {
-    const text = await askGemini(`Write a polite, concise email reply the user can send. Do not invent facts that are not in the email. Keep it under 140 words.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${String(body || '').slice(0, 6000)}`);
+    const text = await askModel(`Write a polite, concise email reply the user can send. Do not invent facts that are not in the email. Keep it under 140 words.\nFrom: ${from || 'Unknown'}\nSubject: ${subject || ''}\n\n${String(body || '').slice(0, 6000)}`, {
+      role: 'primary',
+      maxTokens: 500,
+      temperature: 0.3,
+      cacheKey: `mail-reply:${resolveUser(req)?.id || ''}:${from}:${subject}:${String(body || '').slice(0, 6000)}`,
+      cacheTtlMs: 5 * 60 * 1000,
+      userId: resolveUser(req)?.id || '',
+    });
     res.json({ text });
   } catch (err) {
-    res.json({ text: templateReply({ subject, from, email }), fallback: true, note: 'AI is unavailable — this is an editable template.' });
+    refundAiAction(req, FEATURE_KEYS.AI_COMM);
+    res.json({ text: templateReply({ subject, from, email }), fallback: true, note: 'AI is unavailable - this is an editable template.' });
   }
 });
 
@@ -1949,10 +1916,18 @@ app.post('/api/ai/mail/followup', async (req, res) => {
   const { subject, to, body } = req.body || {};
   const nextSubject = subject?.toLowerCase().startsWith('follow') ? subject : `Following up: ${subject || 'my last email'}`;
   try {
-    const text = await askGemini(`Write a short, polite follow-up email to someone the user already emailed. Reference the earlier message without repeating it. Keep it under 120 words.\nTo: ${to || 'there'}\nEarlier subject: ${subject || ''}\n\nEarlier message:\n${String(body || '').slice(0, 6000)}`);
+    const text = await askModel(`Write a short, polite follow-up email to someone the user already emailed. Reference the earlier message without repeating it. Keep it under 120 words.\nTo: ${to || 'there'}\nEarlier subject: ${subject || ''}\n\nEarlier message:\n${String(body || '').slice(0, 6000)}`, {
+      role: 'primary',
+      maxTokens: 450,
+      temperature: 0.3,
+      cacheKey: `mail-followup:${resolveUser(req)?.id || ''}:${to}:${subject}:${String(body || '').slice(0, 6000)}`,
+      cacheTtlMs: 5 * 60 * 1000,
+      userId: resolveUser(req)?.id || '',
+    });
     res.json({ text, subject: nextSubject });
   } catch (err) {
-    res.json({ text: templateFollowUp({ subject }), subject: nextSubject, fallback: true, note: 'AI is unavailable — this is an editable template.' });
+    refundAiAction(req, FEATURE_KEYS.AI_COMM);
+    res.json({ text: templateFollowUp({ subject }), subject: nextSubject, fallback: true, note: 'AI is unavailable - this is an editable template.' });
   }
 });
 
@@ -2013,9 +1988,17 @@ Conversation so far (oldest first):
 ${history}`;
 
   try {
-    const text = await askGemini(prompt);
+    const text = await askModel(prompt, {
+      role: 'primary',
+      maxTokens: 500,
+      temperature: 0.4,
+      cacheKey: `conversation:${resolveUser(req)?.id || ''}:${hashKey(history, instruction, isLinkedIn)}`,
+      cacheTtlMs: 2 * 60 * 1000,
+      userId: resolveUser(req)?.id || '',
+    });
     res.json({ text: String(text || '').trim() });
   } catch (err) {
+    refundAiAction(req, FEATURE_KEYS.AI_COMM);
     // Deterministic draft so the composer never dead-ends.
     const last = [...(Array.isArray(messages) ? messages : [])].reverse().find((item) => item?.text);
     const fallback = isLinkedIn
@@ -2528,7 +2511,7 @@ function extractJobMetadata(html, rawUrl, plainText = '', domLogo = '') {
   };
 }
 
-async function fetchJobText(url) {
+async function fetchJobTextUncached(url) {
   const greenhouseJob = async () => {
     let source;
     try { source = new URL(url); } catch { return null; }
@@ -3021,6 +3004,21 @@ async function fetchJobText(url) {
   }
 }
 
+/**
+ * 24h cache + single-flight around the expensive job reader.
+ *
+ * Ten candidates opening the same Amazon/Google posting in the same minute now
+ * share one fetch (and at most one headless Chrome), instead of ten browsers
+ * and ten identical parses. `remember()` never caches a rejection, so a real
+ * fetch error still surfaces and can be retried.
+ */
+const JOB_TEXT_TTL_MS = Number(process.env.JOB_TEXT_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
+
+function fetchJobText(url) {
+  const key = `job:fetch:${hashKey(String(url || '').trim().toLowerCase())}`;
+  return remember(key, () => fetchJobTextUncached(url), { ttlMs: JOB_TEXT_TTL_MS });
+}
+
 function loadMasterResume() {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'master-resume.json'), 'utf8'));
@@ -3321,6 +3319,8 @@ function editableResumeHtml(profile, resume) {
 
 // ── Tailored 1-Page Cover Letter Generator ─────────────────────────────────
 app.post('/api/cover-letter/generate', async (req, res) => {
+  // Cover letters share the tailoring allowance: Free 5/mo, Pro 50/mo.
+  if (!guardFeature(req, res, FEATURE_KEYS.RESUME_TAILOR)) return;
   try {
     const { jobTitle = '', company = '', jobLocation = '', jobDescription = '', profile = {}, resumeText = '' } = req.body || {};
     const candidateName = profile.fullName || 'Nelluru Jaswanth';
@@ -3401,7 +3401,16 @@ Return ONLY a valid JSON object matching this schema:
   "signOff": "Best Regards,"
 }`;
 
-      const aiRaw = await askGemini(prompt);
+      const aiRaw = await askModel(prompt, {
+        role: 'primary',
+        json: true,
+        maxTokens: 1400,
+        temperature: 0.35,
+        // Same job + same candidate + same resume → same letter, no second bill.
+        cacheKey: `cover-letter:${resolveUser(req)?.id || ''}:${hashKey(prompt)}`,
+        cacheTtlMs: 60 * 60 * 1000,
+        userId: resolveUser(req)?.id || '',
+      });
       const jsonStr = String(aiRaw || '').replace(/```json|```/gi, '').trim();
       const parsed = JSON.parse(jsonStr);
       if (parsed && Array.isArray(parsed.paragraphs) && parsed.paragraphs.length >= 3) {
@@ -3423,10 +3432,14 @@ Return ONLY a valid JSON object matching this schema:
       }
     } catch (aiErr) {
       console.warn('AI cover letter generation fell back to deterministic template:', aiErr?.message);
+      // The deterministic template is free to produce; do not charge the
+      // tailoring credit for a letter the model never wrote.
+      refundAiAction(req, FEATURE_KEYS.RESUME_TAILOR);
     }
 
     return res.json({ ok: true, coverLetter: fallbackCoverLetter });
   } catch (err) {
+    refundAiAction(req, FEATURE_KEYS.RESUME_TAILOR);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -3455,7 +3468,10 @@ app.post('/api/external-job/tailor', async (req, res) => {
     const { url, profile, resumeText, profileResumeText, jobDescription, title, company, template } = req.body || {};
     const preferredFormatId = RESUME_TEMPLATE_FORMATS[String(template || '').toLowerCase()] || RESUME_TEMPLATE_FORMATS.classic;
     const jobUrl = publicJobUrl(url);
-    if (!jobUrl && !jobDescription) return res.status(400).json({ error: 'Enter a public job link or paste the complete job description.' });
+    if (!jobUrl && !jobDescription) {
+      refundAiAction(req, FEATURE_KEYS.RESUME_TAILOR);
+      return res.status(400).json({ error: 'Enter a public job link or paste the complete job description.' });
+    }
     const pastedPosting = jobDescription ? validateJobDescription({ title, company, description: jobDescription }) : null;
     const fetched = pastedPosting
       ? { text: pastedPosting.description, posting: pastedPosting, openUrl: '', applyUrl: '', meta: {} }
@@ -3465,7 +3481,10 @@ app.post('/api/external-job/tailor', async (req, res) => {
     const supplied = String(resumeText || '').trim();
     const profileFallback = String(profileResumeText || '').trim();
     const sourceResume = resumeTextIsUsable(supplied) ? supplied : profileFallback;
-    if (!resumeTextIsUsable(sourceResume)) return res.status(400).json({ error: 'Provide the candidate resume text for this tailoring request.' });
+    if (!resumeTextIsUsable(sourceResume)) {
+      refundAiAction(req, FEATURE_KEYS.RESUME_TAILOR);
+      return res.status(400).json({ error: 'Provide the candidate resume text for this tailoring request.' });
+    }
     const baselineSource = resumeTextIsUsable(supplied)
       ? 'uploaded-resume'
       : (profileFallback.includes(String(profile?.resume?.text || '').trim()) && String(profile?.resume?.text || '').trim()
@@ -3516,9 +3535,18 @@ Job description: ${jobText.slice(0, 16000)}`;
       try {
         // A truncated or slightly malformed reply is repaired instead of
         // failing the whole run; the section restorers then fill any gap.
-        const answer = await askGemini(attempt === 0
+        const answer = await askModel(attempt === 0
           ? prompt
-          : `${prompt}\n\nThe previous reply was cut off. Keep every detail under 35 words and close every brace and bracket.`);
+          : `${prompt}\n\nThe previous reply was cut off. Keep every detail under 35 words and close every brace and bracket.`, {
+          role: 'primary',
+          json: true,
+          maxTokens: 2600,
+          temperature: 0.2,
+          // Double-click / retry with identical inputs must not be billed twice.
+          cacheKey: `tailor:${resolveUser(req)?.id || ''}:${hashKey(prompt)}`,
+          cacheTtlMs: 30 * 60 * 1000,
+          userId: resolveUser(req)?.id || '',
+        });
         parsed = validateTailoredResume(parseModelJson(answer));
       } catch (geminiErr) {
         firstError = firstError || geminiErr;
@@ -3671,7 +3699,9 @@ Job description: ${jobText.slice(0, 16000)}`;
     });
   } catch (err) {
     console.error('External resume tailor failed:', err);
-    res.status(500).json({ error: err.message || 'Could not tailor a resume for that job link.' });
+    // A failed run must not consume the Free user's monthly tailoring credit.
+    refundAiAction(req, FEATURE_KEYS.RESUME_TAILOR);
+    return sendAiError(res, err, 'Could not tailor a resume for that job link.');
   }
 });
 
@@ -6054,32 +6084,34 @@ app.post('/api/rag/chat', async (req, res) => {
 
     // Record-list answers stay deterministic so a model can never add a person
     // or a reply that does not exist. Free-form overviews get the same verified
-    // facts as ground-truth context for GPT-6 Luna.
+    // facts as ground-truth context for the model.
     if (retrieval.useLLM) {
       const messages = [
         { role: 'system', content: buildSystemPrompt(retrieval).slice(0, 12000) },
         ...copilotHistory(history),
         { role: 'user', content: question },
       ];
-      const attempts = [];
-      if (process.env.RADOX_API_KEY || process.env.RADOXAI_API_KEY) {
-        attempts.push(() => askRadox(messages, { maxTokens: 900, temperature: 0.2 }));
-      }
-      if (process.env.BYNARA_API_KEY || process.env.NARA_API_KEY) {
-        attempts.push(() => askNara(messages, { maxTokens: 900, temperature: 0.2 }));
-      }
-      attempts.push(() => askFreeLLM(messages, { maxTokens: 900 }));
-      for (const attempt of attempts) {
-        try {
-          const text = await attempt();
-          if (text && text.trim()) {
-            reply = text.trim();
-            model = 'gpt-6-luna';
-            break;
-          }
-        } catch (error) {
-          console.warn('[Copilot] provider unavailable:', String(error?.message || error).slice(0, 160));
+      try {
+        // Same routing as every other feature: free Nara in development, the
+        // plan's OpenAI model in production, with the same scheduler/cache.
+        const result = await executeModel({
+          role: 'fast',
+          messages,
+          maxTokens: 900,
+          temperature: 0.2,
+          tier: aiTierStorage.getStore() === 'free' ? 'free' : 'pro',
+          paid: isPaidOpenAiActive(),
+          userId: resolveUser(req)?.id || '',
+          cacheKey: `copilot:${resolveUser(req)?.id || ''}:${hashKey(question, retrieval.summary)}`,
+          cacheTtlMs: 10 * 60 * 1000,
+        });
+        if (result.text && result.text.trim()) {
+          reply = result.text.trim();
+          model = result.model;
         }
+      } catch (error) {
+        // The verified local answer is already good enough; never 500 a chat.
+        console.warn('[Copilot] AI unavailable, using verified local answer:', String(error?.message || error).slice(0, 160));
       }
     }
 
@@ -6191,6 +6223,15 @@ function publicTaskView(task) {
   };
 }
 
+/**
+ * One auto-apply run per user, enforced in process.
+ *
+ * The database check below is correct but racy: two clicks that arrive in the
+ * same millisecond both see "no active task" and both create one. This keyed
+ * mutex (lib/user-lock.js) serialises the check+create for a single user.
+ * Cross-instance safety comes from the `getActiveTask()` check inside the lock
+ * (Phase B moves the lock to Redis).
+ */
 app.post('/api/applications/auto-apply/start', async (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
@@ -6204,6 +6245,9 @@ app.post('/api/applications/auto-apply/start', async (req, res) => {
     });
   }
 
+  // Serialise start requests for this user so a double click cannot create two
+  // parallel browser runs (race conditions + LinkedIn pacing risk).
+  const releaseApplyLock = await userApplyLock.acquire(user.id);
   try {
     let active = await getActiveTask(user.id);
     // A task whose browser tab stopped reporting is orphaned. Do not let it
@@ -6257,6 +6301,8 @@ app.post('/api/applications/auto-apply/start', async (req, res) => {
   } catch (err) {
     console.error('[auto-apply] start failed:', err.message);
     taskError(res, err);
+  } finally {
+    releaseApplyLock();
   }
 });
 

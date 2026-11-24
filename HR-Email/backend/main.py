@@ -127,6 +127,12 @@ class TestEmailRequest(BaseModel):
     contact_company: Optional[str] = "Test Company"
 
 
+class QuickPasteRequest(BaseModel):
+    raw_text: str
+    default_company: Optional[str] = None
+    default_title: Optional[str] = "Talent Acquisition"
+
+
 class SendEmailsRequest(BaseModel):
     contact_ids: List[int]
     email_type: str = "INITIAL"  # INITIAL or FOLLOWUP
@@ -231,13 +237,13 @@ async def upload_pdf(file: UploadFile = File(...)):
         if existing:
             existing_contacts.append({**contact, "db_status": existing["status"], "db_id": existing["id"]})
         else:
-            cid = await upsert_contact(
+            contact_obj, is_new = await upsert_contact(
                 contact.get("name"),
                 contact["email"],
                 contact.get("title"),
                 contact.get("company")
             )
-            new_contacts.append({**contact, "db_id": cid})
+            new_contacts.append({**contact, "db_id": contact_obj["id"]})
     
     return {
         "stats": {
@@ -275,6 +281,61 @@ async def import_contacts(contacts: List[dict]):
         "imported": len(imported),
         "skipped": len(skipped),
         "contacts": imported,
+    }
+
+
+@app.post("/api/quick-paste-contacts")
+async def quick_paste_contacts(req: QuickPasteRequest):
+    """
+    Parse a list of pasted email IDs (from textarea, separated by newlines, commas, spaces, etc.),
+    clean and deduplicate them, and add them as NOT_CONTACTED contacts into the database.
+    """
+    import re
+    email_pattern = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+    found_emails = email_pattern.findall(req.raw_text)
+    
+    unique_emails = list(dict.fromkeys([e.strip().lower() for e in found_emails if e.strip()]))
+    
+    if not unique_emails:
+        raise HTTPException(status_code=400, detail="No valid email addresses found in the pasted text.")
+    
+    added_contacts = []
+    existing_contacts = []
+    
+    for email in unique_emails:
+        company = req.default_company
+        if not company or not company.strip():
+            domain = email.split("@")[-1].split(".")[0]
+            if domain.lower() not in ("gmail", "yahoo", "outlook", "hotmail", "icloud", "mail", "live"):
+                company = domain.capitalize()
+            else:
+                company = "your company"
+        
+        user_part = email.split("@")[0].replace(".", " ").replace("_", " ").strip()
+        name = user_part.title() if user_part else "Hiring Team"
+        
+        contact_dict, is_new = await upsert_contact(
+            name=name,
+            email=email,
+            title=req.default_title or "HR / Recruiter",
+            company=company
+        )
+        
+        if is_new:
+            added_contacts.append(contact_dict)
+        else:
+            existing_contacts.append(contact_dict)
+            
+    all_uncontacted = [c["id"] for c in (added_contacts + existing_contacts) if c.get("status") == "NOT_CONTACTED"]
+    
+    return {
+        "status": "success",
+        "total_parsed": len(unique_emails),
+        "added": len(added_contacts),
+        "existing": len(existing_contacts),
+        "contacts": added_contacts,
+        "contact_ids": [c["id"] for c in added_contacts],
+        "all_uncontacted_ids": all_uncontacted,
     }
 
 

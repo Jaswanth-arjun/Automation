@@ -161,6 +161,8 @@ test('server-side browsers are retired and the vault is user-scoped', () => {
   assert.match(server, /code: 'USE_EXTENSION_FLOW'/);
   assert.match(server, /function serverSideApplyEnabled\(\)/);
   assert.match(server, /refundFeature\(user, FEATURE_KEYS\.AUTO_APPLY, 1\)/, 'a failed start must refund the entitlement');
+  assert.match(server, /await userApplyLock\.acquire\(user\.id\)/, 'start must take the per-user lock before checking for an active task');
+  assert.match(server, /finally \{\s*releaseApplyLock\(\);/, 'the per-user lock must always be released');
   assert.match(server, /async function vaultOwner\(req = \{\}\)/);
   assert.match(server, /userForToken\(bearer\)/, 'the vault must require a real session token, not the install-owner fallback');
   assert.match(server, /function vaultAnswerIsUnusable\(/, 'page chrome must never be stored as an answer');
