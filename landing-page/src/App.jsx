@@ -50,25 +50,38 @@ function GlobalAssistant() {
   return <DashboardRAGEntrance walkIn={isHome} />;
 }
 
+const CLEANUP_FLAG = 'hamzooh_cleanup_20261125_done';
+
+function clearDashboardLocalData() {
+  localStorage.removeItem('hamzooh_admin_jobs');
+  localStorage.removeItem('wayin_applications');
+  localStorage.removeItem('wayin_apply_progress');
+  localStorage.removeItem('wayin_tailor_reports');
+  localStorage.removeItem('hamzooh_activity_overlay');
+  localStorage.removeItem('wayin_saved_jobs');
+  Object.keys(localStorage).forEach((k) => {
+    if (k.startsWith('hamzooh_cover_letter_')) localStorage.removeItem(k);
+  });
+  try {
+    const resumes = JSON.parse(localStorage.getItem('wayin_resumes') || '[]');
+    const userAdded = resumes.filter(
+      (r) => !r.jobUrl && !r.jobId && r.size !== '1 page PDF' && !/-tailored-resume\.pdf$/i.test(r.name || ''),
+    );
+    localStorage.setItem('wayin_resumes', JSON.stringify(userAdded));
+  } catch {}
+}
+
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
+  if (typeof window !== 'undefined' && !localStorage.getItem(CLEANUP_FLAG)) {
+    clearDashboardLocalData();
+    localStorage.setItem(CLEANUP_FLAG, '1');
+  }
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('clear_dashboard') === '1') {
-      localStorage.removeItem('hamzooh_admin_jobs');
-      localStorage.removeItem('wayin_applications');
-      localStorage.removeItem('wayin_apply_progress');
-      localStorage.removeItem('wayin_tailor_reports');
-      localStorage.removeItem('hamzooh_activity_overlay');
-      Object.keys(localStorage).forEach((k) => {
-        if (k.startsWith('hamzooh_cover_letter_')) localStorage.removeItem(k);
-      });
-      try {
-        const resumes = JSON.parse(localStorage.getItem('wayin_resumes') || '[]');
-        const userAdded = resumes.filter((r) => !r.jobUrl && !r.jobId && r.size !== '1 page PDF' && !/-tailored-resume\.pdf$/i.test(r.name || ''));
-        localStorage.setItem('wayin_resumes', JSON.stringify(userAdded));
-      } catch {}
+      clearDashboardLocalData();
       params.delete('clear_dashboard');
       const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
       window.location.replace(next);
