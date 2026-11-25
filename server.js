@@ -34,7 +34,7 @@ import {
 
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer-core';
-import { registerAdminAccess } from './lib/admin-access.js';
+import { registerAdminAccess, hasAdminSession } from './lib/admin-access.js';
 import { getDocumentProxy } from 'unpdf';
 import XLSX from 'xlsx';
 import { fillPageGaps, fitResumeToOnePage, modernResumeHtml, renderFittedResumePdf, resumePlainText } from './lib/resume-pdf.js';
@@ -46,7 +46,7 @@ import { userApplyLock } from './lib/user-lock.js';
 import { aiMaintenanceMiddleware } from './lib/ai-failure.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
-import { assignMissingEmployeeSnos, companiesMatch, employeeMatchesCompany, mergeEmployeeRecords, normalizeCompany } from './lib/employee-directory.js';
+import { assignMissingEmployeeSnos, companiesMatch, employeeMatchesCompany, mergeEmployeeRecords, normalizeCompany, resolveContactCompany } from './lib/employee-directory.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import { registerBillingRoutes } from './lib/billing/routes.js';
 import { accessForUser, accessFromRequest, applyContactAccess, consumeFeature, guardFeature, refundFeature, resolveUser, upgradePayload } from './lib/billing/entitlements.js';
@@ -1001,6 +1001,15 @@ const uploadList = multer({
   },
 });
 
+// A verified admin session (emailed one-time code) is not a subscription: the
+// admin panel must show the real addresses of the shared directory it manages,
+// never the blurred rows a free candidate sees. Everything else stays on its
+// plan cap.
+function contactAccessFor(req) {
+  if (hasAdminSession(req)) return { planId: 'admin', unlockedContacts: Infinity };
+  return accessForUser(resolveUser(req));
+}
+
 app.get('/api/employees', async (req, res) => {
   const company = String(req.query.company || '').trim();
   const autoDiscover = String(req.query.autoDiscover || 'true').toLowerCase() !== 'false';
@@ -1025,7 +1034,8 @@ app.get('/api/employees', async (req, res) => {
       if (result.contacts && result.contacts.length > 0) {
         saveEmployeeRecords(result.contacts.map((c) => ({
           name: c.name,
-          company: c.company || company,
+          company: resolveContactCompany(c, company),
+          companyAliases: [c.company].filter(Boolean),
           role: c.role,
           email: c.email,
           details: c.source || 'Auto-Discovered',
@@ -1041,10 +1051,10 @@ app.get('/api/employees', async (req, res) => {
   }
 
   // Free users unlock the first N contacts for this company; the rest are
-  // returned blurred. Pro users get everyone. Locked emails never leave the
-  // server, and every user sees the same shared, deduped directory.
-  const access = accessForUser(resolveUser(req));
-  const gated = applyContactAccess(list, access);
+  // returned blurred. Pro users get everyone, and a verified admin session
+  // sees every address. Locked emails never leave the server, and every user
+  // sees the same shared, deduped directory.
+  const gated = applyContactAccess(list, contactAccessFor(req));
   res.json(gated.contacts);
 });
 
@@ -1107,15 +1117,15 @@ app.post('/api/employees/discover', async (req, res) => {
     if (result.contacts && result.contacts.length > 0) {
       saveEmployeeRecords(result.contacts.map((c) => ({
         name: c.name,
-        company: c.company || company,
+        company: resolveContactCompany(c, targetCompany || result.company),
+        companyAliases: [c.company].filter(Boolean),
         role: c.role,
         email: c.email,
         details: c.source || 'Auto-Discovered',
       })), 'auto-discovery');
     }
     const updated = readEmployees().filter((e) => employeeMatchesCompany(e, company || result.company));
-    const access = accessForUser(resolveUser(req));
-    const gated = applyContactAccess(updated, access);
+    const gated = applyContactAccess(updated, contactAccessFor(req));
     res.json({
       success: true,
       company: company || result.company,
@@ -3709,7 +3719,8 @@ Job description: ${jobText.slice(0, 16000)}`;
         if (disc?.contacts?.length) {
           saveEmployeeRecords(disc.contacts.map((c) => ({
             name: c.name,
-            company: c.company || finalCompany,
+            company: resolveContactCompany(c, finalCompany),
+            companyAliases: [c.company].filter(Boolean),
             role: c.role,
             email: c.email,
             details: c.source || 'Auto-Discovered',
