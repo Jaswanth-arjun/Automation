@@ -5025,7 +5025,7 @@ app.get('/api/campaigns/:id', (req, res) => {
 
 app.post('/api/campaigns', async (req, res) => {
   try {
-    const { userId, company, role, roles, perRole, referralTarget, sendInvites, useAINotes, connectionNote, userProfile } = req.body || {};
+    const { userId, company, role, roles, perRole, referralTarget, sendInvites, useAINotes, connectionNote, userProfile, headless } = req.body || {};
     if (!company || !String(company).trim()) {
       return res.status(400).json({ error: 'A target company is required.' });
     }
@@ -5100,6 +5100,10 @@ app.post('/api/campaigns', async (req, res) => {
         error: '',
         errorStage: '',
         lastActivity: 'Resuming the existing campaign for this job…',
+        config: {
+          ...(resumable.config || {}),
+          headless: headless !== false,
+        },
       });
       activeCampaignEngine = attachCampaignEngine(new ReferralCampaignEngine(resumed));
       broadcastCampaign(resumed);
@@ -5144,6 +5148,7 @@ app.post('/api/campaigns', async (req, res) => {
         connectionNote: connectionNote || '',
         userProfile: userProfile || {},
         sessionDir,
+        headless: headless !== false,
       },
     });
 

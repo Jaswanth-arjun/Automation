@@ -4,7 +4,7 @@ import {
   ArrowLeft, ArrowRight, Mail, FileText, Sparkles,
   Copy, Check, Send, Download, CheckCircle2,
   AlertCircle, RefreshCw,
-  Upload, Eye, ChevronRight, UserCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil,
+  Upload, Eye, EyeOff, ChevronRight, UserCheck, Target, X, Plus, Play, Square, Loader, Zap, Monitor, Pencil,
   Lock, Gem
 } from 'lucide-react';
 import { DEMO_JOBS } from '../lib/mockData';
@@ -307,7 +307,8 @@ export default function Apply() {
   const [liPerRole, setLiPerRole] = useState(10);
   // Stage 1 target: one company-wide referral-message count, independent of liPerRole.
   const [liReferralTarget, setLiReferralTarget] = useState(5);
-  const [liUseAI, setLiUseAI] = useState(true);
+  const [liUseAI] = useState(true);
+  const [liWatchLive, setLiWatchLive] = useState(false);
   const [liNote, setLiNote] = useState('');
   const [liStarting, setLiStarting] = useState(false);
   const [liCampaignMsg, setLiCampaignMsg] = useState(null);
@@ -458,6 +459,7 @@ export default function Apply() {
         referralTarget: liReferralTarget,
         sendInvites: true,
         useAINotes: liUseAI,
+        headless: !liWatchLive,
         connectionNote: liNote.trim(),
         userProfile: {
           ...profile,
@@ -2819,24 +2821,26 @@ ${firstName}`;
                   </div>
                   <div style={{ flex: 1, minWidth: '160px' }}>
                     <label style={{ fontSize: '11px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: '4px' }}>
-                      AI Personalized Notes
+                      Watch Automation
                     </label>
                     <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px', lineHeight: '1.2' }}>
-                      Custom note per recipient
+                      {liWatchLive ? 'Live browser window opens' : 'Runs silently in background'}
                     </div>
                     <button
-                      onClick={() => setLiUseAI(!liUseAI)}
+                      onClick={() => setLiWatchLive(!liWatchLive)}
                       disabled={liIsRunning}
                       style={{
                         width: '100%', padding: '12px 16px',
-                        border: liUseAI ? '1.5px solid #a78bfa' : '1px solid #e2e8f0',
+                        border: liWatchLive ? '1.5px solid #16a34a' : '1px solid #e2e8f0',
                         borderRadius: '10px', fontSize: '13px', fontWeight: '700',
-                        background: liUseAI ? '#f5f3ff' : '#ffffff',
-                        color: liUseAI ? '#6d28d9' : '#64748b',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                        background: liWatchLive ? '#f0fdf4' : '#ffffff',
+                        color: liWatchLive ? '#15803d' : '#64748b',
+                        cursor: liIsRunning ? 'not-allowed' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
                       }}
                     >
-                      <Sparkles size={14} /> {liUseAI ? 'Gemini AI On' : 'Template Notes'}
+                      {liWatchLive ? <Eye size={14} /> : <EyeOff size={14} />}
+                      {liWatchLive ? 'Enabled (Watch Live)' : 'Disabled (Background)'}
                     </button>
                   </div>
                 </div>
