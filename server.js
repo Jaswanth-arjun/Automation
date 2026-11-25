@@ -788,7 +788,7 @@ function markCompanyDiscovered(company) {
 
 function companyNeedsDiscovery(company, list, force = false) {
   if (force) return true;
-  if (!Array.isArray(list) || !list.length) return true;
+  if (Array.isArray(list) && list.length > 0) return false;
   const last = Date.parse(readDiscoveryMeta()[normalizeCompany(company)] || '') || 0;
   return (Date.now() - last) > CONTACT_REFRESH_MS;
 }
@@ -1117,30 +1117,35 @@ app.post('/api/employees/sync', (req, res) => {
 });
 
 app.post('/api/employees/discover', async (req, res) => {
-  const { company, jobUrl, jobHtml, jobTitle } = req.body || {};
+  const { company, jobUrl, jobHtml, jobTitle, refresh } = req.body || {};
   if (!company && !jobUrl) {
     return res.status(400).json({ error: 'Company name or job URL is required for discovery.' });
   }
   try {
     const all = readEmployees();
     const targetCompany = String(company || '').trim();
-    const result = await discoverCompanyEmployees({
-      company: targetCompany,
-      jobUrl: String(jobUrl || '').trim(),
-      jobHtml: String(jobHtml || '').trim(),
-      jobTitle: String(jobTitle || '').trim(),
-      existingEmployees: targetCompany ? all.filter((e) => employeeMatchesCompany(e, targetCompany)) : [],
-    });
-    if (targetCompany) markCompanyDiscovered(targetCompany);
-    if (result.contacts && result.contacts.length > 0) {
-      saveEmployeeRecords(result.contacts.map((c) => ({
-        name: c.name,
-        company: resolveContactCompany(c, targetCompany || result.company),
-        companyAliases: [c.company].filter(Boolean),
-        role: c.role,
-        email: c.email,
-        details: c.source || 'Auto-Discovered',
-      })), 'auto-discovery');
+    const existing = targetCompany ? all.filter((e) => employeeMatchesCompany(e, targetCompany)) : [];
+    const forceRefresh = ['1', 'true', 'yes'].includes(String(refresh || '').toLowerCase());
+    let result = { company: targetCompany, domain: '', mailServerVerified: true, mailProvider: '', contacts: [] };
+    if (!targetCompany || companyNeedsDiscovery(targetCompany, existing, forceRefresh)) {
+      result = await discoverCompanyEmployees({
+        company: targetCompany,
+        jobUrl: String(jobUrl || '').trim(),
+        jobHtml: String(jobHtml || '').trim(),
+        jobTitle: String(jobTitle || '').trim(),
+        existingEmployees: existing,
+      });
+      if (targetCompany) markCompanyDiscovered(targetCompany);
+      if (result.contacts && result.contacts.length > 0) {
+        saveEmployeeRecords(result.contacts.map((c) => ({
+          name: c.name,
+          company: resolveContactCompany(c, targetCompany || result.company),
+          companyAliases: [c.company].filter(Boolean),
+          role: c.role,
+          email: c.email,
+          details: c.source || 'Auto-Discovered',
+        })), 'auto-discovery');
+      }
     }
     const updated = readEmployees().filter((e) => employeeMatchesCompany(e, company || result.company));
     const gated = applyContactAccess(updated, contactAccessFor(req));
@@ -3724,14 +3729,15 @@ Job description: ${jobText.slice(0, 16000)}`;
     const alreadyPresentKeywords = ats.matchedKeywordsBefore || [];
     const missingKeywords = ats.missingKeywords || [];
     const scoreDelta = (ats.afterScore || 0) - (ats.beforeScore || 0);
-    // Auto-discover company employee outreach contacts for referral outreach
-    if (finalCompany) {
+    // Auto-discover company employee outreach contacts for referral outreach (only if DB has none yet)
+    const existingForCompany = finalCompany ? readEmployees().filter((e) => employeeMatchesCompany(e, finalCompany)) : [];
+    if (finalCompany && companyNeedsDiscovery(finalCompany, existingForCompany, false)) {
       discoverCompanyEmployees({
         company: finalCompany,
         jobUrl: openUrl,
         jobHtml: fetched.posting?.description || '',
         jobTitle: finalTitle,
-        existingEmployees: readEmployees().filter((e) => employeeMatchesCompany(e, finalCompany))
+        existingEmployees: existingForCompany
       }).then((disc) => {
         markCompanyDiscovered(finalCompany);
         if (disc?.contacts?.length) {
