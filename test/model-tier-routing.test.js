@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { modelRoutes, tierModel, freeLaneModel, modelConfig } from '../lib/model-router.js';
+import { modelRoutes, tierModel, freeLaneModel, modelConfig, providerLimit } from '../lib/model-router.js';
 
 const ENV_KEYS = [
   'OPENAI_ENABLED',
@@ -111,4 +111,32 @@ test('the free lane and tier models are configurable', () => {
     assert.equal(cfg.paidEnabled, true);
     assert.equal(cfg.tierModels.free.primary, 'gpt-4.1-nano');
   });
+});
+
+test('each provider key bucket gets its real limits, not the generic default', () => {
+  const keys = ['AI_OPENAI_CONCURRENCY', 'AI_OPENAI_RPM', 'AI_NARA_CONCURRENCY', 'AI_NARA_RPM', 'AI_MIN_INTERVAL_MS'];
+  const previous = {};
+  for (const key of keys) previous[key] = process.env[key];
+  Object.assign(process.env, {
+    AI_OPENAI_CONCURRENCY: '8',
+    AI_OPENAI_RPM: '600',
+    AI_NARA_CONCURRENCY: '3',
+    AI_NARA_RPM: '10',
+    AI_MIN_INTERVAL_MS: '6000',
+  });
+  try {
+    // Buckets are `<provider>:<keyIndex>`; the limiter must read the provider
+    // before the colon or every key silently falls back to 3 concurrent / 20 RPM.
+    assert.deepEqual(providerLimit('openai:0'), { concurrency: 8, rpm: 600, intervalMs: 0 });
+    assert.deepEqual(providerLimit('openai:3'), providerLimit('openai'));
+    assert.deepEqual(providerLimit('nara:0'), { concurrency: 3, rpm: 10, intervalMs: 6000 });
+    assert.deepEqual(providerLimit('nara:4'), providerLimit('nara:0'));
+    assert.notDeepEqual(providerLimit('nara:0'), providerLimit('openai:0'), 'free and paid keys must not share one quota');
+    assert.equal(providerLimit('freellm:0').concurrency, 3, 'unknown gateways keep the safe default');
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
 });

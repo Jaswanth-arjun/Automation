@@ -723,7 +723,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     allContacts = contacts;
     const query = contactsSearch.value.trim().toLowerCase();
     const filtered = query
-      ? contacts.filter((contact) => [contact.name, contact.company, contact.role, contact.email]
+      ? contacts.filter((contact) => [contact.name, contact.company, contact.role, contact.email,
+        String(contact.sno || ''), ...(Array.isArray(contact.companies) ? contact.companies : [])]
         .filter(Boolean).join(' ').toLowerCase().includes(query))
       : contacts;
     const visible = filtered.slice(0, CONTACT_RENDER_LIMIT);
@@ -742,7 +743,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     contactsList.innerHTML = visible.map((contact) => `
       <div class="contact-item">
         <div class="contact-info">
-          <strong>${escapeHtml(contact.name || '')}</strong>
+          <strong>${contact.sno ? `<span class="contact-sno" title="Employee serial number">#${escapeHtml(String(contact.sno))}</span> ` : ''}${escapeHtml(contact.name || '')}</strong>
           <div class="contact-meta">${escapeHtml([contact.role, contact.company, contact.email].filter(Boolean).join(' · '))}</div>
           ${contact.details ? `<div class="contact-details">${escapeHtml(contact.details)}</div>` : ''}
         </div>

@@ -12,7 +12,8 @@
     "dev": "node scripts/dev-with-freellmapi.mjs",
     "dev:automation": "node server.js",
     "dev:all": "node scripts/dev-with-freellmapi.mjs",
-    "cli": "node linkdin-automation/linkedin-connect.js"
+    "cli": "node linkdin-automation/linkedin-connect.js",
+    "sync:employees": "node scripts/sync-employees.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

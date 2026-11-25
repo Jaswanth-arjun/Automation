@@ -30,9 +30,15 @@ function isProfileComplete() {
  * walks in slowly from the sidebar edge to the bottom-right, then cross-fades
  * into the seated RAG assistant at the same spot. Replays on each fresh load.
  */
-export default function DashboardRAGEntrance() {
-  const [phase, setPhase] = useState('checking'); // checking | hidden | walking | handoff | ready
+export default function DashboardRAGEntrance({ walkIn = true }) {
   const [complete, setComplete] = useState(isProfileComplete);
+  // checking | hidden | walking | handoff | ready
+  // Without the walk-in (any dashboard page except Home) the seated assistant
+  // is shown at once; the profile gate stays the same.
+  const [phase, setPhase] = useState(() => {
+    if (walkIn) return 'checking';
+    return isProfileComplete() ? 'ready' : 'hidden';
+  });
 
   useEffect(() => {
     const check = () => setComplete(isProfileComplete());
@@ -47,8 +53,8 @@ export default function DashboardRAGEntrance() {
 
   useEffect(() => {
     if (phase === 'checking') setPhase(complete ? 'walking' : 'hidden');
-    else if (phase === 'hidden' && complete) setPhase('walking');
-  }, [complete, phase]);
+    else if (phase === 'hidden' && complete) setPhase(walkIn ? 'walking' : 'ready');
+  }, [complete, phase, walkIn]);
 
   const onArrive = useCallback(() => setPhase('handoff'), []);
 

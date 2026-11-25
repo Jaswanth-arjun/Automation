@@ -21,7 +21,7 @@ import { VisionAgent } from './lib/vision-agent.js';
 import { BlueprintEngine } from './lib/blueprint-engine.js';
 import { getAllAnswers, saveVaultAnswer, findSimilarAnswer, saveVaultCredential, findVaultCredential } from './lib/vault-manager.js';
 import { inferFromProfile, sensitiveCategory, applicationLogisticsAnswer, policyAnswer } from './lib/apply-intelligence.js';
-import { executeModel, getUsageSummary, modelConfig, providerStatus, probeModels, parseModelJson as parseAiJson, roleForTask, routeCooldownSnapshot, keyPoolSnapshot, isPaidOpenAiActive, AiBusyError } from './lib/model-router.js';
+import { executeModel, getUsageSummary, modelConfig, providerStatus, probeModels, parseModelJson as parseAiJson, roleForTask, routeCooldownSnapshot, keyPoolSnapshot, isPaidOpenAiActive, AiBusyError, schedulerSnapshot } from './lib/model-router.js';
 import { listAnswers, saveAnswer, updateAnswer, deleteAnswer, lookupAnswer, questionCategory, isSensitiveCategory } from './lib/answer-memory.js';
 import {
   TASK_STATUS, createTask, getTask, getTaskView, getActiveTask, getLatestTaskForJob, listTasks,
@@ -46,6 +46,7 @@ import { userApplyLock } from './lib/user-lock.js';
 import { aiMaintenanceMiddleware } from './lib/ai-failure.js';
 import { experienceFromResumeText, extrasFromResumeText, urlsInResumeText } from './lib/resume-sections.js';
 import { discoverCompanyEmployees, verifyEmailAddress } from './lib/email-discovery.js';
+import { assignMissingEmployeeSnos, companiesMatch, employeeMatchesCompany, mergeEmployeeRecords, normalizeCompany } from './lib/employee-directory.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import { registerBillingRoutes } from './lib/billing/routes.js';
 import { accessForUser, accessFromRequest, applyContactAccess, consumeFeature, guardFeature, refundFeature, resolveUser, upgradePayload } from './lib/billing/entitlements.js';
@@ -726,28 +727,52 @@ function readEmployeeFile(filePath) {
   }
 }
 function readEmployees() {
-  const main = readEmployeeFile(employeesFilePath);
-  if (main.length) return main;
-  const backup = readEmployeeFile(employeesBackupPath);
-  if (backup.length) {
-    fs.writeFileSync(employeesFilePath, JSON.stringify(backup, null, 2), 'utf8');
-    return backup;
+  let list = readEmployeeFile(employeesFilePath);
+  if (!list.length) {
+    const backup = readEmployeeFile(employeesBackupPath);
+    if (backup.length) list = backup;
   }
-  return main;
+  // One-time backfill: every stored employee gets a permanent serial number.
+  if (assignMissingEmployeeSnos(list)) writeEmployees(list);
+  else if (!fs.existsSync(employeesFilePath)) writeEmployees(list);
+  return list;
 }
 function writeEmployees(list) {
   const json = JSON.stringify(list, null, 2);
   fs.writeFileSync(employeesFilePath, json, 'utf8');
   fs.writeFileSync(employeesBackupPath, json, 'utf8');
 }
-function normalizeCompany(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Employee serial numbers, dedupe and company matching live in
+// lib/employee-directory.js so the same rules run locally and in production.
+
+// Per-company "we already asked the sources" marker, so Hunter credits are
+// spent once per company per window instead of on every page view.
+const discoveryMetaPath = path.join(__dirname, 'data', 'employee_discovery.json');
+const CONTACT_REFRESH_MS = 24 * 60 * 60 * 1000;
+
+function readDiscoveryMeta() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(discoveryMetaPath, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }
-function companiesMatch(a, b) {
-  const x = normalizeCompany(a);
-  const y = normalizeCompany(b);
-  if (!x || !y) return false;
-  return x === y || x.includes(y) || y.includes(x);
+
+function markCompanyDiscovered(company) {
+  const key = normalizeCompany(company);
+  if (!key) return;
+  const meta = readDiscoveryMeta();
+  meta[key] = new Date().toISOString();
+  try { fs.writeFileSync(discoveryMetaPath, JSON.stringify(meta, null, 2), 'utf8'); } catch {}
+}
+
+function companyNeedsDiscovery(company, list, force = false) {
+  if (force) return true;
+  if (!Array.isArray(list) || !list.length) return true;
+  const last = Date.parse(readDiscoveryMeta()[normalizeCompany(company)] || '') || 0;
+  return (Date.now() - last) > CONTACT_REFRESH_MS;
 }
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
@@ -905,27 +930,9 @@ async function pdfToLinks(pdf) {
 }
 
 function saveEmployeeRecords(records, source) {
-  const all = readEmployees();
-  const saved = [];
-  for (const rec of records) {
-    if (!rec.email || !rec.name) continue;
-    const duplicate = all.find(e => e.email === rec.email && companiesMatch(e.company, rec.company));
-    if (duplicate) continue;
-    const row = {
-      id: crypto.randomUUID(),
-      name: rec.name,
-      company: rec.company || '',
-      role: rec.role || '',
-      email: rec.email,
-      details: rec.details || '',
-      source,
-      createdAt: new Date().toISOString(),
-    };
-    all.unshift(row);
-    saved.push(row);
-  }
-  writeEmployees(all);
-  return saved;
+  const result = mergeEmployeeRecords(readEmployees(), records, source);
+  if (result.added || result.merged) writeEmployees(result.list);
+  return result.saved;
 }
 
 const LIST_FILE = /\.(pdf|xlsx|xls|csv)$/i;
@@ -997,17 +1004,23 @@ const uploadList = multer({
 app.get('/api/employees', async (req, res) => {
   const company = String(req.query.company || '').trim();
   const autoDiscover = String(req.query.autoDiscover || 'true').toLowerCase() !== 'false';
+  const forceRefresh = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());
   const all = readEmployees();
-  let list = company ? all.filter(e => companiesMatch(e.company, company)) : all;
+  let list = company ? all.filter((e) => employeeMatchesCompany(e, company)) : all;
 
-  // If a company is specified and no employees exist yet, automatically discover them
-  if (company && list.length === 0 && autoDiscover) {
+  // Shared company directory: whatever is already stored is served first (and
+  // for free, since it is our own data). The external sources — Hunter.io while
+  // credits last, plus the pattern/MX engine — are asked only when this company
+  // has no contacts yet or its last lookup is older than the refresh window, so
+  // credits are not burned on every page view. When those sources are exhausted
+  // the stored directory is still returned.
+  if (company && autoDiscover && companyNeedsDiscovery(company, list, forceRefresh)) {
     try {
-      console.log(`[Employee Discovery] No contacts found for "${company}". Auto-discovering from multi-source engine...`);
+      console.log(`[Employee Discovery] Refreshing outreach contacts for "${company}"...`);
       const result = await discoverCompanyEmployees({
         company,
         jobTitle: String(req.query.jobTitle || '').trim(),
-        existingEmployees: all,
+        existingEmployees: list,
       });
       if (result.contacts && result.contacts.length > 0) {
         saveEmployeeRecords(result.contacts.map((c) => ({
@@ -1017,19 +1030,62 @@ app.get('/api/employees', async (req, res) => {
           email: c.email,
           details: c.source || 'Auto-Discovered',
         })), 'auto-discovery');
-        list = readEmployees().filter(e => companiesMatch(e.company, company));
-        console.log(`[Employee Discovery] Discovered and saved ${list.length} contacts for "${company}".`);
+        list = readEmployees().filter((e) => employeeMatchesCompany(e, company));
+        console.log(`[Employee Discovery] ${list.length} contacts available for "${company}".`);
       }
     } catch (err) {
       console.warn(`[Employee Discovery] Auto-discovery failed for "${company}":`, err.message);
+    } finally {
+      markCompanyDiscovered(company);
     }
   }
 
-  // Free users unlock the first 5 contacts for this company; the rest are
-  // returned blurred. Locked emails never leave the server.
+  // Free users unlock the first N contacts for this company; the rest are
+  // returned blurred. Pro users get everyone. Locked emails never leave the
+  // server, and every user sees the same shared, deduped directory.
   const access = accessForUser(resolveUser(req));
   const gated = applyContactAccess(list, access);
   res.json(gated.contacts);
+});
+
+// Local (or any environment) -> this environment, without duplicates. The
+// employee sno is kept when it is free, so the same person never becomes a
+// second row after a sync.
+function employeeSyncAuthorized(req) {
+  const expected = String(process.env.EMPLOYEE_SYNC_TOKEN || '').trim();
+  if (expected) {
+    const given = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    return given === expected;
+  }
+  const ip = String(req.ip || req.socket?.remoteAddress || '');
+  return /^(::1|::ffff:127\.0\.0\.1|127\.0\.0\.1)$/.test(ip);
+}
+
+app.post('/api/employees/sync', (req, res) => {
+  if (!employeeSyncAuthorized(req)) {
+    return res.status(401).json({ error: 'Set EMPLOYEE_SYNC_TOKEN and send it as a Bearer token to sync contacts.' });
+  }
+  const incoming = Array.isArray(req.body?.employees) ? req.body.employees : [];
+  if (!incoming.length) return res.status(400).json({ error: 'employees[] is required.' });
+  const records = incoming.map((row) => ({
+    name: String(row?.name || '').trim(),
+    company: String(row?.company || '').trim(),
+    role: String(row?.role || '').trim(),
+    email: String(row?.email || '').trim().toLowerCase(),
+    details: String(row?.details || '').trim(),
+    sno: Number(row?.sno) || 0,
+  })).filter((row) => row.email.includes('@'));
+  const result = mergeEmployeeRecords(readEmployees(), records, 'sync');
+  if (result.added || result.merged) writeEmployees(result.list);
+  const total = result.list.length;
+  res.json({
+    received: incoming.length,
+    imported: result.added,
+    enriched: result.merged,
+    skipped: Math.max(0, incoming.length - result.added - result.merged),
+    total,
+    employees: result.saved,
+  });
 });
 
 app.post('/api/employees/discover', async (req, res) => {
@@ -1039,13 +1095,15 @@ app.post('/api/employees/discover', async (req, res) => {
   }
   try {
     const all = readEmployees();
+    const targetCompany = String(company || '').trim();
     const result = await discoverCompanyEmployees({
-      company: String(company || '').trim(),
+      company: targetCompany,
       jobUrl: String(jobUrl || '').trim(),
       jobHtml: String(jobHtml || '').trim(),
       jobTitle: String(jobTitle || '').trim(),
-      existingEmployees: all,
+      existingEmployees: targetCompany ? all.filter((e) => employeeMatchesCompany(e, targetCompany)) : [],
     });
+    if (targetCompany) markCompanyDiscovered(targetCompany);
     if (result.contacts && result.contacts.length > 0) {
       saveEmployeeRecords(result.contacts.map((c) => ({
         name: c.name,
@@ -1055,7 +1113,7 @@ app.post('/api/employees/discover', async (req, res) => {
         details: c.source || 'Auto-Discovered',
       })), 'auto-discovery');
     }
-    const updated = readEmployees().filter(e => companiesMatch(e.company, company || result.company));
+    const updated = readEmployees().filter((e) => employeeMatchesCompany(e, company || result.company));
     const access = accessForUser(resolveUser(req));
     const gated = applyContactAccess(updated, access);
     res.json({
@@ -2489,7 +2547,6 @@ function extractJobMetadata(html, rawUrl, plainText = '', domLogo = '') {
       if (rootDomain && rootDomain.includes('.')) logo = `https://logos.hunter.io/${rootDomain}`;
     }
 
-
     // 5) Location from text (default Hybrid only when nothing found).
     if (/hybrid/i.test(textBlob)) location = 'Hybrid';
     else if (/remote/i.test(textBlob)) location = 'Remote';
@@ -2961,7 +3018,6 @@ async function fetchJobTextUncached(url) {
   } catch (error) {
     fetchError = error;
   }
-
 
   try {
     const greenhouse = await greenhouseJob();
@@ -3647,8 +3703,9 @@ Job description: ${jobText.slice(0, 16000)}`;
         jobUrl: openUrl,
         jobHtml: fetched.posting?.description || '',
         jobTitle: finalTitle,
-        existingEmployees: readEmployees()
+        existingEmployees: readEmployees().filter((e) => employeeMatchesCompany(e, finalCompany))
       }).then((disc) => {
+        markCompanyDiscovered(finalCompany);
         if (disc?.contacts?.length) {
           saveEmployeeRecords(disc.contacts.map((c) => ({
             name: c.name,
@@ -6681,7 +6738,7 @@ app.get('/api/ai/usage', async (req, res) => {
 });
 
 app.get('/api/ai/models', (req, res) => {
-  res.json({ ok: true, config: modelConfig(), providers: providerStatus(), cooldowns: routeCooldownSnapshot(), keyPool: keyPoolSnapshot() });
+  res.json({ ok: true, config: modelConfig(), providers: providerStatus(), cooldowns: routeCooldownSnapshot(), keyPool: keyPoolSnapshot(), scheduler: schedulerSnapshot() });
 });
 
 app.post('/api/ai/models/probe', async (req, res) => {

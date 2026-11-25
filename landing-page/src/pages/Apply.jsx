@@ -538,7 +538,10 @@ export default function Apply() {
           .filter((emp) => !lockedNames.has(String(emp.name || '').trim().toLowerCase()));
         const merged = [...serverRows];
         cached.forEach((emp) => {
-          if (!merged.some((row) => row.email === emp.email && sameCompany(row.company))) merged.push(emp);
+          // One row per email id, even when the server matched the same person
+          // through a company alias — the candidate must never see duplicates.
+          const email = String(emp.email || '').toLowerCase();
+          if (!merged.some((row) => String(row.email || '').toLowerCase() === email)) merged.push(emp);
         });
         const list = merged;
         setEmployeeList(list.map((emp) => ({

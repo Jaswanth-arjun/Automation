@@ -43,7 +43,11 @@ function GlobalAssistant() {
   const { pathname } = useLocation();
   if (!isAuthenticated) return null;
   if (!pathname.startsWith('/dashboard')) return null;
-  return <DashboardRAGEntrance />;
+  // The left-to-right walk-in belongs to Home only. Every other dashboard page
+  // (jobs, apply, profile…) shows the seated assistant straight away, with no
+  // mascot running across the page — including after a refresh.
+  const isHome = pathname === '/dashboard' || pathname === '/dashboard/';
+  return <DashboardRAGEntrance walkIn={isHome} />;
 }
 
 function ProtectedRoute({ children }) {
