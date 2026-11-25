@@ -2335,17 +2335,33 @@ function isJobErrorPage(pageUrl, html) {
   return /server error|500 internal|page not found|access denied/i.test(title);
 }
 
+const NON_APPLY_ASSET_RE = /\.(png|jpe?g|gif|svg|webp|ico|bmp|css|js|mjs|woff2?|ttf|eot|otf|pdf|json|xml|map)(\?|#|$)|\/(?:api\/images|images|assets|static|favicon|org-theme-logo|_next|error|500)(\/|$)/i;
+
+function isValidApplyUrl(url, hostsRegex) {
+  try {
+    const parsed = new URL(url);
+    if (!/^https?:$/i.test(parsed.protocol)) return false;
+    if (!hostsRegex.test(parsed.hostname)) return false;
+    if (NON_APPLY_ASSET_RE.test(parsed.pathname + parsed.search)) return false;
+    if (/^\/api\//i.test(parsed.pathname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function extractApplyUrl(html, baseUrl) {
-  const hosts = /greenhouse\.io|lever\.co|myworkdayjobs\.com|ashbyhq\.com|smartrecruiters\.com|icims\.com|workable\.com|jobvite\.com|taleo\.net/;
-  const hrefs = [...String(html || '').matchAll(/href=["']([^"']+)["']/gi)].map((item) => item[1]);
-  const texts = [...String(html || '').matchAll(/https?:\/\/[^\s"'<>]+/gi)].map((item) => item[0]);
-  for (const href of [...hrefs, ...texts]) {
+  const hosts = /greenhouse\.io|lever\.co|myworkdayjobs\.com|ashbyhq\.com|smartrecruiters\.com|icims\.com|workable\.com|jobvite\.com|taleo\.net/i;
+  const baseIsAts = isValidApplyUrl(baseUrl, hosts);
+  const anchorHrefs = [...String(html || '').matchAll(/<a\b[^>]*\bhref=["']([^"']+)["']/gi)].map((item) => item[1]);
+  const texts = baseIsAts ? [] : [...String(html || '').matchAll(/https?:\/\/[^\s"'<>]+/gi)].map((item) => item[0]);
+  for (const href of [...anchorHrefs, ...texts]) {
     try {
       const next = new URL(href, baseUrl).toString();
-      if (hosts.test(next) && !/\/error(\/|$)|\/500(\/|$)/i.test(next)) return next;
+      if (isValidApplyUrl(next, hosts)) return next;
     } catch { }
   }
-  return '';
+  return baseIsAts ? String(baseUrl || '') : '';
 }
 
 function prettifyCompanySlug(slug) {
@@ -3566,7 +3582,8 @@ app.post('/api/external-job/tailor', async (req, res) => {
       ? { text: pastedPosting.description, posting: pastedPosting, openUrl: '', applyUrl: '', meta: {} }
       : await fetchJobText(jobUrl.toString());
     const jobText = fetched.text;
-    const openUrl = fetched.applyUrl || (jobUrl ? jobUrl.toString() : '');
+    const safeFetchedApplyUrl = fetched.applyUrl && !NON_APPLY_ASSET_RE.test(fetched.applyUrl) ? fetched.applyUrl : '';
+    const openUrl = safeFetchedApplyUrl || (jobUrl ? jobUrl.toString() : '');
     const supplied = String(resumeText || '').trim();
     const profileFallback = String(profileResumeText || '').trim();
     const sourceResume = resumeTextIsUsable(supplied) ? supplied : profileFallback;

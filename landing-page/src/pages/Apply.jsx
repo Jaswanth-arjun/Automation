@@ -1234,7 +1234,9 @@ ${firstName}`;
 
   // Handle Direct Apply — Extension-based auto-apply (opens new tab in same browser)
   const handleProceedDirectApply = async (isTrainMode = false) => {
-    const link = [job?.applyLink, job?.url, job?.sourceUrl].map((u) => String(u || '').trim()).find((u) => /^https?:\/\//i.test(u)) || '';
+    const link = [job?.applyLink, job?.url, job?.sourceUrl]
+      .map((u) => String(u || '').trim())
+      .find((u) => /^https?:\/\//i.test(u) && !/\.(png|jpe?g|gif|svg|webp|ico|css|js)(\?|#|$)|\/(?:api\/images|org-theme-logo|favicon)\b/i.test(u)) || '';
     if (!link) {
       alert('This job has no application URL. Add an Apply link on the job, then try Auto Apply again.');
       return;
@@ -1448,13 +1450,16 @@ ${firstName}`;
     setNeedsUser(null);
   };
 
-  // A company/social profile page is never the application, so it is only used
+  // A company/social profile page or image/asset URL is never the application, so it is only used
   // when nothing else was stored for this job.
   const PROFILE_PAGE_URL = /^https?:\/\/(?:[a-z0-9-]+\.)?(?:linkedin\.com\/(?:company|in|school|showcase)|facebook\.com|twitter\.com|x\.com|instagram\.com)\b/i;
+  const ASSET_URL_RE = /\.(png|jpe?g|gif|svg|webp|ico|css|js)(\?|#|$)|\/(?:api\/images|org-theme-logo|favicon)\b/i;
   const applyLink = () => {
     const candidates = [job?.applyLink, job?.url, job?.sourceUrl]
       .map((u) => String(u || '').trim()).filter((u) => /^https?:\/\//i.test(u));
-    return candidates.find((u) => !PROFILE_PAGE_URL.test(u)) || candidates[0] || '';
+    return candidates.find((u) => !PROFILE_PAGE_URL.test(u) && !ASSET_URL_RE.test(u))
+      || candidates.find((u) => !ASSET_URL_RE.test(u))
+      || candidates[0] || '';
   };
   const applyTargetHost = (() => {
     try { return new URL(applyLink()).hostname.replace(/^www\./, ''); } catch { return ''; }
@@ -3556,7 +3561,9 @@ ${firstName}`;
               {(autoApplyResult?.status === 'needs_attention' || autoTask?.status === 'waiting_for_user_input') && (
                 <button
                   onClick={() => {
-                    const link = job?.applyLink || job?.url || autoTask?.url || autoApplyResult?.applyUrl;
+                    const link = [job?.applyLink, job?.url, job?.sourceUrl, autoTask?.url, autoApplyResult?.applyUrl]
+                      .map((u) => String(u || '').trim())
+                      .find((u) => /^https?:\/\//i.test(u) && !/\.(png|jpe?g|gif|svg|webp|ico|css|js)(\?|#|$)|\/(?:api\/images|org-theme-logo|favicon)\b/i.test(u));
                     if (link) window.open(link, '_blank');
                   }}
                   className="btn-accent"
