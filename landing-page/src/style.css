@@ -2907,9 +2907,8 @@ nav.mobile-nav {
   padding: 14px 12px 8px;
   display: flex;
   flex-direction: column;
-  /* The global `nav { justify-content: space-between }` used to spread the
-     groups apart; keep them packed at the top. */
-  justify-content: flex-start;
+  justify-content: center;
+  justify-content: safe center;
   gap: 6px;
   scrollbar-width: thin;
   scrollbar-color: #dcded7 transparent;
