@@ -670,5 +670,86 @@
       "name": "nlr.jaswanth2004"
     },
     "postedAt": "2026-11-22T15:54:57.735Z"
+  },
+  {
+    "id": "b2854039-4224-4ddf-8ce3-41902f889b08",
+    "logo": "https://logos.hunter.io/ashbyhq.com",
+    "role": "Frontend Engineer - Internship",
+    "company": "Certa",
+    "filters": {
+      "experience": "Freshers",
+      "visibility": "Confidential",
+      "workMode": "Jaipur, India",
+      "type": "Internship",
+      "category": "Freshers",
+      "location": "Jaipur, India",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "AI",
+      "C",
+      "JavaScript",
+      "TypeScript",
+      "React",
+      "Operating Systems"
+    ],
+    "goodToHaveSkills": [
+      "API Integration",
+      "Debugging"
+    ],
+    "applyLink": "https://jobs.ashbyhq.com/certa/9f7caf0b-46ff-49ab-ae78-62deadec106e",
+    "description": "Certa is the AI-first third-party operating system. Enterprises, from the Fortune 500 to fast-growing startups, use our no-code platform to onboard, assess, and monitor their vendors, suppliers, and partners across risk, compliance, and ESG. We have processed over 10 million entities for 100,000+ users across 120+ countries, and are backed by Fin Capital, Vertex Ventures, and Point72 Ventures.\nThis is a paid 6-month internship with the opportunity to transition into a full-time role at the end based on performance. You'll build the interfaces enterprise users interact with every day, shipping real features to real customers from your first sprint, with real ownership and direct mentorship from senior engineers.\n\n## What You'll Do\n\n• Build UI components: Develop pixel-perfect, highly interactive UI components in React.\n• Turn designs into code: Translate Figma designs into production-ready code, and push back when the design doesn't make sense.\n• Own performance: Care about load times, re-renders, and bundle sizes.\n• Collaborate on APIs: Work with backend engineers to define APIs and data contracts.\n• Ship end-to-end with quality: Write component tests, maintain a high standard for code quality, and ship features end-to-end, not just the \"frontend part.\"\n• What You'll Need\n• JS/TS fundamentals: A solid grasp of JavaScript/TypeScript fundamentals: closures, async, and the event loop.\n• React: Working knowledge of React: hooks, state management, and component lifecycle.\n• Real project experience: You've shipped something real to the web (even if small) and gone beyond tutorials: thoughtful state management (what lives where and why), API integration with loading/error/auth handling, forms with client- and server-aware validation, multi-page routing (nested and protected routes, query params), or working with a component library or design system.\n• Debugging & performance: You can look at a broken UI and fix it without being told where to start, and you've used browser DevTools to spot and fix a slow render.\n• Quality & UX: You care about accessibility, responsiveness, and edge cases, not just happy paths, and you have opinions about UX that you're not afraid to voice.\n• AI-assisted building: You use AI tools (Copilot, v0, or similar) to build faster, and know when a suggestion is right and when it's subtly wrong.\n• Internship Details & What You Get\n• Duration: A paid 6-month internship, with the opportunity to transition to a full-time role at the end based on performance.\n• Compensation: Competitive compensation, benchmarked above market for fresher roles.\n• The work: Complex, high-stakes enterprise UIs - enterprise software done right - with your code shipping to real customers quickly.\n• Mentorship & impact: Direct mentorship from senior engineers who push you to grow fast, and real ownership from day one.\n\n## Location\n\nCerta is a remote-first company and we hire globally. We believe strongly in each team member working from the location that they choose. Should Certers wish to meet and work in person, they have 3 lively office locations they can travel to:\n• London\n• San Francisco\n• Jaipur\nThe perfect place for Certers to collaborate, co-work, and have face-to-face meetings.\nWhy Certa\n• Category leadership. Certa was named a Leader in the inaugural 2026 Gartner Magic Quadrant for Third-Party Risk Management Tools - recognition that we're defining the category, not following it.\n• Industry recognition. We've been honored across the analyst and awards landscape, including Top Tech and Customer Value distinctions in The Hackett Group's 2026 Risk Management SolutionMap, the ProcureTech100 (Advanced AI and Risk Management categories), and Best Overall eProcurement Software in the FinTech Breakthrough Awards.\n• A top place to work. Certa was named one of Forbes' Best Startup Employers in the US. We're a fast-growing company where you'll wear many hats, ship quickly, and shape decisions that matter.\n• Real scale with strong backing. We've processed over 10 million entities for 100,000+ users across 120+ countries. We're well-funded by leading investors including Fin Capital, Vertex Ventures, and Point72 Ventures, on the back of an oversubscribed Series B, headed towards Series C.\nWe're excited to meet you!",
+    "jobDetails": [],
+    "sourceUrl": "https://jobs.ashbyhq.com/certa/9f7caf0b-46ff-49ab-ae78-62deadec106e",
+    "postedBy": {
+      "id": "usr_0747de3d0fb30f2d",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "nlr.jaswanth2004"
+    },
+    "postedAt": "2026-11-25T12:10:51.454Z"
+  },
+  {
+    "id": "352860f7-d521-453a-a095-e4989750b14a",
+    "logo": "https://lever-client-logos.s3.us-west-2.amazonaws.com/3d73b5a9-c725-424d-962c-495d3d85c72f-1763840396961.png",
+    "role": "SDE I",
+    "company": "Hevo Data",
+    "filters": {
+      "experience": "Freshers",
+      "visibility": "Confidential",
+      "workMode": "Bengaluru, India",
+      "type": "Internship",
+      "category": "Freshers",
+      "location": "Bengaluru, India",
+      "experienceLabel": "0–1 years",
+      "experienceMin": 0,
+      "experienceMax": 1
+    },
+    "mustHaveSkills": [
+      "AI",
+      "Java",
+      "TypeScript",
+      "Python",
+      "REST",
+      "Object-Oriented Programming (OOP)"
+    ],
+    "goodToHaveSkills": [
+      "Data Structures and Algorithms (DSA)",
+      "Software Development",
+      "Testing",
+      "Problem-Solving",
+      "Multithreading / Concurrency"
+    ],
+    "applyLink": "https://jobs.lever.co/hevodata",
+    "description": "## Sde I\n\nBangalore, India\nEngineering – Backend /\nFull time /\nOn-site\nApply for this job\nWhat you’ll own as SDE I at Hevo:\n. Implement SaaS connectors for assigned applications, learning application specific nuances like basic auth and data extraction.\n. Assist in building simple REST API components, focusing on clean implementation and testing.\n. Debug and optimize code for data pipeline efficiency under mentorship.\n. Contribute to feature breakdown, coding, and documentation for smaller tasks.\n. Apply logical thinking to solve integration issues and improve component quality.\nWhat you’ll bring to the table:\n. Basic object-oriented programming skills and familiarity with design principles.\n. Exposure to data pipelines or APIs; eagerness to learn concurrency and performance basics.\n. Foundational knowledge of REST APIs (e.g., making calls, handling JSON) – no deep expertise needed.\n. Proficiency in Java/TypeScript/Python, good problem-solving with data structures and algorithms.\n. Strong analytical and logical thinking for real-world challenges.\nCandidate Persona:\n. 0-1 years in software development, ideally with internships in integrations or data tools.\n. B Tech in Computer Science or equivalent from a reputed college.\nWe may use artificial intelligence (AI) tools to support parts of the hiring process, such as reviewing applications, analyzing resumes, or assessing responses and identifying potential inconsistencies or verification signals in application materials based on available information. These tools assist our recruitment team but do not replace human judgment. Final hiring decisions are ultimately made by humans. If you would like more information about how your data is processed, please contact us.\nApply for this job\nHevo Data Home Page\nJobs powered by",
+    "jobDetails": [],
+    "sourceUrl": "https://jobs.lever.co/hevodata/6cbbe304-e065-4711-bf3e-756795d2bc2a",
+    "postedBy": {
+      "id": "usr_0747de3d0fb30f2d",
+      "email": "nlr.jaswanth2004@gmail.com",
+      "name": "nlr.jaswanth2004"
+    },
+    "postedAt": "2026-11-25T13:29:26.605Z"
   }
 ]
