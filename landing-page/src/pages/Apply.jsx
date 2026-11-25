@@ -307,7 +307,7 @@ export default function Apply() {
   const [liPerRole, setLiPerRole] = useState(10);
   // Stage 1 target: one company-wide referral-message count, independent of liPerRole.
   const [liReferralTarget, setLiReferralTarget] = useState(5);
-  const [liUseAI] = useState(true);
+  const [liUseAI, setLiUseAI] = useState(true);
   const [liWatchLive, setLiWatchLive] = useState(false);
   const [liNote, setLiNote] = useState('');
   const [liStarting, setLiStarting] = useState(false);
@@ -417,6 +417,7 @@ export default function Apply() {
     if (typeof config.perRole === 'number' && config.perRole > 0) setLiPerRole(config.perRole);
     if (typeof config.referralTarget === 'number' && config.referralTarget > 0) setLiReferralTarget(config.referralTarget);
     if (typeof config.useAINotes === 'boolean') setLiUseAI(config.useAINotes);
+    if (typeof config.headless === 'boolean') setLiWatchLive(config.headless === false);
     if (typeof config.connectionNote === 'string') setLiNote(config.connectionNote);
   }, [liCampaign?.id]);
 
