@@ -2923,6 +2923,7 @@ ${firstName}`;
                     campaignId={liCampaign?.id || ''}
                     company={job?.company || liCompany}
                     filterByCompany
+                    watchLive={liWatchLive}
                     onChange={(next) => {
                       setLiCampaign(next);
                       const live = next && ['running', 'queued', 'waiting'].includes(next.status);

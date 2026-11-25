@@ -100,6 +100,7 @@ export default function CampaignStatus({
   campaignId = '',
   company = '',
   filterByCompany = false,
+  watchLive,
 }) {
   const [campaign, setCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -258,7 +259,9 @@ export default function CampaignStatus({
         resume: api.resumeCampaign,
         stop: api.stopCampaign,
       }[action];
-      const res = await handler(campaign.id);
+      const res = action === 'resume' && typeof watchLive === 'boolean'
+        ? await handler(campaign.id, { headless: !watchLive })
+        : await handler(campaign.id);
       if (res?.campaign) setCampaign(res.campaign);
     } catch (err) {
       setError(err.message || `Could not ${action} the campaign.`);

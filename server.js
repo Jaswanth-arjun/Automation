@@ -5200,7 +5200,11 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
   if (['completed'].includes(campaign.status)) {
     return res.status(400).json({ error: 'This campaign already completed. Start a new one instead.' });
   }
+  const hasHeadless = typeof req.body?.headless === 'boolean';
   if (activeCampaignEngine && activeCampaignEngine.isRunning && activeCampaignEngine.campaignId === campaign.id) {
+    if (hasHeadless && activeCampaignEngine.config) {
+      activeCampaignEngine.config.headless = req.body.headless;
+    }
     await activeCampaignEngine.resume();
   } else {
     if (activeBotInstance && activeBotInstance.isRunning) {
@@ -5212,6 +5216,7 @@ app.post('/api/campaigns/:id/resume', async (req, res) => {
       error: '',
       errorStage: '',
       lastActivity: 'Resuming from saved progress…',
+      ...(hasHeadless ? { config: { ...(campaign.config || {}), headless: req.body.headless } } : {}),
     });
     activeCampaignEngine = attachCampaignEngine(new ReferralCampaignEngine(resumed));
     broadcastCampaign(resumed);

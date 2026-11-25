@@ -111,7 +111,7 @@ export const api = {
   getCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}`),
   startCampaign: (payload) => apiFetch(LINKEDIN_API, '/api/campaigns', { method: 'POST', body: JSON.stringify(payload) }),
   pauseCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/pause`, { method: 'POST' }),
-  resumeCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+  resumeCampaign: (id, payload = {}) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/resume`, { method: 'POST', body: JSON.stringify(payload) }),
   stopCampaign: (id) => apiFetch(LINKEDIN_API, `/api/campaigns/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
 
   // Per-user LinkedIn account connect
