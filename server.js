@@ -743,6 +743,24 @@ function writeEmployees(list) {
   fs.writeFileSync(employeesBackupPath, json, 'utf8');
 }
 
+// A fresh container — or a host disk mounted over data/ — boots with an empty
+// directory. The image keeps a seed copy outside data/ (see Dockerfile), so
+// production starts with the shared contacts instead of zero rows.
+const employeeSeedPath = process.env.EMPLOYEE_SEED_FILE || path.join(__dirname, 'seed', 'employees.json');
+function seedEmployeeDirectory() {
+  try {
+    if (readEmployeeFile(employeesFilePath).length) return;
+    const seeded = readEmployeeFile(employeeSeedPath);
+    if (!seeded.length) return;
+    assignMissingEmployeeSnos(seeded);
+    writeEmployees(seeded);
+    console.log(`[Employees] Seeded ${seeded.length} contacts from ${employeeSeedPath}`);
+  } catch (err) {
+    console.warn('Employee seed skipped:', err?.message || err);
+  }
+}
+seedEmployeeDirectory();
+
 // Employee serial numbers, dedupe and company matching live in
 // lib/employee-directory.js so the same rules run locally and in production.
 

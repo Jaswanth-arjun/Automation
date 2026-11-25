@@ -27,6 +27,10 @@ COPY . .
 # Create persistent data directories
 RUN mkdir -p /app/data /app/.chrome-data
 
+# Keep a seed copy of the employee directory outside data/ so a mounted disk
+# cannot leave production with an empty contact list.
+RUN mkdir -p /app/seed && if [ -f data/employees.json ]; then cp data/employees.json /app/seed/employees.json; fi
+
 EXPOSE 3000
 
 CMD ["node", "server.js"]

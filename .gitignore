@@ -30,8 +30,10 @@ temp_scripts/
 HR-Email/backend/__pycache__/
 HR-Email/backend/credentials/
 HR-Email/backend/*.db
-data/employees*.json
 data/master-resume.json
+# The shared employee directory ships with the app so a fresh deploy starts
+# with every contact; only the runtime backup copy stays local.
+data/employees.backup.json
 landing-page/build-*.txt
 landing-page/hamster-loader.mp4
 HAMZO*.html
