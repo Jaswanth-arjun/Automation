@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Upload, FileText, Trash2, CheckCircle, Clock, Plus, X, Eye, LayoutTemplate } from 'lucide-react';
-import { resumeStore, profileStore, api } from '../lib/api';
+import { resumeStore, profileStore, coverLetterStore, api } from '../lib/api';
+import { downloadCoverLetterPdf, openCoverLetterPdf, coverLetterFileName } from '../lib/coverLetterPdf';
 import { RESUME_TEMPLATES, getSelectedTemplateId, setSelectedTemplateId } from '../lib/resumeTemplates';
 import JobAnalyzerModal from '../components/JobAnalyzerModal';
 import { extractProfilePdf, resumeUrlsFromText } from '../components/JobAnalyzerModal.helpers';
@@ -142,6 +143,7 @@ function TemplatePreview({ variant }) {
 
 export default function ResumeManager() {
   const [resumes, setResumes] = useState(() => resumeStore.getAll());
+  const [coverLetters, setCoverLetters] = useState(() => coverLetterStore.getAll());
   const fileRef = useRef(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [jobLink, setJobLink] = useState('');
@@ -163,7 +165,14 @@ export default function ResumeManager() {
     };
     window.addEventListener('message', onMessage);
     window.postMessage({ source: 'hamzooh-app', type: 'HAMZOOH_GET_ANSWERS' }, '*');
-    return () => window.removeEventListener('message', onMessage);
+    const syncCoverLetters = () => setCoverLetters(coverLetterStore.getAll());
+    window.addEventListener('cover_letter_updated', syncCoverLetters);
+    window.addEventListener('storage', syncCoverLetters);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('cover_letter_updated', syncCoverLetters);
+      window.removeEventListener('storage', syncCoverLetters);
+    };
   }, []);
 
   const pushProfileToExtension = () => {
@@ -574,6 +583,57 @@ export default function ResumeManager() {
                 </div>
               </article>
             ))}
+          </div>
+        )}
+      </section>
+
+      {/* Generated cover letter versions */}
+      <section className="profile-section" style={{ marginTop: 20 }}>
+        <h2>Cover letter versions</h2>
+        {coverLetters.length === 0 ? (
+          <p style={{ fontSize: 13.5, color: '#666', margin: 0 }}>
+            Generated cover letters appear here after you create one for a job.
+          </p>
+        ) : (
+          <div className="resume-list">
+            {coverLetters.map((cl) => {
+              const fileName = coverLetterFileName(cl, cl.companyName);
+              const savedDate = cl.updatedAt || cl.savedAt || cl.date;
+              return (
+                <article
+                  key={cl.jobId}
+                  className="resume-card"
+                  onClick={() => openCoverLetterPdf(cl, { company: cl.companyName, jobTitle: cl.jobTitle }).catch((e) => setError(e.message || 'Could not open cover letter PDF.'))}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="resume-card-head">
+                    <div className="resume-card-icon"><FileText size={20} /></div>
+                    <strong className="resume-card-name">{fileName}</strong>
+                  </div>
+                  <div className="resume-card-meta">
+                    <span>{cl.jobTitle || '1 page PDF'}</span>
+                    {savedDate && <span><Clock size={12} /> {new Date(savedDate).toLocaleDateString()}</span>}
+                  </div>
+                  <div className="resume-card-actions" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      className="btn-ghost sm"
+                      onClick={() => downloadCoverLetterPdf(cl, { company: cl.companyName, jobTitle: cl.jobTitle }).catch((e) => setError(e.message || 'Could not download cover letter PDF.'))}
+                    >
+                      Download PDF
+                    </button>
+                    <button
+                      className="btn-ghost danger sm"
+                      onClick={() => {
+                        coverLetterStore.clear(cl.jobId);
+                        setCoverLetters(coverLetterStore.getAll());
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

@@ -803,10 +803,38 @@ export const coverLetterStore = {
       return null;
     }
   },
+  getAll() {
+    const prefix = 'hamzooh_cover_letter_';
+    const list = [];
+    try {
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(prefix)) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          list.push({
+            jobId: key.slice(prefix.length),
+            ...parsed,
+          });
+        }
+      }
+      list.sort((a, b) => Date.parse(b.updatedAt || b.savedAt || 0) - Date.parse(a.updatedAt || a.savedAt || 0));
+    } catch {}
+    return list;
+  },
   save(jobId, coverLetter) {
     if (!jobId || !coverLetter) return;
     try {
-      localStorage.setItem(`hamzooh_cover_letter_${jobId}`, JSON.stringify(coverLetter));
+      const now = new Date().toISOString();
+      const payload = {
+        ...coverLetter,
+        jobId,
+        savedAt: coverLetter.savedAt || now,
+        updatedAt: now,
+      };
+      localStorage.setItem(`hamzooh_cover_letter_${jobId}`, JSON.stringify(payload));
       window.dispatchEvent(new Event('cover_letter_updated'));
     } catch {}
   },
