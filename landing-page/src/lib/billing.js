@@ -97,7 +97,7 @@ export async function runCheckout({ cycle, user, onProgress }) {
       key: order.keyId,
       amount: order.amount,
       currency: order.currency || 'INR',
-      name: 'HAMZO',
+      name: 'HAMZOOH',
       description: cycle === 'yearly' ? 'Pro — yearly' : 'Pro — monthly',
       prefill: {
         name: user?.displayName || '',
