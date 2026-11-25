@@ -50,7 +50,7 @@ function GlobalAssistant() {
   return <DashboardRAGEntrance walkIn={isHome} />;
 }
 
-const CLEANUP_FLAG = 'hamzooh_cleanup_20261125_v2_done';
+const CLEANUP_FLAG = 'hamzooh_cleanup_20261125_v3_done';
 
 function clearDashboardLocalData() {
   localStorage.removeItem('hamzooh_admin_jobs');
