@@ -22,6 +22,7 @@ import { keywordAudit, scoreValue, scoreLabel, mapProfileForBackend, extractProf
 import MatchScore from '../components/MatchScore';
 import AutoApplyTaskPanel, { AutoApplyActivityFeed } from '../components/AutoApplyTaskPanel';
 import { AUTOMATION_PHASES } from '../lib/autoApplyNarrative';
+import { buildReferralEmail, referralSubject, referralResumeFileName } from '../lib/referralEmail';
 
 const Linkedin = ({ size = 16, style = {} }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
@@ -46,6 +47,7 @@ function downloadPdf(base64, filename) {
   link.download = filename?.toLowerCase().endsWith('.pdf') ? filename : `${filename || 'resume'}.pdf`;
   link.click();
 }
+
 
 /**
  * Deterministic quality check of a tailored resume. These are the things a
@@ -299,10 +301,17 @@ export default function Apply() {
   const [liConnectError, setLiConnectError] = useState('');
 
   // Campaign Launcher state (embedded in Tab 2 when connected)
-  const DEFAULT_ROLES = ['Recruiter', 'Talent Acquisition', 'HR', 'Hiring Manager', 'Engineering Manager'];
+  const BASE_DEFAULT_ROLES = ['Hiring', 'Referral', 'Recruiter', 'Talent Acquisition'];
+  const buildDefaultRoles = (roleName) => {
+    const clean = String(roleName || '').trim();
+    if (clean && !BASE_DEFAULT_ROLES.some((r) => r.toLowerCase() === clean.toLowerCase())) {
+      return [...BASE_DEFAULT_ROLES, clean];
+    }
+    return [...BASE_DEFAULT_ROLES];
+  };
   const [liCompany, setLiCompany] = useState(job?.company || '');
   const [liJobRole, setLiJobRole] = useState(job?.title || '');
-  const [liRoles, setLiRoles] = useState(DEFAULT_ROLES);
+  const [liRoles, setLiRoles] = useState(() => buildDefaultRoles(job?.title));
   const [liNewRole, setLiNewRole] = useState('');
   const [liPerRole, setLiPerRole] = useState(10);
   // Stage 1 target: one company-wide referral-message count, independent of liPerRole.
@@ -391,17 +400,21 @@ export default function Apply() {
     setLiConnectError('');
   };
 
-  // Auto-set company when job changes
+  // Auto-set company, job role, and default role filters (with job title as 5th) when job loads/changes
   useEffect(() => {
     if (job?.company) setLiCompany(job.company);
-    if (job?.title) setLiJobRole(job.title);
-  }, [job?.company, job?.title]);
+    if (job?.title) {
+      setLiJobRole(job.title);
+      if (!liCampaign) {
+        setLiRoles(buildDefaultRoles(job.title));
+      }
+    }
+  }, [job?.company, job?.title, liCampaign?.id]);
 
   // Reuse whatever was configured last (either here or in LinkedIn Automation)
   useEffect(() => {
     const prefs = campaignPrefsStore.get();
     if (!prefs) return;
-    if (Array.isArray(prefs.roles) && prefs.roles.length) setLiRoles(prefs.roles);
     if (typeof prefs.perRole === 'number' && prefs.perRole > 0) setLiPerRole(prefs.perRole);
     if (typeof prefs.referralTarget === 'number' && prefs.referralTarget > 0) setLiReferralTarget(prefs.referralTarget);
     if (typeof prefs.useAI === 'boolean') setLiUseAI(prefs.useAI);
@@ -608,31 +621,28 @@ export default function Apply() {
   const lockedContacts = employeeList.filter(e => e.locked);
   const unlockViaPro = () => navigate('/dashboard/subscription?plan=monthly');
 
-  // Referral Email Template Draft (matching reference image format)
-  const generateInitialDraft = () => {
-    const firstName = (profile.fullName || 'Jaswanth').split(' ')[0];
-    const currentTitle = profile.experience?.[0]?.title || 'Java Full Stack Developer Intern';
-    const currentCompany = profile.experience?.[0]?.company || 'Model Career Centre - APSSDC';
-    const previousTitle = profile.experience?.[1]?.title || 'Java Web Developer';
-    const previousCompany = profile.experience?.[1]?.company || 'TaPTaP by Blackbucks';
-    const skillsText = (profile.skills || ['API integration', 'Agile delivery', 'Node.js', 'SQL']).slice(0, 3).join(', ');
+  // The referral mail is built from this candidate's profile and this job.
+  // The tailored PDF for this job is preferred, then a resume saved for this
+  // job, then the active resume — the same order the send handler uses.
+  const hasTailoredResumeForJob = Boolean(tailoredPdfBase64);
+  // Exactly the PDF the send handler will attach: just-tailored first, then the
+  // resume saved for this job, then the active resume, then the uploaded file.
+  const resumeBase64ForEmail = tailoredPdfBase64
+    || jobResume?.pdfBase64 || jobResume?.base64
+    || activeResume?.pdfBase64 || activeResume?.base64
+    || profile?.resume?.dataUrl
+    || '';
+  const hasAttachedResume = Boolean(resumeBase64ForEmail);
+  const resumeNameForEmail = referralResumeFileName(profile, job);
+  const generateInitialDraft = (style = 'detailed') => buildReferralEmail({
+    profile,
+    job,
+    hasResume: hasAttachedResume,
+    resumeName: resumeNameForEmail,
+    style,
+  });
 
-    return `Hi {{outreachEmployeeName}},
-
-I'm ${firstName}, currently a ${currentTitle} at ${currentCompany}. My work centers on ${skillsText}, and I've also worked as a ${previousTitle} at ${previousCompany}.
-My earlier Cloud Engineer role at Model Career Centre - APSSDC and Full Stack Engineer role at YHills gave me experience across application and cloud work, from development through deployment. You can learn more about my background through my LinkedIn profile.
-
-I'm applying for the ${job?.title || 'position'} role at ${job?.company || 'your company'}. If you're comfortable referring me for this position, I'd sincerely appreciate your help with my application.
-
-Here is the link to the job: ${window.location.origin}/dashboard/jobs/${job?.id || ''}
-
-Thanks,
-${firstName}`;
-  };
-
-  const [emailSubject, setEmailSubject] = useState(() =>
-    `Application Referral Request: ${job?.title || 'Role'} at ${job?.company || 'Company'}`
-  );
+  const [emailSubject, setEmailSubject] = useState(() => referralSubject(job));
   const [emailBody, setEmailBody] = useState(() => generateInitialDraft());
   const toneIndexRef = useRef(0); // avoids a stale index when tone clicks are rapid
   const [isRewriting, setIsRewriting] = useState(false);
@@ -640,33 +650,24 @@ ${firstName}`;
   // Sync draft whenever active job changes
   useEffect(() => {
     if (job) {
-      setEmailSubject(`Application Referral Request: ${job.title} at ${job.company}`);
-      setEmailBody(generateInitialDraft());
+      setEmailSubject(referralSubject(job));
+      setEmailBody(buildReferralEmail({
+        profile,
+        job,
+        hasResume: hasAttachedResume,
+        resumeName: resumeNameForEmail,
+      }));
     }
-  }, [job?.id, job?.title, job?.company]);
+  }, [job?.id, job?.title, job?.company, hasAttachedResume, hasTailoredResumeForJob]);
 
-  // Rewrite Message handler (AI tone switcher)
+  // Rewrite Message handler (tone switcher)
   const handleRewriteMessage = () => {
     setIsRewriting(true);
     setTimeout(() => {
-      const firstName = (profile.fullName || 'Jaswanth').split(' ')[0];
-      const jobTitle = job?.title || 'Engineering Role';
-      const companyName = job?.company || 'your organization';
-
-      const TONES = [
-        // Tone 0: Professional & Polite (Reference Image style)
-        `Hi {{outreachEmployeeName}},\n\nI'm ${firstName}, currently a ${profile.experience?.[0]?.title || 'Full Stack Developer'}. I noticed the open ${jobTitle} role at ${companyName} and would be thrilled to contribute to your engineering team.\n\nWith my experience in ${(profile.skills || ['full stack development']).slice(0, 4).join(', ')}, I feel confident in my ability to add immediate value. You can check my LinkedIn profile for detailed portfolio projects.\n\nIf you are comfortable providing an employee referral for this opening, it would mean a lot to me!\n\nJob URL: ${window.location.origin}/dashboard/jobs/${job?.id || ''}\n\nWarm regards,\n${firstName}`,
-
-        // Tone 1: Concise & Impactful
-        `Hi {{outreachEmployeeName}},\n\nI hope you're having a great week! I'm reaching out because I'm applying for the ${jobTitle} position at ${companyName}.\n\nI have strong hands-on experience in ${(profile.skills || ['software development']).slice(0, 3).join(', ')} and would greatly appreciate an internal referral if you're open to it.\n\nMy profile and resume are attached for your quick reference.\n\nThanks a lot,\n${firstName}`,
-
-        // Tone 2: Default Detailed
-        generateInitialDraft()
-      ];
-
-      const nextIndex = (toneIndexRef.current + 1) % TONES.length;
+      const STYLES = ['detailed', 'concise'];
+      const nextIndex = (toneIndexRef.current + 1) % STYLES.length;
       toneIndexRef.current = nextIndex;
-      setEmailBody(TONES[nextIndex]);
+      setEmailBody(generateInitialDraft(STYLES[nextIndex]));
       setIsRewriting(false);
     }, 450);
   };
@@ -689,8 +690,8 @@ ${firstName}`;
         senderEmail: connectedGmailEmail || profile.email || '',
         jobTitle: job?.title,
         company: job?.company,
-        resumeBase64: tailoredPdfBase64 || jobResume?.pdfBase64 || activeResume?.pdfBase64 || '',
-        resumeFileName: tailoredFileName || jobResume?.name || activeResume?.name || `${(profile.fullName || 'Candidate').split(' ')[0]}_Resume.pdf`,
+        resumeBase64: resumeBase64ForEmail,
+        resumeFileName: resumeNameForEmail,
       };
 
       const res = await api.sendReferralEmail(payload);
@@ -715,7 +716,7 @@ ${firstName}`;
         status: 'Outreach',
         stage: 'referral',
         ...(hasMatchScore ? { matchScore: matchResult.score } : {}),
-        resumeUsed: tailoredFileName || jobResume?.name || activeResume?.name || `${(profile.fullName || 'User').split(' ')[0]}-resume.pdf`,
+        resumeUsed: resumeNameForEmail,
         referralSentTo: (sentNames.length ? sentNames : selectedEmployees.map(e => e.name)).join(', ')
       });
       applyProgressStore.mark(jobId || job?.id, 'referral', {
@@ -810,7 +811,7 @@ ${firstName}`;
       const chosen = result.formats?.find(f => f.id === result.recommendedId) || result.formats?.[0];
       if (!chosen?.pdfBase64) throw new Error('The tailoring engine did not return a PDF for this job.');
 
-      const name = `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-tailored-resume.pdf`;
+      const name = referralResumeFileName(profile, job);
       setTailorResult(result);
       setFormatId(chosen.id || 'recommended');
       setTailoredPdfBase64(chosen.pdfBase64);
@@ -900,7 +901,7 @@ ${firstName}`;
     const chosen = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
     if (!chosen) return;
     if (!chosen.pdfBase64 && !tailoredPdfBase64) return;
-    const name = tailoredFileName || 'tailored-resume.pdf';
+    const name = resumeNameForEmail;
     if (chosen.editedHtml) {
       try {
         const rendered = await api.renderEditedResumePdf(chosen.editedHtml);
@@ -1296,7 +1297,7 @@ ${firstName}`;
     const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
     let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || '';
     if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
-    let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
+    let fileNameToAttach = resumeNameForEmail;
 
     // If no PDF exists yet, generate one on-the-fly before starting auto-apply
     if (!pdfToAttach) {
@@ -1311,7 +1312,7 @@ ${firstName}`;
         const chosen = result.formats?.[0];
         if (chosen?.pdfBase64) {
           pdfToAttach = chosen.pdfBase64;
-          fileNameToAttach = `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-tailored-resume.pdf`;
+          fileNameToAttach = resumeNameForEmail;
           resumeStore.add({
             name: fileNameToAttach,
             size: '1 page PDF',
@@ -1530,8 +1531,7 @@ ${firstName}`;
     const jobPdf = jobResume?.pdfBase64 || jobResume?.base64 || '';
     let pdfToAttach = tailoredPdfBase64 || jobPdf || activeResume?.pdfBase64 || activeResume?.base64 || profile?.resume?.dataUrl || '';
     if (typeof pdfToAttach === 'string' && pdfToAttach.includes(',')) pdfToAttach = pdfToAttach.split(',')[1];
-    let fileNameToAttach = tailoredFileName || jobResume?.name || activeResume?.name
-      || `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-resume.pdf`;
+    let fileNameToAttach = resumeNameForEmail;
 
     if (!pdfToAttach) {
       const active = activeResume || resumes[0];
@@ -1544,7 +1544,7 @@ ${firstName}`;
       const chosen = result.formats?.[0];
       if (!chosen?.pdfBase64) throw new Error('No resume PDF could be prepared for this application.');
       pdfToAttach = chosen.pdfBase64;
-      fileNameToAttach = `${(profile?.fullName || 'Candidate').split(' ')[0]}-${(job?.company || 'job').replace(/\s+/g, '-')}-tailored-resume.pdf`;
+      fileNameToAttach = resumeNameForEmail;
       resumeStore.add({
         name: fileNameToAttach,
         size: '1 page PDF',
@@ -1821,8 +1821,13 @@ ${firstName}`;
 
   const userEmail = connectedGmailEmail || profile.email || localStorage.getItem('hamzooh_gmail_email') || localStorage.getItem('mailmind_gmail_email') || 'Connected Google Account';
   // Banner + sends: just-tailored (this session) > resume saved for this job > global active.
-  const effectiveResume = (tailoredPdfBase64 && { name: tailoredFileName, pdfBase64: tailoredPdfBase64 }) || jobResume || activeResume;
-  const resumeDisplayName = effectiveResume?.name || `${(profile.fullName || 'Jaswanth').split(' ')[0]}-resume.pdf`;
+  const effectiveResume = (tailoredPdfBase64 && { name: tailoredFileName, pdfBase64: tailoredPdfBase64 })
+    || jobResume
+    || activeResume
+    || (profile?.resume?.dataUrl
+      ? { name: resumeNameForEmail, pdfBase64: profile.resume.dataUrl }
+      : null);
+  const resumeDisplayName = effectiveResume?.name || resumeNameForEmail;
 
   // ── Tailoring report derived values ──
   const chosenFormat = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
@@ -2097,7 +2102,9 @@ ${firstName}`;
                   <FileText size={20} />
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: '700', color: '#064e3b', lineHeight: '1.4' }}>
-                  Your latest profile resume will be automatically attached as a PDF to all outgoing emails.
+                  {effectiveResume
+                    ? `${tailoredPdfBase64 || jobResume ? 'Your tailored resume' : 'Your saved resume'} (${resumeDisplayName}) will be attached as a PDF to every outreach email.`
+                    : 'No resume found yet. Upload or tailor a resume so every outreach email carries it.'}
                 </div>
               </div>
 

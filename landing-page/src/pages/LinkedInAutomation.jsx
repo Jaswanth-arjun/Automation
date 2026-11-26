@@ -77,7 +77,15 @@ const STATUS_LABEL = {
   declined: 'Declined',
 };
 
-const DEFAULT_ROLES = ['Recruiter', 'Talent Acquisition', 'HR', 'Hiring Manager', 'Engineering Manager'];
+const BASE_DEFAULT_ROLES = ['Hiring', 'Referral', 'Recruiter', 'Talent Acquisition'];
+const LEGACY_DEFAULT_ROLES_KEY = 'recruiter|talent acquisition|hr|hiring manager|engineering manager';
+function buildDefaultRoles(roleName) {
+  const clean = String(roleName || '').trim();
+  if (clean && !BASE_DEFAULT_ROLES.some((r) => r.toLowerCase() === clean.toLowerCase())) {
+    return [...BASE_DEFAULT_ROLES, clean];
+  }
+  return [...BASE_DEFAULT_ROLES];
+}
 
 const LOG_LEVELS = [
   { key: 'all', label: 'All' },
@@ -212,7 +220,7 @@ export default function LinkedInAutomation() {
   // Campaign form
   const [company, setCompany] = useState(() => searchParams.get('company') || '');
   const [jobRole, setJobRole] = useState(() => searchParams.get('role') || '');
-  const [roles, setRoles] = useState(DEFAULT_ROLES);
+  const [roles, setRoles] = useState(() => buildDefaultRoles(''));
   const [newRole, setNewRole] = useState('');
   const [perRole, setPerRole] = useState(10);
   // Stage 1 target: one company-wide referral-message count, independent of perRole.
@@ -310,7 +318,12 @@ export default function LinkedInAutomation() {
     if (!prefs) return;
     if (prefs.company) setCompany(prefs.company);
     if (prefs.role) setJobRole(prefs.role);
-    if (Array.isArray(prefs.roles) && prefs.roles.length) setRoles(prefs.roles);
+    const savedRolesKey = Array.isArray(prefs.roles) ? prefs.roles.map((r) => String(r || '').trim().toLowerCase()).join('|') : '';
+    if (Array.isArray(prefs.roles) && prefs.roles.length && savedRolesKey !== LEGACY_DEFAULT_ROLES_KEY) {
+      setRoles(prefs.roles);
+    } else {
+      setRoles(buildDefaultRoles(prefs.role || ''));
+    }
     if (typeof prefs.perRole === 'number' && prefs.perRole > 0) setPerRole(prefs.perRole);
     if (typeof prefs.referralTarget === 'number' && prefs.referralTarget > 0) setReferralTarget(prefs.referralTarget);
     if (typeof prefs.useAI === 'boolean') setUseAI(prefs.useAI);
