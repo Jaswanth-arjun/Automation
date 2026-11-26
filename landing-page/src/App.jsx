@@ -39,9 +39,9 @@ function AdminPanelRedirect() {
 // The copilot belongs to the signed-in dashboard only: it is never shown on the
 // public landing/auth pages, even for an authenticated visitor.
 function GlobalAssistant() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const { pathname } = useLocation();
-  if (!isAuthenticated) return null;
+  if (!isAuthenticated || loading) return null;
   if (!pathname.startsWith('/dashboard')) return null;
   // The left-to-right walk-in belongs to Home only. Every other dashboard page
   // (jobs, apply, profile…) shows the seated assistant straight away, with no

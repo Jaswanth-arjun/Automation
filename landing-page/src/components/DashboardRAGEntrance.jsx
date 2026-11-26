@@ -52,9 +52,14 @@ export default function DashboardRAGEntrance({ walkIn = true }) {
   }, []);
 
   useEffect(() => {
-    if (phase === 'checking') setPhase(complete ? 'walking' : 'hidden');
-    else if (phase === 'hidden' && complete) setPhase(walkIn ? 'walking' : 'ready');
-  }, [complete, phase, walkIn]);
+    if (walkIn && complete) {
+      setPhase('walking');
+    } else if (!walkIn && complete) {
+      setPhase((prev) => (prev === 'hidden' || prev === 'checking' ? 'ready' : prev));
+    } else if (!complete) {
+      setPhase('hidden');
+    }
+  }, [complete, walkIn]);
 
   const onArrive = useCallback(() => setPhase('handoff'), []);
 
