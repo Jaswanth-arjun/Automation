@@ -54,7 +54,8 @@ export function appBucket(status) {
   const value = String(status || '').toLowerCase();
   if (value === 'shortlisted' || value === 'interview' || value === 'offer') return 'Shortlisted';
   if (value === 'rejected') return 'Rejected';
-  if (value === 'applied' || value === 'outreach' || value === 'response' || value === 'saved') return 'Applied';
+  if (value === 'applied' || value === 'assessment') return 'Applied';
+  if (value === 'outreach' || value === 'response') return 'Outreach';
   return 'Not applied';
 }
 
