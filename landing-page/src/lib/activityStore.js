@@ -172,7 +172,7 @@ function decorateRow(row, overlay) {
     if (next.linkedin) {
       liSent += 1;
       const status = String(next.linkedin.status || 'pending').toLowerCase();
-      if (status === 'accepted' || status === 'replied') liAccepted += 1;
+      if (status === 'accepted' || status === 'seen' || status === 'replied') liAccepted += 1;
       if (status === 'seen') liSeen += 1;
       if (status === 'replied') liReplied += 1;
       if (status === 'declined') liDeclined += 1;

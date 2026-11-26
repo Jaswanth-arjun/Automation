@@ -221,10 +221,12 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
       setLiThreadError('');
       return undefined;
     }
-    // A pending invitation has no thread yet, and scanning the inbox for one
-    // costs tens of seconds. Say so immediately instead of making the user wait.
+    // A pending or declined invitation has no thread yet, and scanning the
+    // inbox for one costs tens of seconds. Say so immediately instead of
+    // making the user wait. Note: 'seen' means they already accepted and have
+    // an open messaging thread, so always load the real conversation for it.
     const liStatus = String(selectedContact.linkedin.status || '').toLowerCase();
-    if (!liForceLive && ['pending', 'seen', 'declined'].includes(liStatus)) {
+    if (!liForceLive && ['pending', 'declined'].includes(liStatus)) {
       setLiMessages([]);
       setLiThreadError('');
       setLiLoading(false);
@@ -637,12 +639,12 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
 
                 {isLinkedIn && (
                   <div className="atd-li-steps">
-                    {['sent', 'seen', 'accepted', 'replied'].map((step) => {
+                    {['sent', 'accepted', 'seen', 'replied'].map((step) => {
                       const current = String(selectedContact.linkedin?.status || 'pending').toLowerCase();
                       const done =
                         step === 'sent' ||
-                        (step === 'seen' && current === 'seen') ||
-                        (step === 'accepted' && (current === 'accepted' || current === 'replied')) ||
+                        (step === 'accepted' && ['accepted', 'seen', 'replied'].includes(current)) ||
+                        (step === 'seen' && ['seen', 'replied'].includes(current)) ||
                         (step === 'replied' && current === 'replied');
                       return (
                         <span key={step} className={`atd-li-step ${done ? 'done' : ''}`}>
@@ -671,7 +673,7 @@ export default function ActivityDrawer({ row, onClose, onChanged }) {
                           <div className="atd-thread-notice">
                             <Info size={14} />
                             <span>{liThreadNote}</span>
-                            {!liForceLive && ['pending', 'seen', 'declined'].includes(String(selectedContact.linkedin?.status || '').toLowerCase()) && (
+                            {!liForceLive && ['pending', 'declined'].includes(String(selectedContact.linkedin?.status || '').toLowerCase()) && (
                               <button className="atd-thread-retry" onClick={() => { liRefreshFor.current = selectedContact.id; setLiForceLive(true); setLiNonce((value) => value + 1); }}>
                                 Check LinkedIn
                               </button>
