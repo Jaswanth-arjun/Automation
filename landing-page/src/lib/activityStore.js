@@ -392,7 +392,10 @@ export function buildActivityRows(sources = {}, overlay = readOverlay()) {
     }
 
     connections.forEach((connection) => {
-      const status = String(connection.status || 'pending').toLowerCase();
+      const rawStatus = String(connection.status || 'pending').toLowerCase();
+      const replyBody = String(connection.replyText || '').trim();
+      const isFalseSelfReply = rawStatus === 'replied' && /^you(?:\s*:|\s+sent\b|\s+reacted\b)/i.test(replyBody);
+      const status = isFalseSelfReply ? 'seen' : rawStatus;
       const contactId = `li:${connection.id || norm(connection.name)}`;
       if (row.contacts.some((item) => item.id === contactId)) return;
       const contact = {
@@ -410,9 +413,9 @@ export function buildActivityRows(sources = {}, overlay = readOverlay()) {
           lastChecked: connection.lastChecked || '',
         },
       };
-      if (status === 'replied' && String(connection.replyText || '').trim()) {
+      if (status === 'replied' && replyBody) {
         contact.linkedinReply = {
-          body: connection.replyText,
+          body: replyBody,
           receivedAt: connection.lastChecked || connection.sentDate,
         };
       }
