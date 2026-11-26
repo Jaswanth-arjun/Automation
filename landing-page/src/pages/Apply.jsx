@@ -302,8 +302,17 @@ export default function Apply() {
 
   // Campaign Launcher state (embedded in Tab 2 when connected)
   const BASE_DEFAULT_ROLES = ['Hiring', 'Referral', 'Recruiter', 'Talent Acquisition'];
+  const normalizeRoleFilterName = (roleName) => {
+    let clean = String(roleName || '').trim();
+    if (!clean) return '';
+    clean = clean.replace(/\s*\([^)]*\)/g, ' ');
+    clean = clean.replace(/\s+at\s+.+$/i, ' ');
+    clean = clean.replace(/\s*[-–—|/,]\s*(?:intern(?:ship)?|co-?op|trainee|apprentice|fresher|remote|hybrid|onsite|on-site|full[- ]?time|part[- ]?time|contract|20\d{2}|india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|noida|gurgaon|gurugram|chennai|jaipur)\b.*$/i, '');
+    clean = clean.replace(/\b(?:internship|intern|co-?op|trainee|apprentice)\b/gi, ' ');
+    return clean.replace(/[-–—,|/:\s]+$/g, '').replace(/^[-–—,|/:\s]+/g, '').replace(/\s+/g, ' ').trim();
+  };
   const buildDefaultRoles = (roleName) => {
-    const clean = String(roleName || '').trim();
+    const clean = normalizeRoleFilterName(roleName);
     if (clean && !BASE_DEFAULT_ROLES.some((r) => r.toLowerCase() === clean.toLowerCase())) {
       return [...BASE_DEFAULT_ROLES, clean];
     }
@@ -1827,7 +1836,9 @@ export default function Apply() {
     || (profile?.resume?.dataUrl
       ? { name: resumeNameForEmail, pdfBase64: profile.resume.dataUrl }
       : null);
-  const resumeDisplayName = effectiveResume?.name || resumeNameForEmail;
+  // Always show the agreed attachment name, even when an older resume saved
+  // for this job still carries a "-tailored-resume.pdf" filename.
+  const resumeDisplayName = resumeNameForEmail;
 
   // ── Tailoring report derived values ──
   const chosenFormat = tailorResult?.formats?.find(f => f.id === formatId) || tailorResult?.formats?.[0];
@@ -1885,7 +1896,7 @@ export default function Apply() {
 
   const jobProgress = applyProgressStore.get(jobId || job?.id);
   const resumeReady = Boolean(tailorResult || jobResume);
-  const resumeReadyName = tailoredFileName || jobResume?.name || '';
+  const resumeReadyName = resumeNameForEmail;
   const STEPS = [
     { key: 'tailor', label: 'Tailor Resume', icon: Sparkles, done: Boolean(tailorResult || jobResume || jobProgress.tailor) },
     { key: 'referral', label: 'Send Referral Request (Email)', icon: Mail, done: sendSuccess || Boolean(jobProgress.referral) },
@@ -2103,7 +2114,7 @@ export default function Apply() {
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: '700', color: '#064e3b', lineHeight: '1.4' }}>
                   {effectiveResume
-                    ? `${tailoredPdfBase64 || jobResume ? 'Your tailored resume' : 'Your saved resume'} (${resumeDisplayName}) will be attached as a PDF to every outreach email.`
+                    ? `Your resume (${resumeDisplayName}) will be attached as a PDF to every outreach email.`
                     : 'No resume found yet. Upload or tailor a resume so every outreach email carries it.'}
                 </div>
               </div>

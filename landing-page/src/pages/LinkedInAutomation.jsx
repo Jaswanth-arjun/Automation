@@ -79,8 +79,17 @@ const STATUS_LABEL = {
 
 const BASE_DEFAULT_ROLES = ['Hiring', 'Referral', 'Recruiter', 'Talent Acquisition'];
 const LEGACY_DEFAULT_ROLES_KEY = 'recruiter|talent acquisition|hr|hiring manager|engineering manager';
+function normalizeRoleFilterName(roleName) {
+  let clean = String(roleName || '').trim();
+  if (!clean) return '';
+  clean = clean.replace(/\s*\([^)]*\)/g, ' ');
+  clean = clean.replace(/\s+at\s+.+$/i, ' ');
+  clean = clean.replace(/\s*[-–—|/,]\s*(?:intern(?:ship)?|co-?op|trainee|apprentice|fresher|remote|hybrid|onsite|on-site|full[- ]?time|part[- ]?time|contract|20\d{2}|india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|noida|gurgaon|gurugram|chennai|jaipur)\b.*$/i, '');
+  clean = clean.replace(/\b(?:internship|intern|co-?op|trainee|apprentice)\b/gi, ' ');
+  return clean.replace(/[-–—,|/:\s]+$/g, '').replace(/^[-–—,|/:\s]+/g, '').replace(/\s+/g, ' ').trim();
+}
 function buildDefaultRoles(roleName) {
-  const clean = String(roleName || '').trim();
+  const clean = normalizeRoleFilterName(roleName);
   if (clean && !BASE_DEFAULT_ROLES.some((r) => r.toLowerCase() === clean.toLowerCase())) {
     return [...BASE_DEFAULT_ROLES, clean];
   }
